@@ -1,0 +1,11 @@
+# local dev data (portable MariaDB) and secrets - never commit
+/data/
+node_modules/
+.env
+.env.local
+api/.env
+*.log
+.DS_Store
+
+# Build outputs (web/dist, api/dist) ARE committed on purpose:
+# cPanel Git deploys them straight to the server, so no build runs on the host.

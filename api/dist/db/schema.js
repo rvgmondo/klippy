@@ -1,0 +1,271 @@
+/**
+ * Klippy v2 database schema (Drizzle ORM, MySQL/MariaDB).
+ *
+ * MULTI-TENANCY: shared-schema. Every tenant-owned table carries `accountId`,
+ * indexed leftmost. One `accounts` row == one workspace/business. A user belongs
+ * to exactly one account. MySQL has no row-level security, so isolation is
+ * enforced in the app via the tenant-scoped query helper (see src/lib/tenant.ts).
+ * Rule: never read/write a tenant table without an `accountId` filter.
+ *
+ * Ported from the v1 PHP schema (../../klippy/sql/schema.sql) + migration_002.
+ */
+import { mysqlTable, int, varchar, text, boolean, datetime, date, mysqlEnum, timestamp, index, uniqueIndex, } from 'drizzle-orm/mysql-core';
+import { relations } from 'drizzle-orm';
+const pk = () => int('id', { unsigned: true }).autoincrement().primaryKey();
+const createdAt = () => timestamp('created_at').defaultNow().notNull();
+const updatedAt = () => timestamp('updated_at').defaultNow().onUpdateNow().notNull();
+// ---- Tenant root -----------------------------------------------------------
+export const accounts = mysqlTable('accounts', {
+    id: pk(),
+    name: varchar('name', { length: 150 }).notNull(),
+    slug: varchar('slug', { length: 80 }).notNull(),
+    plan: mysqlEnum('plan', ['free', 'pro', 'business']).default('free').notNull(),
+    status: mysqlEnum('status', ['active', 'suspended']).default('active').notNull(),
+    // What the account calls its top-level folders (renameable in settings):
+    // e.g. "Client"/"Clients", "Business"/"Businesses", "Project"/"Projects".
+    folderLabelSingular: varchar('folder_label_singular', { length: 40 }).default('Client').notNull(),
+    folderLabelPlural: varchar('folder_label_plural', { length: 40 }).default('Clients').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    deletedAt: datetime('deleted_at'),
+}, (t) => [
+    uniqueIndex('uniq_accounts_slug').on(t.slug),
+]);
+// ---- Users (belong to one account) ----------------------------------------
+export const users = mysqlTable('users', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    email: varchar('email', { length: 150 }).notNull(),
+    passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+    role: mysqlEnum('role', ['owner', 'admin', 'member']).default('member').notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    failedAttempts: int('failed_attempts', { unsigned: true }).default(0).notNull(),
+    lockedUntil: datetime('locked_until'),
+    lastLogin: datetime('last_login'),
+    resetTokenHash: varchar('reset_token_hash', { length: 255 }),
+    resetExpires: datetime('reset_expires'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    // Email unique within an account (not globally) so the same person can exist
+    // in different workspaces later.
+    uniqueIndex('uniq_users_account_email').on(t.accountId, t.email),
+]);
+// ---- Folders (nestable tree; top level = the account's "Clients"/"Businesses") ----
+// parentId NULL => top-level folder. Self-referencing for arbitrary depth.
+export const folders = mysqlTable('folders', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    parentId: int('parent_id', { unsigned: true })
+        .references(() => folders.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 150 }).notNull(),
+    color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
+    notes: text('notes'),
+    isArchived: boolean('is_archived').default(false).notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_folders_account_parent').on(t.accountId, t.parentId, t.position),
+]);
+// ---- Boards ----------------------------------------------------------------
+export const boards = mysqlTable('boards', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    folderId: int('folder_id', { unsigned: true }).notNull()
+        .references(() => folders.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 150 }).notNull(),
+    description: varchar('description', { length: 255 }),
+    isArchived: boolean('is_archived').default(false).notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_boards_account_folder').on(t.accountId, t.folderId, t.position),
+]);
+// ---- Board columns ---------------------------------------------------------
+export const boardColumns = mysqlTable('board_columns', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    boardId: int('board_id', { unsigned: true }).notNull()
+        .references(() => boards.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    color: varchar('color', { length: 20 }).default('#94a3b8').notNull(),
+    isDoneColumn: boolean('is_done_column').default(false).notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_columns_account_board').on(t.accountId, t.boardId, t.position),
+]);
+// ---- Tasks (cards) ---------------------------------------------------------
+export const tasks = mysqlTable('tasks', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    boardId: int('board_id', { unsigned: true }).notNull()
+        .references(() => boards.id, { onDelete: 'cascade' }),
+    columnId: int('column_id', { unsigned: true }).notNull()
+        .references(() => boardColumns.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 200 }).notNull(),
+    description: text('description'),
+    priority: mysqlEnum('priority', ['none', 'low', 'medium', 'high', 'urgent']).default('none').notNull(),
+    dueDate: date('due_date', { mode: 'string' }),
+    assignedTo: int('assigned_to', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    isCompleted: boolean('is_completed').default(false).notNull(),
+    completedAt: datetime('completed_at'),
+    isArchived: boolean('is_archived').default(false).notNull(),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_tasks_account_column').on(t.accountId, t.columnId, t.position),
+    index('idx_tasks_account_board').on(t.accountId, t.boardId),
+    index('idx_tasks_account_due').on(t.accountId, t.dueDate),
+]);
+// ---- Time entries ----------------------------------------------------------
+export const timeEntries = mysqlTable('time_entries', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).notNull()
+        .references(() => tasks.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    startTime: datetime('start_time').notNull(),
+    endTime: datetime('end_time'),
+    durationSeconds: int('duration_seconds', { unsigned: true }),
+    note: varchar('note', { length: 255 }),
+    isManual: boolean('is_manual').default(false).notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_time_account_task').on(t.accountId, t.taskId),
+    // Fast lookup of a user's currently-running timer (end_time IS NULL).
+    index('idx_time_account_user_open').on(t.accountId, t.userId, t.endTime),
+]);
+// ---- Focus sessions (Pomodoro-style; may or may not be tied to a task) -----
+export const focusSessions = mysqlTable('focus_sessions', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).references(() => tasks.id, { onDelete: 'set null' }),
+    label: varchar('label', { length: 200 }),
+    plannedSeconds: int('planned_seconds', { unsigned: true }),
+    startTime: datetime('start_time').notNull(),
+    endTime: datetime('end_time'),
+    durationSeconds: int('duration_seconds', { unsigned: true }),
+    status: mysqlEnum('status', ['running', 'completed', 'cancelled']).default('running').notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_focus_account_user').on(t.accountId, t.userId, t.status),
+]);
+// ---- Subtasks --------------------------------------------------------------
+export const taskSubtasks = mysqlTable('task_subtasks', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).notNull()
+        .references(() => tasks.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 200 }).notNull(),
+    isCompleted: boolean('is_completed').default(false).notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_subtasks_account_task').on(t.accountId, t.taskId, t.position),
+]);
+// ---- Comments --------------------------------------------------------------
+export const taskComments = mysqlTable('task_comments', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).notNull()
+        .references(() => tasks.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    comment: text('comment').notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_comments_account_task').on(t.accountId, t.taskId),
+]);
+// ---- File attachments ------------------------------------------------------
+export const taskFiles = mysqlTable('task_files', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).notNull()
+        .references(() => tasks.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    originalName: varchar('original_name', { length: 255 }).notNull(),
+    storedName: varchar('stored_name', { length: 255 }).notNull(),
+    filesize: int('filesize', { unsigned: true }).notNull(),
+    mimeType: varchar('mime_type', { length: 100 }).notNull(),
+    uploadedAt: createdAt(),
+}, (t) => [
+    index('idx_files_account_task').on(t.accountId, t.taskId),
+]);
+// ---- Labels (account-level tags; many-to-many with tasks) ------------------
+export const labels = mysqlTable('labels', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 50 }).notNull(),
+    color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_labels_account').on(t.accountId),
+]);
+export const taskLabels = mysqlTable('task_labels', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    taskId: int('task_id', { unsigned: true }).notNull()
+        .references(() => tasks.id, { onDelete: 'cascade' }),
+    labelId: int('label_id', { unsigned: true }).notNull()
+        .references(() => labels.id, { onDelete: 'cascade' }),
+}, (t) => [
+    uniqueIndex('uniq_task_label').on(t.taskId, t.labelId),
+    index('idx_task_labels_account_task').on(t.accountId, t.taskId),
+]);
+// ---- Relations (for db.query.* nested reads) ------------------------------
+export const accountsRelations = relations(accounts, ({ many }) => ({
+    users: many(users),
+    folders: many(folders),
+}));
+export const usersRelations = relations(users, ({ one }) => ({
+    account: one(accounts, { fields: [users.accountId], references: [accounts.id] }),
+}));
+export const foldersRelations = relations(folders, ({ one, many }) => ({
+    account: one(accounts, { fields: [folders.accountId], references: [accounts.id] }),
+    parent: one(folders, { fields: [folders.parentId], references: [folders.id], relationName: 'folder_parent' }),
+    children: many(folders, { relationName: 'folder_parent' }),
+    boards: many(boards),
+}));
+export const boardsRelations = relations(boards, ({ one, many }) => ({
+    folder: one(folders, { fields: [boards.folderId], references: [folders.id] }),
+    columns: many(boardColumns),
+    tasks: many(tasks),
+}));
+export const boardColumnsRelations = relations(boardColumns, ({ one, many }) => ({
+    board: one(boards, { fields: [boardColumns.boardId], references: [boards.id] }),
+    tasks: many(tasks),
+}));
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
+    board: one(boards, { fields: [tasks.boardId], references: [boards.id] }),
+    column: one(boardColumns, { fields: [tasks.columnId], references: [boardColumns.id] }),
+    assignee: one(users, { fields: [tasks.assignedTo], references: [users.id] }),
+    subtasks: many(taskSubtasks),
+    comments: many(taskComments),
+    files: many(taskFiles),
+    timeEntries: many(timeEntries),
+}));
+//# sourceMappingURL=schema.js.map

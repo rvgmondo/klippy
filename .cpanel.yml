@@ -1,0 +1,22 @@
+# cPanel Git Version Control deploy manifest.
+# When you click "Deploy HEAD Commit" in cPanel, these tasks copy the built
+# app into place and restart the Node process. No zips, no phpMyAdmin - the API
+# applies its own database migrations on restart.
+#
+# Paths below match this account (novelcom / klippy.mondobase.com). If the Node
+# version folder changes from 20, update NODEBIN.
+---
+deployment:
+  tasks:
+    - export DOCROOT=/home/novelcom/klippy.mondobase.com
+    - export APIROOT=/home/novelcom/klippy.mondobase.com/klippy_api
+    - export NODEBIN=/home/novelcom/nodevenv/klippy_api/20/bin
+    # --- Web: static frontend into the docroot ---
+    - /bin/cp -R web/dist/. $DOCROOT/
+    # --- API: replace code (keep node_modules + tmp in place) ---
+    - /bin/cp -f api/app.js api/package.json api/package-lock.json $APIROOT/
+    - /bin/rm -rf $APIROOT/dist $APIROOT/drizzle
+    - /bin/cp -R api/dist api/drizzle $APIROOT/
+    - cd $APIROOT && $NODEBIN/npm install --omit=dev --no-audit --no-fund
+    # --- Restart the Passenger/Node app ---
+    - /bin/mkdir -p $APIROOT/tmp && /usr/bin/touch $APIROOT/tmp/restart.txt

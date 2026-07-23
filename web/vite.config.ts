@@ -1,0 +1,15 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: {
+    port: 5173,
+    // Proxy API calls to the Fastify server so the browser sees one origin
+    // in dev (cookies + auth "just work", no CORS dance).
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8090', changeOrigin: true },
+    },
+  },
+});

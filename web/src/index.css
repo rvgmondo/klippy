@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+:root { color-scheme: dark; }
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #0b0f17;
+  color: #e5e7eb;
+  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, unobtrusive scrollbars for the board columns. */
+* { scrollbar-width: thin; scrollbar-color: #2a3444 transparent; }
