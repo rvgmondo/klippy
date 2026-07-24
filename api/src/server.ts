@@ -19,6 +19,7 @@ import { userRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { workspaceRoutes } from './routes/workspaces.js';
+import { brandingRoutes } from './routes/branding.js';
 import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
 import { labelRoutes } from './routes/labels.js';
@@ -74,6 +75,7 @@ export function buildServer() {
   app.register(searchRoutes);
   app.register(tokenRoutes);
   app.register(workspaceRoutes);
+  app.register(brandingRoutes);
   app.register(teamRoutes);
   app.register(cronRoutes);
   app.register(labelRoutes);

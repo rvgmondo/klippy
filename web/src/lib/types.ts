@@ -5,6 +5,8 @@ export interface User {
   role: 'owner' | 'admin' | 'member';
   accountId: number;
   dailyDigest?: boolean;
+  theme?: 'system' | 'dark' | 'light';
+  accent?: string;
 }
 export interface Account {
   id: number;
@@ -13,6 +15,8 @@ export interface Account {
   plan: string;
   folderLabelSingular: string;
   folderLabelPlural: string;
+  brandName?: string | null;
+  hasLogo?: boolean;
 }
 export interface Folder {
   id: number;
@@ -21,6 +25,7 @@ export interface Folder {
   name: string;
   color: string;
   notes: string | null;
+  imagePath?: string | null;
   isArchived: boolean;
   position: number;
 }

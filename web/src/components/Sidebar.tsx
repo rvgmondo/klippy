@@ -37,8 +37,14 @@ export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
   return (
     <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
       <div className="flex h-14 items-center gap-2 border-b border-slate-800 px-4">
-        <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white">K</div>
-        <span className="font-semibold text-white">Klippy</span>
+        {account?.hasLogo ? (
+          <img src="/api/v1/account/logo" alt="" className="h-7 w-7 shrink-0 rounded-lg object-contain" />
+        ) : (
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white">
+            {(account?.brandName || 'Klippy')[0]!.toUpperCase()}
+          </div>
+        )}
+        <span className="truncate font-semibold text-white">{account?.brandName || 'Klippy'}</span>
       </div>
 
       <div className="flex items-center justify-between px-4 pb-1 pt-4">
@@ -96,6 +102,29 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
     mutationFn: () => apiDelete(`/folders/${folder.id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
+  const removeImage = useMutation({
+    mutationFn: () => apiDelete(`/folders/${folder.id}/image`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
+
+  // Hidden file input, opened from the folder menu.
+  function pickImage() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`/api/v1/folders/${folder.id}/image`, {
+        method: 'POST', body: form, credentials: 'same-origin',
+      });
+      if (res.ok) qc.invalidateQueries({ queryKey: ['folders'] });
+      else alert((await res.json().catch(() => null))?.error ?? 'Upload failed.');
+    };
+    input.click();
+  }
 
   const hasKids = children.length > 0 || (boards.data?.boards.length ?? 0) > 0;
 
@@ -106,7 +135,12 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
         <button onClick={() => setOpen(!open)} className="text-slate-500 hover:text-slate-300">
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
-        <Folder size={14} style={{ color: folder.color }} />
+        {folder.imagePath ? (
+          <img src={`/api/v1/folders/${folder.id}/image`} alt=""
+            className="h-4 w-4 shrink-0 rounded object-cover" />
+        ) : (
+          <Folder size={14} style={{ color: folder.color }} />
+        )}
         <button onClick={() => setOpen(!open)} className="flex-1 truncate text-left text-sm text-slate-200">{folder.name}</button>
         <button title="Add board"
           onClick={() => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); }}
@@ -119,6 +153,8 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
             { label: 'Add board', onClick: () => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); } },
             { label: 'Add subfolder', onClick: () => { const n = ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
             { label: 'Rename', onClick: () => { const n = ask('Rename folder', folder.name); if (n) renameFolder.mutate(n); } },
+            { label: folder.imagePath ? 'Change image' : 'Add image', onClick: () => pickImage() },
+            ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
             { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`)) deleteFolder.mutate(); } },
           ]}
         />

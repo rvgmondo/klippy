@@ -37,6 +37,8 @@ export async function userRoutes(app: FastifyInstance) {
       currentPassword: z.string().min(1).max(200).optional(),
       newPassword: z.string().min(8, 'New password must be at least 8 characters').max(200).optional(),
       dailyDigest: z.boolean().optional(),
+      theme: z.enum(['system','dark','light']).optional(),
+      accent: z.string().trim().max(20).optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
 
@@ -46,6 +48,8 @@ export async function userRoutes(app: FastifyInstance) {
     const patch: Record<string, unknown> = {};
     if (parsed.data.name !== undefined) patch.name = parsed.data.name;
     if (parsed.data.dailyDigest !== undefined) patch.dailyDigest = parsed.data.dailyDigest;
+    if (parsed.data.theme !== undefined) patch.theme = parsed.data.theme;
+    if (parsed.data.accent !== undefined) patch.accent = parsed.data.accent;
 
     if (parsed.data.newPassword) {
       if (!parsed.data.currentPassword) {
@@ -59,7 +63,7 @@ export async function userRoutes(app: FastifyInstance) {
 
     await db.update(users).set(patch).where(eq(users.id, userId));
     const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    return { user: u ? { id: u.id, name: u.name, email: u.email, dailyDigest: u.dailyDigest } : null };
+    return { user: u ? { id: u.id, name: u.name, email: u.email, dailyDigest: u.dailyDigest, theme: u.theme, accent: u.accent } : null };
   });
 
   /**

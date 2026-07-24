@@ -30,6 +30,9 @@ export const accounts = mysqlTable('accounts', {
   // e.g. "Client"/"Clients", "Business"/"Businesses", "Project"/"Projects".
   folderLabelSingular: varchar('folder_label_singular', { length: 40 }).default('Client').notNull(),
   folderLabelPlural: varchar('folder_label_plural', { length: 40 }).default('Clients').notNull(),
+  // White-labelling: replace the Klippy name/logo shown inside the app.
+  brandName: varchar('brand_name', { length: 80 }),
+  logoPath: varchar('logo_path', { length: 255 }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   deletedAt: datetime('deleted_at'),
@@ -54,6 +57,9 @@ export const users = mysqlTable('users', {
   resetExpires: datetime('reset_expires'),
   // Opt out of the morning "what's due" email.
   dailyDigest: boolean('daily_digest').default(true).notNull(),
+  // Appearance is a personal preference, not a workspace one.
+  theme: mysqlEnum('theme', ['system', 'dark', 'light']).default('dark').notNull(),
+  accent: varchar('accent', { length: 20 }).default('violet').notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -89,6 +95,8 @@ export const folders = mysqlTable('folders', {
   name: varchar('name', { length: 150 }).notNull(),
   color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
   notes: text('notes'),
+  // Optional logo/image for this business or client, shown in the sidebar.
+  imagePath: varchar('image_path', { length: 255 }),
   isArchived: boolean('is_archived').default(false).notNull(),
   position: int('position', { unsigned: true }).default(0).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),

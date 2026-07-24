@@ -26,12 +26,13 @@ const loginSchema = z.object({
 });
 
 function publicUser(u: typeof users.$inferSelect, role: 'owner' | 'admin' | 'member', accountId: number) {
-  return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest };
+  return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest, theme: u.theme, accent: u.accent };
 }
 function publicAccount(a: typeof accounts.$inferSelect) {
   return {
     id: a.id, name: a.name, slug: a.slug, plan: a.plan,
     folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
+    brandName: a.brandName, hasLogo: !!a.logoPath,
   };
 }
 

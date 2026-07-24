@@ -18,12 +18,13 @@ const loginSchema = z.object({
     password: z.string().min(1).max(200),
 });
 function publicUser(u, role, accountId) {
-    return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest };
+    return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest, theme: u.theme, accent: u.accent };
 }
 function publicAccount(a) {
     return {
         id: a.id, name: a.name, slug: a.slug, plan: a.plan,
         folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
+        brandName: a.brandName, hasLogo: !!a.logoPath,
     };
 }
 async function uniqueSlug(base) {

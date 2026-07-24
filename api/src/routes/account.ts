@@ -9,12 +9,14 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),
   folderLabelSingular: z.string().trim().min(1).max(40).optional(),
   folderLabelPlural: z.string().trim().min(1).max(40).optional(),
+  brandName: z.string().trim().max(80).nullable().optional(),
 });
 
 function publicAccount(a: typeof accounts.$inferSelect) {
   return {
     id: a.id, name: a.name, slug: a.slug, plan: a.plan,
     folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
+    brandName: a.brandName, hasLogo: !!a.logoPath,
   };
 }
 
