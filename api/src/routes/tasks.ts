@@ -6,6 +6,7 @@ import { tasks, boards, boardColumns, users, taskSubtasks, taskComments, taskLab
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { isActiveMember } from '../lib/membership.js';
 
 const priority = z.enum(['none', 'low', 'medium', 'high', 'urgent']);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -217,7 +218,5 @@ export async function taskRoutes(app: FastifyInstance) {
 }
 
 async function userInAccount(accountId: number, userId: number): Promise<boolean> {
-  const [u] = await db.select({ id: users.id }).from(users)
-    .where(tenantWhere(users, accountId, eq(users.id, userId))).limit(1);
-  return !!u;
+  return isActiveMember(accountId, userId);
 }

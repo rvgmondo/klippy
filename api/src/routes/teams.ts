@@ -6,6 +6,7 @@ import { teams, teamMembers, boardTeams, users, boards } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { isActiveMember } from '../lib/membership.js';
 
 export async function teamRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.requireAuth);
@@ -85,9 +86,9 @@ export async function teamRoutes(app: FastifyInstance) {
     const [team] = await db.select({ id: teams.id }).from(teams)
       .where(tenantWhere(teams, accountId, eq(teams.id, id))).limit(1);
     if (!team) return reply.code(404).send({ error: 'Team not found.' });
-    const [member] = await db.select({ id: users.id }).from(users)
-      .where(tenantWhere(users, accountId, eq(users.id, parsed.data.userId))).limit(1);
-    if (!member) return reply.code(400).send({ error: 'Person not found.' });
+    if (!(await isActiveMember(accountId, parsed.data.userId))) {
+      return reply.code(400).send({ error: 'That person is not in this workspace.' });
+    }
 
     const [existing] = await db.select({ id: teamMembers.id }).from(teamMembers)
       .where(tenantWhere(teamMembers, accountId, and(eq(teamMembers.teamId, id), eq(teamMembers.userId, parsed.data.userId)))).limit(1);

@@ -1,8 +1,8 @@
 import fp from 'fastify-plugin';
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { apiTokens, users } from '../db/schema.js';
+import { apiTokens, users, memberships } from '../db/schema.js';
 import { COOKIE_NAME, verifyToken } from './auth.js';
 export const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 /** Resolve an `Authorization: Bearer <token>` API token to an auth context. */
@@ -14,12 +14,14 @@ async function authFromBearer(header) {
         return null;
     const [row] = await db.select({
         id: apiTokens.id, accountId: apiTokens.accountId, userId: apiTokens.userId,
-        role: users.role, isActive: users.isActive,
+        role: memberships.role, memberActive: memberships.isActive, userActive: users.isActive,
     }).from(apiTokens)
-        .leftJoin(users, eq(users.id, apiTokens.userId))
+        .innerJoin(users, eq(users.id, apiTokens.userId))
+        // The token only works while its owner is still an active member of that workspace.
+        .innerJoin(memberships, and(eq(memberships.userId, apiTokens.userId), eq(memberships.accountId, apiTokens.accountId)))
         .where(eq(apiTokens.tokenHash, sha256(raw)))
         .limit(1);
-    if (!row || !row.role || !row.isActive)
+    if (!row || !row.role || !row.memberActive || !row.userActive)
         return null;
     // Best-effort last-used stamp; never block the request on it.
     void db.update(apiTokens).set({ lastUsedAt: new Date() }).where(eq(apiTokens.id, row.id)).catch(() => { });

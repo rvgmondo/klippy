@@ -9,6 +9,7 @@ import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
+import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 
 type View = 'home' | 'board' | 'calendar';
 
@@ -44,6 +45,8 @@ export function Workspace() {
             className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-300 hover:bg-slate-800 lg:hidden">
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
           </button>
+
+          <div className="hidden sm:block"><WorkspaceSwitcher /></div>
 
           <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 p-1">
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />

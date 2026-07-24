@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, lt } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships } from '../db/schema.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 function renderDigest(name, today, overdue) {
@@ -35,8 +35,12 @@ export async function cronRoutes(app) {
         if (given !== secret)
             return reply.code(401).send({ error: 'Bad cron key.' });
         const today = todayStr();
-        const recipients = await db.select().from(users)
-            .where(and(eq(users.isActive, true), eq(users.dailyDigest, true)));
+        // One row per (person, workspace) so someone in two workspaces gets each.
+        const recipients = await db.select({
+            id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,
+        }).from(memberships)
+            .innerJoin(users, eq(users.id, memberships.userId))
+            .where(and(eq(users.isActive, true), eq(users.dailyDigest, true), eq(memberships.isActive, true)));
         let sent = 0;
         for (const u of recipients) {
             const base = and(eq(tasks.accountId, u.accountId), eq(tasks.isArchived, false), eq(tasks.isCompleted, false), isNotNull(tasks.dueDate));

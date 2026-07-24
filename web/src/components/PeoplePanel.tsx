@@ -18,9 +18,25 @@ export function PeoplePanel() {
   const [error, setError] = useState<string | null>(null);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
+  const [notice, setNotice] = useState<string | null>(null);
   const create = useMutation({
-    mutationFn: () => apiPost('/users', form),
-    onSuccess: () => { setAdding(false); setForm({ name: '', email: '', password: '', role: 'member' }); setError(null); invalidate(); },
+    mutationFn: () => {
+      const body: Record<string, unknown> = { email: form.email.trim(), role: form.role };
+      // Existing Klippy logins just get added; only new people need these.
+      if (form.name.trim()) body.name = form.name.trim();
+      if (form.password) body.password = form.password;
+      return apiPost<{ existingLogin: boolean }>('/users', body);
+    },
+    onSuccess: (res) => {
+      setAdding(false);
+      setForm({ name: '', email: '', password: '', role: 'member' });
+      setError(null);
+      setNotice(res?.existingLogin
+        ? 'They already had a Klippy login, so they were added straight to this workspace.'
+        : 'Added. Share the temporary password so they can sign in and change it.');
+      setTimeout(() => setNotice(null), 6000);
+      invalidate();
+    },
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not add.'),
   });
   const patch = useMutation({ mutationFn: (v: { id: number; body: Record<string, unknown> }) => apiPatch(`/users/${v.id}`, v.body), onSuccess: invalidate });
@@ -37,14 +53,17 @@ export function PeoplePanel() {
 
       {adding && (
         <div className="mb-4 space-y-2 rounded-lg border border-slate-700 bg-slate-900 p-3">
-          <input className={field} placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <input className={field} placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <input className={field} type="text" placeholder="Temporary password (min 8 chars)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+          <input className={field} placeholder="Email address" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <input className={field} placeholder="Name (only needed for someone new to Klippy)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input className={field} type="text" placeholder="Temporary password (only for someone new)" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
           <select className={field} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
-          <p className="text-[11px] text-slate-500">No email invites yet, so set a temporary password and share it with them to change after login.</p>
+          <p className="text-[11px] text-slate-500">
+            If this email already has a Klippy login (even in another workspace), just enter the
+            email and pick a role. Name and password are only needed for someone brand new.
+          </p>
           {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-300">{error}</div>}
           <div className="flex gap-2">
             <button onClick={() => create.mutate()} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500">Create</button>
@@ -52,6 +71,8 @@ export function PeoplePanel() {
           </div>
         </div>
       )}
+
+      {notice && <div className="mb-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-300">{notice}</div>}
 
       <div className="space-y-1">
         {users.map((u) => (

@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { and, eq, gt } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
 import { db } from '../db/client.js';
-import { accounts, users } from '../db/schema.js';
+import { accounts, users, memberships } from '../db/schema.js';
+import { getMembership, workspacesFor } from '../lib/membership.js';
 import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
@@ -16,8 +17,8 @@ const loginSchema = z.object({
     email: z.string().trim().toLowerCase().email().max(150),
     password: z.string().min(1).max(200),
 });
-function publicUser(u) {
-    return { id: u.id, name: u.name, email: u.email, role: u.role, accountId: u.accountId, dailyDigest: u.dailyDigest };
+function publicUser(u, role, accountId) {
+    return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest };
 }
 function publicAccount(a) {
     return {
@@ -53,18 +54,19 @@ export async function authRoutes(app) {
             const accIns = await tx.insert(accounts).values({ name: accountName, slug });
             const accountId = Number(accIns[0].insertId);
             const userIns = await tx.insert(users).values({
-                accountId, name, email, passwordHash, role: 'owner', lastLogin: new Date(),
+                name, email, passwordHash, lastLogin: new Date(),
             });
             const userId = Number(userIns[0].insertId);
+            await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
             return { accountId, userId };
         });
         const [account] = await db.select().from(accounts).where(eq(accounts.id, result.accountId)).limit(1);
         const [user] = await db.select().from(users).where(eq(users.id, result.userId)).limit(1);
         if (!account || !user)
             return reply.code(500).send({ error: 'Signup failed.' });
-        const token = signToken({ uid: user.id, aid: account.id, role: user.role });
+        const token = signToken({ uid: user.id, aid: account.id, role: 'owner' });
         reply.setCookie(COOKIE_NAME, token, cookieOptions());
-        return reply.code(201).send({ user: publicUser(user), account: publicAccount(account) });
+        return reply.code(201).send({ user: publicUser(user, 'owner', account.id), account: publicAccount(account) });
     });
     // ---- Login ---------------------------------------------------------------
     app.post('/api/v1/auth/login', async (req, reply) => {
@@ -95,16 +97,21 @@ export async function authRoutes(app) {
             await db.update(users).set({ failedAttempts: attempts, lockedUntil }).where(eq(users.id, user.id));
             return reply.code(401).send({ error: 'Invalid email or password.' });
         }
-        const [account] = await db.select().from(accounts).where(eq(accounts.id, user.accountId)).limit(1);
+        const spaces = await workspacesFor(user.id);
+        if (!spaces.length) {
+            return reply.code(403).send({ error: 'This login is not in any workspace yet.' });
+        }
+        const first = spaces[0];
+        const [account] = await db.select().from(accounts).where(eq(accounts.id, first.accountId)).limit(1);
         if (!account || account.status !== 'active') {
             return reply.code(403).send({ error: 'This workspace is not active.' });
         }
         await db.update(users)
             .set({ failedAttempts: 0, lockedUntil: null, lastLogin: new Date() })
             .where(eq(users.id, user.id));
-        const token = signToken({ uid: user.id, aid: account.id, role: user.role });
+        const token = signToken({ uid: user.id, aid: account.id, role: first.role });
         reply.setCookie(COOKIE_NAME, token, cookieOptions());
-        return reply.send({ user: publicUser(user), account: publicAccount(account) });
+        return reply.send({ user: publicUser(user, first.role, account.id), account: publicAccount(account) });
     });
     // ---- Forgot password: email a reset link ---------------------------------
     app.post('/api/v1/auth/forgot', async (req, reply) => {
@@ -155,14 +162,20 @@ export async function authRoutes(app) {
     // ---- Current user --------------------------------------------------------
     app.get('/api/v1/auth/me', { preHandler: app.requireAuth }, async (req, reply) => {
         const { userId, accountId } = req.auth;
-        const [user] = await db.select().from(users)
-            .where(and(eq(users.id, userId), eq(users.accountId, accountId))).limit(1);
+        const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
         if (!user || !user.isActive)
+            return reply.code(401).send({ error: 'Not authenticated.' });
+        const m = await getMembership(accountId, userId);
+        if (!m || !m.isActive)
             return reply.code(401).send({ error: 'Not authenticated.' });
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
         if (!account)
             return reply.code(401).send({ error: 'Not authenticated.' });
-        return reply.send({ user: publicUser(user), account: publicAccount(account) });
+        return reply.send({
+            user: publicUser(user, m.role, account.id),
+            account: publicAccount(account),
+            workspaces: await workspacesFor(userId),
+        });
     });
 }
 //# sourceMappingURL=auth.js.map

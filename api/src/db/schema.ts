@@ -37,15 +37,15 @@ export const accounts = mysqlTable('accounts', {
   uniqueIndex('uniq_accounts_slug').on(t.slug),
 ]);
 
-// ---- Users (belong to one account) ----------------------------------------
+// ---- Users (GLOBAL identity; workspace access comes from `memberships`) ----
+// A person has ONE login and can belong to many workspaces. Anything that needs
+// "is this person in this workspace, and with what role" must go through
+// `memberships`, never through a column on users.
 export const users = mysqlTable('users', {
   id: pk(),
-  accountId: int('account_id', { unsigned: true }).notNull()
-    .references(() => accounts.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 100 }).notNull(),
   email: varchar('email', { length: 150 }).notNull(),
   passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-  role: mysqlEnum('role', ['owner', 'admin', 'member']).default('member').notNull(),
   isActive: boolean('is_active').default(true).notNull(),
   failedAttempts: int('failed_attempts', { unsigned: true }).default(0).notNull(),
   lockedUntil: datetime('locked_until'),
@@ -57,9 +57,25 @@ export const users = mysqlTable('users', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
-  // Email unique within an account (not globally) so the same person can exist
-  // in different workspaces later.
-  uniqueIndex('uniq_users_account_email').on(t.accountId, t.email),
+  // One login per email address, across the whole system.
+  uniqueIndex('uniq_users_email').on(t.email),
+]);
+
+// ---- Memberships (which workspaces a person belongs to, and their role) ----
+export const memberships = mysqlTable('memberships', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  userId: int('user_id', { unsigned: true }).notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  role: mysqlEnum('role', ['owner', 'admin', 'member']).default('member').notNull(),
+  // Per-workspace deactivation, so removing someone from one workspace does not
+  // touch their access to others.
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex('uniq_membership').on(t.accountId, t.userId),
+  index('idx_memberships_user').on(t.userId),
 ]);
 
 // ---- Folders (nestable tree; top level = the account's "Clients"/"Businesses") ----
@@ -316,11 +332,11 @@ export const apiTokens = mysqlTable('api_tokens', {
 
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
-  users: many(users),
+  memberships: many(memberships),
   folders: many(folders),
 }));
-export const usersRelations = relations(users, ({ one }) => ({
-  account: one(accounts, { fields: [users.accountId], references: [accounts.id] }),
+export const usersRelations = relations(users, ({ many }) => ({
+  memberships: many(memberships),
 }));
 export const foldersRelations = relations(folders, ({ one, many }) => ({
   account: one(accounts, { fields: [folders.accountId], references: [accounts.id] }),
@@ -359,3 +375,5 @@ export type FocusSession = typeof focusSessions.$inferSelect;
 export type Label = typeof labels.$inferSelect;
 export type Team = typeof teams.$inferSelect;
 export type ApiToken = typeof apiTokens.$inferSelect;
+export type Membership = typeof memberships.$inferSelect;
+export type Role = Membership['role'];
