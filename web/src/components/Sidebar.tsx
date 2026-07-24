@@ -35,7 +35,7 @@ export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
+    <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
       <div className="flex h-14 items-center gap-2 border-b border-slate-800 px-4">
         <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white">K</div>
         <span className="font-semibold text-white">Klippy</span>

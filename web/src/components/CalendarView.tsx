@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import type { CalendarTask, Priority } from '../lib/types';
 import { CardDetail } from './CardDetail';
+import { QuickAddTask } from './QuickAddTask';
 
 type View = 'day' | 'week' | 'month' | 'year';
 
@@ -22,6 +23,7 @@ export function CalendarView() {
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState(new Date());
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
+  const [addDate, setAddDate] = useState<string | null>(null);
 
   const range = useMemo(() => computeRange(view, cursor), [view, cursor]);
   const { data } = useQuery({
@@ -59,14 +61,15 @@ export function CalendarView() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-4">
-        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} />}
-        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} />}
-        {view === 'day' && <DayList cursor={cursor} byDay={byDay} onOpen={setOpenTask} />}
+      <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
+        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
+        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
+        {view === 'day' && <DayList cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
         {view === 'year' && <YearGrid cursor={cursor} byDay={byDay} onPick={(d) => { setCursor(d); setView('month'); }} />}
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
+      {addDate && <QuickAddTask dueDate={addDate} onClose={() => setAddDate(null)} />}
     </div>
   );
 }
@@ -84,23 +87,34 @@ function TaskPill({ t, onOpen }: { t: CalendarTask; onOpen: OpenFn }) {
   );
 }
 
-function MonthGrid({ cursor, byDay, onOpen }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn }) {
+function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(first);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const today = new Date();
   return (
     <div className="grid grid-cols-7 overflow-hidden rounded-xl border border-slate-800">
-      {DOW.map((d) => <div key={d} className="border-b border-slate-800 bg-slate-900/50 px-2 py-1.5 text-center text-[11px] font-medium text-slate-500">{d}</div>)}
+      {DOW.map((d) => (
+        <div key={d} className="border-b border-slate-800 bg-slate-900/50 px-1 py-1.5 text-center text-[10px] font-medium text-slate-500 sm:px-2 sm:text-[11px]">
+          <span className="sm:hidden">{d[0]}</span><span className="hidden sm:inline">{d}</span>
+        </div>
+      ))}
       {days.map((d, i) => {
         const inMonth = d.getMonth() === cursor.getMonth();
         const list = byDay.get(iso(d)) ?? [];
+        const max = 3;
         return (
-          <div key={i} className={`min-h-24 border-b border-r border-slate-800 p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
-            <div className={`mb-1 text-right text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : inMonth ? 'text-slate-400' : 'text-slate-600'}`}>{d.getDate()}</div>
+          <div key={i} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
+            <div className="mb-1 flex items-center justify-between">
+              <button onClick={() => onAdd(iso(d))} title="Add a card on this day"
+                className="grid h-5 w-5 place-items-center rounded text-slate-500 opacity-0 hover:bg-slate-800 hover:text-violet-300 focus:opacity-100 group-hover/day:opacity-100">
+                <Plus size={12} />
+              </button>
+              <span className={`text-[11px] sm:text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : inMonth ? 'text-slate-400' : 'text-slate-600'}`}>{d.getDate()}</span>
+            </div>
             <div className="space-y-1">
-              {list.slice(0, 4).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
-              {list.length > 4 && <div className="px-1 text-[10px] text-slate-500">+{list.length - 4} more</div>}
+              {list.slice(0, max).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
+              {list.length > max && <div className="px-1 text-[10px] text-slate-500">+{list.length - max} more</div>}
             </div>
           </div>
         );
@@ -109,17 +123,23 @@ function MonthGrid({ cursor, byDay, onOpen }: { cursor: Date; byDay: Map<string,
   );
 }
 
-function WeekGrid({ cursor, byDay, onOpen }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn }) {
+function WeekGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = new Date();
   return (
-    <div className="grid grid-cols-7 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-7">
       {days.map((d, i) => {
         const list = byDay.get(iso(d)) ?? [];
         return (
-          <div key={i} className="min-h-64 rounded-xl border border-slate-800 p-2">
-            <div className={`mb-2 text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : 'text-slate-400'}`}>{DOW[i]} {d.getDate()}</div>
+          <div key={i} className="min-h-24 rounded-xl border border-slate-800 p-2 lg:min-h-64">
+            <div className="mb-2 flex items-center justify-between">
+              <span className={`text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : 'text-slate-400'}`}>{DOW[i]} {d.getDate()}</span>
+              <button onClick={() => onAdd(iso(d))} title="Add a card on this day"
+                className="grid h-5 w-5 place-items-center rounded text-slate-500 hover:bg-slate-800 hover:text-violet-300">
+                <Plus size={12} />
+              </button>
+            </div>
             <div className="space-y-1">{list.map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}</div>
           </div>
         );
@@ -128,15 +148,19 @@ function WeekGrid({ cursor, byDay, onOpen }: { cursor: Date; byDay: Map<string, 
   );
 }
 
-function DayList({ cursor, byDay, onOpen }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn }) {
+function DayList({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
   const list = byDay.get(iso(cursor)) ?? [];
   return (
     <div className="mx-auto max-w-2xl space-y-2">
-      {list.length === 0 && <p className="py-12 text-center text-sm text-slate-500">Nothing due this day.</p>}
+      <button onClick={() => onAdd(iso(cursor))}
+        className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400 hover:border-slate-500 hover:text-slate-200">
+        <Plus size={15} /> Add a card on this day
+      </button>
+      {list.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing due this day.</p>}
       {list.map((t) => (
         <button key={t.id} onClick={() => onOpen({ id: t.id, boardId: t.boardId })}
           className="flex w-full items-center gap-3 rounded-xl border border-slate-800 p-3 text-left hover:bg-slate-900">
-          <span className="h-2.5 w-2.5 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
           <span className={`text-sm ${t.isCompleted ? 'text-slate-500 line-through' : 'text-slate-200'}`}>{t.title}</span>
         </button>
       ))}

@@ -3,11 +3,12 @@ import { X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { PeoplePanel } from './PeoplePanel';
 import { LabelsPanel } from './LabelsPanel';
+import { ProfilePanel } from './ProfilePanel';
 
-type Tab = 'workspace' | 'people' | 'labels';
+type Tab = 'profile' | 'workspace' | 'people' | 'labels';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('workspace');
+  const [tab, setTab] = useState<Tab>('profile');
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
@@ -17,16 +18,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
-        <div className="flex gap-1 border-b border-slate-800 px-4 pt-2">
-          {(['workspace', 'people', 'labels'] as Tab[]).map((t) => (
+        <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
+          {(['profile', 'workspace', 'people', 'labels'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
               {t}
             </button>
           ))}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          {tab === 'profile' && <ProfilePanel />}
           {tab === 'workspace' && <WorkspaceTab />}
           {tab === 'people' && <PeoplePanel />}
           {tab === 'labels' && <LabelsPanel />}
