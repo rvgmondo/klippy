@@ -1,22 +1,22 @@
 # cPanel Git Version Control deploy manifest.
-# When you click "Deploy HEAD Commit" in cPanel, these tasks copy the built
-# app into place and restart the Node process. No zips, no phpMyAdmin - the API
-# applies its own database migrations on restart.
-#
-# Paths below match this account (novelcom / klippy.mondobase.com). If the Node
-# version folder changes from 20, update NODEBIN.
+# Clicking "Deploy HEAD Commit" in cPanel runs these tasks: copy the built app
+# into place, install any new packages, restart the Node process. No zips, and
+# no phpMyAdmin - the API applies its own database migrations on restart.
 ---
 deployment:
   tasks:
     - export DOCROOT=/home/novelcom/klippy.mondobase.com
-    - export APIROOT=/home/novelcom/klippy.mondobase.com/klippy_api
-    - export NODEBIN=/home/novelcom/nodevenv/klippy_api/20/bin
+    - export APIROOT=$DOCROOT/klippy_api
+    # Find the cPanel Node virtualenv bin dir rather than hardcoding it (the
+    # path changes with the app root / Node version). Fall back to PATH npm.
+    - export NODEBIN=$(ls -d /home/novelcom/nodevenv/*/*/bin 2>/dev/null | head -1)
+    - export NPM=$([ -x "$NODEBIN/npm" ] && echo "$NODEBIN/npm" || echo npm)
     # --- Web: static frontend into the docroot ---
     - /bin/cp -R web/dist/. $DOCROOT/
-    # --- API: replace code (keep node_modules + tmp in place) ---
+    # --- API: replace code, leaving node_modules and tmp in place ---
     - /bin/cp -f api/app.js api/package.json api/package-lock.json $APIROOT/
     - /bin/rm -rf $APIROOT/dist $APIROOT/drizzle
     - /bin/cp -R api/dist api/drizzle $APIROOT/
-    - cd $APIROOT && $NODEBIN/npm install --omit=dev --no-audit --no-fund
+    - cd $APIROOT && $NPM install --omit=dev --no-audit --no-fund
     # --- Restart the Passenger/Node app ---
     - /bin/mkdir -p $APIROOT/tmp && /usr/bin/touch $APIROOT/tmp/restart.txt
