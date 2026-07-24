@@ -19,6 +19,7 @@ const updateSchema = z.object({
   color: z.string().trim().max(20).optional(),
   notes: z.string().max(5000).nullable().optional(),
   isArchived: z.boolean().optional(),
+  hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
 });
 
 /** True if `candidateParent` is `folderId` itself or a descendant of it. */
@@ -80,13 +81,18 @@ export async function folderRoutes(app: FastifyInstance) {
       .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
     if (!existing) return reply.code(404).send({ error: 'Folder not found.' });
 
-    const patch = parsed.data;
-    if (patch.parentId !== undefined && patch.parentId !== existing.parentId) {
-      if (patch.parentId !== null) {
+    // MySQL DECIMAL columns are string-typed in Drizzle.
+    const patch: Record<string, unknown> = { ...parsed.data };
+    if (parsed.data.hourlyRate !== undefined) {
+      patch.hourlyRate = parsed.data.hourlyRate === null ? null : String(parsed.data.hourlyRate);
+    }
+    const newParent = parsed.data.parentId;
+    if (newParent !== undefined && newParent !== existing.parentId) {
+      if (newParent !== null) {
         const [parent] = await db.select({ id: folders.id }).from(folders)
-          .where(tenantWhere(folders, accountId, eq(folders.id, patch.parentId))).limit(1);
+          .where(tenantWhere(folders, accountId, eq(folders.id, newParent))).limit(1);
         if (!parent) return reply.code(400).send({ error: 'Parent folder not found.' });
-        if (await wouldCycle(accountId, id, patch.parentId)) {
+        if (await wouldCycle(accountId, id, newParent)) {
           return reply.code(400).send({ error: "Can't move a folder into itself or its own subfolder." });
         }
       }

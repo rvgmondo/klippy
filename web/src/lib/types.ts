@@ -26,6 +26,7 @@ export interface Folder {
   color: string;
   notes: string | null;
   imagePath?: string | null;
+  hourlyRate?: string | null;
   isArchived: boolean;
   position: number;
 }

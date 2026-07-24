@@ -9,7 +9,7 @@
  *
  * Ported from the v1 PHP schema (../../klippy/sql/schema.sql) + migration_002.
  */
-import { mysqlTable, int, varchar, text, boolean, datetime, date, mysqlEnum, timestamp, index, uniqueIndex, } from 'drizzle-orm/mysql-core';
+import { mysqlTable, int, varchar, text, boolean, datetime, date, mysqlEnum, timestamp, decimal, index, uniqueIndex, } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 const pk = () => int('id', { unsigned: true }).autoincrement().primaryKey();
 const createdAt = () => timestamp('created_at').defaultNow().notNull();
@@ -26,6 +26,7 @@ export const accounts = mysqlTable('accounts', {
     folderLabelSingular: varchar('folder_label_singular', { length: 40 }).default('Client').notNull(),
     folderLabelPlural: varchar('folder_label_plural', { length: 40 }).default('Clients').notNull(),
     // White-labelling: replace the Klippy name/logo shown inside the app.
+    currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
     brandName: varchar('brand_name', { length: 80 }),
     logoPath: varchar('logo_path', { length: 255 }),
     createdAt: createdAt(),
@@ -89,6 +90,8 @@ export const folders = mysqlTable('folders', {
     notes: text('notes'),
     // Optional logo/image for this business or client, shown in the sidebar.
     imagePath: varchar('image_path', { length: 255 }),
+    // Billing rate for work logged under this client, in the workspace currency.
+    hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }),
     isArchived: boolean('is_archived').default(false).notNull(),
     position: int('position', { unsigned: true }).default(0).notNull(),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
@@ -336,6 +339,24 @@ export const storageNodes = mysqlTable('storage_nodes', {
     updatedAt: updatedAt(),
 }, (t) => [
     index('idx_storage_account_parent').on(t.accountId, t.parentId, t.kind, t.name),
+]);
+// ---- Product notes (admin backlog: ideas, bugs, review notes) -------------
+// A place to capture "we should change X" as it occurs, so the whole list can
+// be handed over in one go instead of in dribs and drabs.
+export const productNotes = mysqlTable('product_notes', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 200 }).notNull(),
+    body: text('body'),
+    kind: mysqlEnum('kind', ['idea', 'bug', 'improvement', 'question']).default('idea').notNull(),
+    status: mysqlEnum('status', ['open', 'planned', 'done', 'dropped']).default('open').notNull(),
+    priority: mysqlEnum('priority', ['low', 'medium', 'high']).default('medium').notNull(),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_notes_account_status').on(t.accountId, t.status, t.createdAt),
 ]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({

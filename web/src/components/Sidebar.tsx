@@ -106,6 +106,10 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
     mutationFn: () => apiDelete(`/folders/${folder.id}/image`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
+  const setRate = useMutation({
+    mutationFn: (rate: number | null) => apiPatch(`/folders/${folder.id}`, { hourlyRate: rate }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
 
   // Hidden file input, opened from the folder menu.
   function pickImage() {
@@ -154,6 +158,13 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
             { label: 'Add subfolder', onClick: () => { const n = ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
             { label: 'Rename', onClick: () => { const n = ask('Rename folder', folder.name); if (n) renameFolder.mutate(n); } },
             { label: folder.imagePath ? 'Change image' : 'Add image', onClick: () => pickImage() },
+            ...(depth === 0 ? [{ label: folder.hourlyRate != null ? `Rate: ${folder.hourlyRate}/h (change)` : 'Set billing rate', onClick: () => {
+              const cur = folder.hourlyRate != null ? String(folder.hourlyRate) : '';
+              const v = window.prompt('Hourly rate for this client (blank to clear)', cur);
+              if (v === null) return;
+              const t = v.trim();
+              setRate.mutate(t === '' ? null : Number(t));
+            } }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
             { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`)) deleteFolder.mutate(); } },
           ]}

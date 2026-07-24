@@ -8,12 +8,13 @@ const updateSchema = z.object({
     folderLabelSingular: z.string().trim().min(1).max(40).optional(),
     folderLabelPlural: z.string().trim().min(1).max(40).optional(),
     brandName: z.string().trim().max(80).nullable().optional(),
+    currency: z.string().trim().length(3).optional(),
 });
 function publicAccount(a) {
     return {
         id: a.id, name: a.name, slug: a.slug, plan: a.plan,
         folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
-        brandName: a.brandName, hasLogo: !!a.logoPath,
+        brandName: a.brandName, hasLogo: !!a.logoPath, currency: a.currency,
     };
 }
 export async function accountRoutes(app) {
