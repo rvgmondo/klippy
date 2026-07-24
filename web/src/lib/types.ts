@@ -4,6 +4,7 @@ export interface User {
   email: string;
   role: 'owner' | 'admin' | 'member';
   accountId: number;
+  dailyDigest?: boolean;
 }
 export interface Account {
   id: number;
@@ -51,6 +52,7 @@ export interface Task {
   description: string | null;
   priority: Priority;
   dueDate: string | null;
+  recurrence: 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
   assignedTo: number | null;
   position: number;
   isCompleted: boolean;

@@ -7,6 +7,28 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 const priority = z.enum(['none', 'low', 'medium', 'high', 'urgent']);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const recurrence = z.enum(['none', 'daily', 'weekly', 'biweekly', 'monthly']);
+/** Advance a YYYY-MM-DD date by one recurrence interval. */
+function advance(dateStr, rule) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (rule === 'daily')
+        dt.setUTCDate(dt.getUTCDate() + 1);
+    else if (rule === 'weekly')
+        dt.setUTCDate(dt.getUTCDate() + 7);
+    else if (rule === 'biweekly')
+        dt.setUTCDate(dt.getUTCDate() + 14);
+    else {
+        // Monthly: keep the day-of-month, clamping for short months (31 Jan -> 28 Feb).
+        const targetMonth = dt.getUTCMonth() + 1;
+        const day = dt.getUTCDate();
+        dt.setUTCDate(1);
+        dt.setUTCMonth(targetMonth);
+        const lastDay = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+        dt.setUTCDate(Math.min(day, lastDay));
+    }
+    return dt.toISOString().slice(0, 10);
+}
 const createSchema = z.object({
     boardId: z.number().int().positive(),
     columnId: z.number().int().positive(),
@@ -21,6 +43,7 @@ const updateSchema = z.object({
     description: z.string().max(20000).nullable().optional(),
     priority: priority.optional(),
     dueDate: dateStr.nullable().optional(),
+    recurrence: recurrence.optional(),
     assignedTo: z.number().int().positive().nullable().optional(),
     isCompleted: z.boolean().optional(),
     isArchived: z.boolean().optional(),
@@ -120,9 +143,24 @@ export async function taskRoutes(app) {
             patch.completedAt = parsed.data.isCompleted ? new Date() : null;
         }
         await db.update(tasks).set(patch).where(tenantWhere(tasks, accountId, eq(tasks.id, id)));
+        // Completing a recurring card spawns the next occurrence, due one interval
+        // later. Only on the transition into completed, and only if it has a date.
+        let spawned = null;
+        const becameComplete = parsed.data.isCompleted === true && !existing.isCompleted;
+        const rule = existing.recurrence;
+        if (becameComplete && rule !== 'none' && existing.dueDate) {
+            const nextDue = advance(existing.dueDate, rule);
+            const position = await nextPosition(tasks, sql `account_id = ${accountId} AND column_id = ${existing.columnId}`);
+            const ins = await db.insert(tasks).values(withTenant(accountId, {
+                boardId: existing.boardId, columnId: existing.columnId, title: existing.title,
+                description: existing.description, priority: existing.priority, dueDate: nextDue,
+                recurrence: rule, assignedTo: existing.assignedTo, position, createdBy: existing.createdBy,
+            }));
+            spawned = Number(ins[0].insertId);
+        }
         const [updated] = await db.select().from(tasks)
             .where(tenantWhere(tasks, accountId, eq(tasks.id, id))).limit(1);
-        return { task: updated };
+        return { task: updated, spawnedTaskId: spawned };
     });
     // Move a card within/between columns of the same board; reindex the target.
     app.post('/api/v1/tasks/:id/move', async (req, reply) => {

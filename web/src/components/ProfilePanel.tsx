@@ -10,6 +10,7 @@ export function ProfilePanel() {
   const [confirm, setConfirm] = useState('');
   const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [digest, setDigest] = useState(user?.dailyDigest ?? true);
 
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
 
@@ -59,6 +60,25 @@ export function ProfilePanel() {
           Save name
         </button>
       </form>
+
+      <div className="border-t border-slate-800 pt-5">
+        <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 accent-violet-600"
+            checked={digest}
+            onChange={async (e) => {
+              const v = e.target.checked;
+              setDigest(v);
+              try { await apiPatch('/profile', { dailyDigest: v }); }
+              catch { setDigest(!v); setMsg({ kind: 'err', text: 'Could not save that.' }); }
+            }} />
+          <span>
+            <span className="block text-sm text-slate-200">Morning digest email</span>
+            <span className="block text-[11px] text-slate-500">
+              A daily email listing what is due today and what is overdue. Only sent when there is something to report.
+            </span>
+          </span>
+        </label>
+      </div>
 
       <form onSubmit={savePassword} className="space-y-2 border-t border-slate-800 pt-5">
         <label className="block text-xs font-medium text-slate-400">Change password</label>

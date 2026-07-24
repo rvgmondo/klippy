@@ -4,8 +4,10 @@ import { useAuth } from '../lib/auth';
 import { PeoplePanel } from './PeoplePanel';
 import { LabelsPanel } from './LabelsPanel';
 import { ProfilePanel } from './ProfilePanel';
+import { TeamsPanel } from './TeamsPanel';
+import { TokensPanel } from './TokensPanel';
 
-type Tab = 'profile' | 'workspace' | 'people' | 'labels';
+type Tab = 'profile' | 'workspace' | 'people' | 'teams' | 'labels' | 'tokens';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('profile');
@@ -19,7 +21,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
-          {(['profile', 'workspace', 'people', 'labels'] as Tab[]).map((t) => (
+          {(['profile', 'workspace', 'people', 'teams', 'labels', 'tokens'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
               {t}
@@ -31,7 +33,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           {tab === 'profile' && <ProfilePanel />}
           {tab === 'workspace' && <WorkspaceTab />}
           {tab === 'people' && <PeoplePanel />}
+          {tab === 'teams' && <TeamsPanel />}
           {tab === 'labels' && <LabelsPanel />}
+          {tab === 'tokens' && <TokensPanel />}
         </div>
       </div>
     </div>

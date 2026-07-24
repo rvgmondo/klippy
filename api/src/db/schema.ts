@@ -52,6 +52,8 @@ export const users = mysqlTable('users', {
   lastLogin: datetime('last_login'),
   resetTokenHash: varchar('reset_token_hash', { length: 255 }),
   resetExpires: datetime('reset_expires'),
+  // Opt out of the morning "what's due" email.
+  dailyDigest: boolean('daily_digest').default(true).notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
@@ -127,6 +129,9 @@ export const tasks = mysqlTable('tasks', {
   description: text('description'),
   priority: mysqlEnum('priority', ['none', 'low', 'medium', 'high', 'urgent']).default('none').notNull(),
   dueDate: date('due_date', { mode: 'string' }),
+  // When a recurring card is completed, the next occurrence is created
+  // automatically with the due date advanced by this interval.
+  recurrence: mysqlEnum('recurrence', ['none', 'daily', 'weekly', 'biweekly', 'monthly']).default('none').notNull(),
   assignedTo: int('assigned_to', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   position: int('position', { unsigned: true }).default(0).notNull(),
   isCompleted: boolean('is_completed').default(false).notNull(),
@@ -254,6 +259,61 @@ export const taskLabels = mysqlTable('task_labels', {
   index('idx_task_labels_account_task').on(t.accountId, t.taskId),
 ]);
 
+// ---- Teams (named groups of people, attachable to boards) -----------------
+export const teams = mysqlTable('teams', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 80 }).notNull(),
+  color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
+  createdAt: createdAt(),
+}, (t) => [
+  index('idx_teams_account').on(t.accountId),
+]);
+
+export const teamMembers = mysqlTable('team_members', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  teamId: int('team_id', { unsigned: true }).notNull()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+  userId: int('user_id', { unsigned: true }).notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+}, (t) => [
+  uniqueIndex('uniq_team_member').on(t.teamId, t.userId),
+  index('idx_team_members_account').on(t.accountId),
+]);
+
+export const boardTeams = mysqlTable('board_teams', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  boardId: int('board_id', { unsigned: true }).notNull()
+    .references(() => boards.id, { onDelete: 'cascade' }),
+  teamId: int('team_id', { unsigned: true }).notNull()
+    .references(() => teams.id, { onDelete: 'cascade' }),
+}, (t) => [
+  uniqueIndex('uniq_board_team').on(t.boardId, t.teamId),
+  index('idx_board_teams_account').on(t.accountId),
+]);
+
+// ---- API tokens (for the browser extension / integrations) ----------------
+// Only the SHA-256 hash is stored; the plaintext token is shown once on create.
+export const apiTokens = mysqlTable('api_tokens', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  userId: int('user_id', { unsigned: true }).notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 80 }).notNull(),
+  tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+  lastUsedAt: datetime('last_used_at'),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex('uniq_api_token_hash').on(t.tokenHash),
+  index('idx_api_tokens_account_user').on(t.accountId, t.userId),
+]);
+
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
   users: many(users),
@@ -297,3 +357,5 @@ export type Task = typeof tasks.$inferSelect;
 export type TimeEntry = typeof timeEntries.$inferSelect;
 export type FocusSession = typeof focusSessions.$inferSelect;
 export type Label = typeof labels.$inferSelect;
+export type Team = typeof teams.$inferSelect;
+export type ApiToken = typeof apiTokens.$inferSelect;

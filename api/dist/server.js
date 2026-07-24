@@ -17,6 +17,9 @@ import { fileRoutes, MAX_FILE_BYTES } from './routes/files.js';
 import { accountRoutes } from './routes/account.js';
 import { userRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
+import { tokenRoutes } from './routes/tokens.js';
+import { teamRoutes } from './routes/teams.js';
+import { cronRoutes } from './routes/cron.js';
 import { labelRoutes } from './routes/labels.js';
 const isProd = process.env.NODE_ENV === 'production';
 export function buildServer() {
@@ -62,6 +65,9 @@ export function buildServer() {
     app.register(accountRoutes);
     app.register(userRoutes);
     app.register(searchRoutes);
+    app.register(tokenRoutes);
+    app.register(teamRoutes);
+    app.register(cronRoutes);
     app.register(labelRoutes);
     return app;
 }

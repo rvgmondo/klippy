@@ -15,6 +15,13 @@
       "when": 1784804860343,
       "tag": "0001_closed_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784878308735,
+      "tag": "0002_fat_natasha_romanoff",
+      "breakpoints": true
     }
   ]
 }

@@ -25,7 +25,7 @@ const loginSchema = z.object({
 });
 
 function publicUser(u: typeof users.$inferSelect) {
-  return { id: u.id, name: u.name, email: u.email, role: u.role, accountId: u.accountId };
+  return { id: u.id, name: u.name, email: u.email, role: u.role, accountId: u.accountId, dailyDigest: u.dailyDigest };
 }
 function publicAccount(a: typeof accounts.$inferSelect) {
   return {

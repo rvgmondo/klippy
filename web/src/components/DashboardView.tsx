@@ -40,8 +40,8 @@ export function DashboardView() {
 
   return (
     <div className="h-full overflow-y-auto p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="mx-auto max-w-7xl">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
           {tiles.map((t) => (
             <div key={t.label} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
               <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
@@ -52,7 +52,7 @@ export function DashboardView() {
           ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
             <div className="mb-1 text-xs text-slate-400">Time tracked this week (you)</div>
             <div className="text-2xl font-semibold text-white">{fmtHours(data.weekSecondsMine)}</div>

@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0; width: 340px;
+      background: #0b0f17; color: #e5e7eb;
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+    }
+    header { display:flex; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid #1e293b; }
+    .logo { width:24px; height:24px; border-radius:6px; background:linear-gradient(135deg,#8b5cf6,#4f46e5);
+            display:grid; place-items:center; font-weight:700; color:#fff; font-size:13px; }
+    h1 { font-size:14px; margin:0; font-weight:600; color:#fff; }
+    main { padding: 12px 14px; }
+    label { display:block; font-size:11px; color:#94a3b8; margin:10px 0 4px; }
+    input, select, textarea {
+      width:100%; box-sizing:border-box; background:#0f172a; color:#e5e7eb;
+      border:1px solid #334155; border-radius:8px; padding:8px 10px; font:inherit; outline:none;
+    }
+    input:focus, select:focus, textarea:focus { border-color:#8b5cf6; }
+    textarea { resize:vertical; min-height:52px; }
+    button.primary {
+      width:100%; margin-top:12px; background:#7c3aed; color:#fff; border:0;
+      border-radius:8px; padding:10px; font:inherit; font-weight:600; cursor:pointer;
+    }
+    button.primary:disabled { opacity:.6; cursor:default; }
+    button.link { background:none; border:0; color:#a78bfa; cursor:pointer; font:inherit; padding:0; }
+    .row { display:flex; gap:8px; }
+    .row > div { flex:1; }
+    .msg { margin-top:10px; padding:8px 10px; border-radius:8px; font-size:12px; }
+    .ok { background:rgba(34,197,94,.12); color:#86efac; border:1px solid rgba(34,197,94,.3); }
+    .err { background:rgba(239,68,68,.12); color:#fca5a5; border:1px solid rgba(239,68,68,.3); }
+    .hint { color:#64748b; font-size:11px; margin-top:8px; line-height:1.5; }
+    .hidden { display:none; }
+    .due { border-top:1px solid #1e293b; margin-top:12px; padding-top:10px; }
+    .due h2 { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:#64748b; margin:0 0 6px; }
+    .due a { display:block; color:#e2e8f0; text-decoration:none; padding:5px 6px; border-radius:6px; }
+    .due a:hover { background:#1e293b; }
+    .overdue { color:#fca5a5; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">K</div>
+    <h1>Klippy Quick Add</h1>
+  </header>
+
+  <main>
+    <!-- Setup: shown until a token is saved -->
+    <section id="setup" class="hidden">
+      <label>Klippy address</label>
+      <input id="baseUrl" placeholder="https://klippy.mondobase.com" />
+      <label>Access token</label>
+      <input id="token" type="password" placeholder="klp_..." />
+      <p class="hint">Create a token in Klippy under Settings &gt; Tokens, then paste it here.</p>
+      <button class="primary" id="save">Connect</button>
+      <div id="setupMsg"></div>
+    </section>
+
+    <!-- Main: quick add -->
+    <section id="app" class="hidden">
+      <label>Card title</label>
+      <input id="title" placeholder="What needs doing?" />
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Optional"></textarea>
+      <div class="row">
+        <div>
+          <label>Board</label>
+          <select id="board"></select>
+        </div>
+        <div>
+          <label>Priority</label>
+          <select id="priority">
+            <option value="none">None</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+      </div>
+      <label>Due date</label>
+      <input id="due" type="date" />
+      <button class="primary" id="add">Add to Klippy</button>
+      <div id="msg"></div>
+
+      <div class="due">
+        <h2>Due today &amp; overdue</h2>
+        <div id="dueList"><span class="hint">Loading...</span></div>
+      </div>
+      <p class="hint"><button class="link" id="reset">Disconnect</button></p>
+    </section>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

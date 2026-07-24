@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Klippy Quick Add",
+  "version": "1.0.0",
+  "description": "Capture any page as a Klippy card, and see what is due today.",
+  "action": {
+    "default_title": "Klippy Quick Add",
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "storage", "contextMenus", "scripting"],
+  "host_permissions": ["https://klippy.mondobase.com/*"],
+  "background": { "service_worker": "background.js" }
+}

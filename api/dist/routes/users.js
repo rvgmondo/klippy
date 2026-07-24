@@ -7,7 +7,7 @@ import { tenantWhere } from '../lib/tenant.js';
 import { hashPassword, verifyPassword } from '../lib/auth.js';
 import { intId } from '../lib/http.js';
 function publicUser(u) {
-    return { id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, lastLogin: u.lastLogin };
+    return { id: u.id, name: u.name, email: u.email, role: u.role, isActive: u.isActive, lastLogin: u.lastLogin, dailyDigest: u.dailyDigest };
 }
 async function activeAdminCount(accountId, excludeUserId) {
     const [row] = await db.select({ c: sql `COUNT(*)` }).from(users)
@@ -31,6 +31,7 @@ export async function userRoutes(app) {
             name: z.string().trim().min(1).max(100).optional(),
             currentPassword: z.string().min(1).max(200).optional(),
             newPassword: z.string().min(8, 'New password must be at least 8 characters').max(200).optional(),
+            dailyDigest: z.boolean().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -41,6 +42,8 @@ export async function userRoutes(app) {
         const patch = {};
         if (parsed.data.name !== undefined)
             patch.name = parsed.data.name;
+        if (parsed.data.dailyDigest !== undefined)
+            patch.dailyDigest = parsed.data.dailyDigest;
         if (parsed.data.newPassword) {
             if (!parsed.data.currentPassword) {
                 return reply.code(400).send({ error: 'Enter your current password to change it.' });

@@ -85,6 +85,25 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
             </div>
 
             <div>
+              <label className="mb-1 block text-xs text-slate-500">Repeats</label>
+              <select className={field} value={t?.recurrence ?? 'none'}
+                onChange={(e) => patchTask.mutate({ recurrence: e.target.value })}>
+                <option value="none">Does not repeat</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every 2 weeks</option>
+                <option value="monthly">Monthly</option>
+              </select>
+              {t?.recurrence && t.recurrence !== 'none' && (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {t.dueDate
+                    ? 'When you mark this done, the next one is created automatically.'
+                    : 'Set a due date so the next one knows when to land.'}
+                </p>
+              )}
+            </div>
+
+            <div>
               <label className="mb-1 block text-xs text-slate-500">Assignee</label>
               <select className={field} value={t?.assignedTo ?? ''}
                 onChange={(e) => patchTask.mutate({ assignedTo: e.target.value ? Number(e.target.value) : null })}>

@@ -17,7 +17,7 @@ const loginSchema = z.object({
     password: z.string().min(1).max(200),
 });
 function publicUser(u) {
-    return { id: u.id, name: u.name, email: u.email, role: u.role, accountId: u.accountId };
+    return { id: u.id, name: u.name, email: u.email, role: u.role, accountId: u.accountId, dailyDigest: u.dailyDigest };
 }
 function publicAccount(a) {
     return {

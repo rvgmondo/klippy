@@ -11,6 +11,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { Menu } from './Menu';
+import { BoardFilters, EMPTY_FILTERS, applyFilters, type FilterState } from './BoardFilters';
 
 const PRIORITY: Record<Priority, { label: string; color: string } | null> = {
   none: null,
@@ -32,6 +33,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
   const qc = useQueryClient();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
+  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [activeId, setActiveId] = useState<string | null>(null);
   // Local container state so cards move smoothly during a drag.
   const [containers, setContainers] = useState<Record<string, number[]>>({});
@@ -133,6 +135,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
       <div className="border-b border-slate-800 px-6 py-3">
         <h2 className="text-lg font-semibold text-white">{data.board.name}</h2>
         {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
+        <div className="mt-2"><BoardFilters value={filters} onChange={setFilters} /></div>
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCorners}
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
@@ -140,7 +143,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
           {data.columns.map((col) => (
             <ColumnLane key={col.id} column={col} boardId={boardId}
-              taskIds={containers[colKey(col.id)] ?? []}
+              taskIds={(containers[colKey(col.id)] ?? []).filter((tid) => { const t = taskMap.get(tid); return t ? applyFilters([t], filters).length > 0 : false; })}
               taskMap={taskMap} labelsByTask={labelsByTask} userMap={userMap} onOpen={setOpenTaskId} />
           ))}
           <AddColumn boardId={boardId} />
