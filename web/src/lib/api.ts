@@ -9,14 +9,24 @@ export class ApiError extends Error {
 }
 
 async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const res = await fetch(BASE + path, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...(opts.headers ?? {}) },
-    credentials: 'same-origin',
-  });
+  // Only declare a JSON content-type when we actually send a body. Fastify
+  // rejects an empty body that claims to be JSON (FST_ERR_CTP_EMPTY_JSON_BODY),
+  // which would break every bodyless POST (logout, timer stop, ...).
+  const headers: Record<string, string> = { ...(opts.headers as Record<string, string> ?? {}) };
+  if (opts.body !== undefined && opts.body !== null && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(BASE + path, { ...opts, headers, credentials: 'same-origin' });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!res.ok) throw new ApiError(data?.error ?? `Request failed (${res.status})`, res.status);
+  let data: unknown = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { data = null; }
+  }
+  if (!res.ok) {
+    const msg = (data as { error?: string } | null)?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(msg, res.status);
+  }
   return data as T;
 }
 

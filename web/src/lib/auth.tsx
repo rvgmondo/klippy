@@ -43,8 +43,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apply(await apiPost<Session>('/auth/signup', { accountName, name, email, password }));
   };
   const logout = async () => {
-    await apiPost('/auth/logout');
-    setUser(null); setAccount(null);
+    // Always clear the local session, even if the server call fails, so the
+    // sign-out button can never appear to do nothing.
+    try {
+      await apiPost('/auth/logout');
+    } catch {
+      // ignore: cookie may already be gone / network hiccup
+    } finally {
+      setUser(null);
+      setAccount(null);
+    }
   };
   const updateAccount = async (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural'>>) => {
     const res = await apiPatch<{ account: Account }>('/account', patch);
