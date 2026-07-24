@@ -315,6 +315,28 @@ export const apiTokens = mysqlTable('api_tokens', {
     uniqueIndex('uniq_api_token_hash').on(t.tokenHash),
     index('idx_api_tokens_account_user').on(t.accountId, t.userId),
 ]);
+// ---- Storage (a per-workspace document tree: folders and files) -----------
+// One table holds both kinds so a folder can contain folders and files alike.
+// `storageKey` is opaque to everything above lib/storage.ts, which is what lets
+// the physical backend swap from disk to S3 without touching this schema.
+export const storageNodes = mysqlTable('storage_nodes', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    parentId: int('parent_id', { unsigned: true })
+        .references(() => storageNodes.id, { onDelete: 'cascade' }),
+    kind: mysqlEnum('kind', ['folder', 'file']).notNull(),
+    name: varchar('name', { length: 255 }).notNull(),
+    // File-only fields; null for folders.
+    storageKey: varchar('storage_key', { length: 255 }),
+    size: int('size', { unsigned: true }),
+    mimeType: varchar('mime_type', { length: 100 }),
+    uploadedBy: int('uploaded_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_storage_account_parent').on(t.accountId, t.parentId, t.kind, t.name),
+]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
     memberships: many(memberships),

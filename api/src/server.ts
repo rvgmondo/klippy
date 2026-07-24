@@ -20,6 +20,8 @@ import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { workspaceRoutes } from './routes/workspaces.js';
 import { brandingRoutes } from './routes/branding.js';
+import { storageRoutes } from './routes/storage.js';
+import { MAX_STORAGE_BYTES } from './lib/storage.js';
 import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
 import { labelRoutes } from './routes/labels.js';
@@ -42,7 +44,7 @@ export function buildServer() {
   });
 
   app.register(cookie, {});
-  app.register(multipart, { limits: { fileSize: MAX_FILE_BYTES, files: 1 } });
+  app.register(multipart, { limits: { fileSize: MAX_STORAGE_BYTES, files: 1 } });
 
   const origins = (process.env.CORS_ORIGIN ?? '')
     .split(',')
@@ -76,6 +78,7 @@ export function buildServer() {
   app.register(tokenRoutes);
   app.register(workspaceRoutes);
   app.register(brandingRoutes);
+  app.register(storageRoutes);
   app.register(teamRoutes);
   app.register(cronRoutes);
   app.register(labelRoutes);

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X } from 'lucide-react';
+import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
 import { CalendarView } from '../components/CalendarView';
+import { FilesView } from '../components/FilesView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
@@ -11,7 +12,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 
-type View = 'home' | 'board' | 'calendar';
+type View = 'home' | 'board' | 'calendar' | 'files';
 
 export function Workspace() {
   const { user, account, logout } = useAuth();
@@ -52,6 +53,7 @@ export function Workspace() {
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />
             <TabButton active={view === 'board'} onClick={() => setView('board')} icon={<LayoutGrid size={15} />} label="Board" />
             <TabButton active={view === 'calendar'} onClick={() => setView('calendar')} icon={<CalendarDays size={15} />} label="Calendar" />
+            <TabButton active={view === 'files'} onClick={() => setView('files')} icon={<HardDrive size={15} />} label="Files" />
           </div>
 
           <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-3">
@@ -85,6 +87,7 @@ export function Workspace() {
           {view === 'home' && <DashboardView />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
+          {view === 'files' && <FilesView />}
         </main>
       </div>
 
