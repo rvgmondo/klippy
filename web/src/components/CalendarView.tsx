@@ -51,12 +51,12 @@ export function CalendarView() {
           <button onClick={() => shift(-1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronLeft size={16} /></button>
           <button onClick={() => shift(1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronRight size={16} /></button>
           <button onClick={() => setCursor(new Date())} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Today</button>
-          <h2 className="ml-2 text-lg font-semibold text-white">{titleFor(view, cursor)}</h2>
+          <h2 className="ml-2 text-lg font-semibold text-slate-100">{titleFor(view, cursor)}</h2>
         </div>
         <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
           {(['day', 'week', 'month', 'year'] as View[]).map((v) => (
             <button key={v} onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${view === v ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}>{v}</button>
+              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${view === v ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>{v}</button>
           ))}
         </div>
       </div>

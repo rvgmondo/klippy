@@ -39,7 +39,7 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
             <circle cx="50" cy="50" r="45" fill="none" stroke="#8b5cf6" strokeWidth="6" strokeLinecap="round"
               strokeDasharray={`${2 * Math.PI * 45}`} strokeDashoffset={`${2 * Math.PI * 45 * (1 - pct / 100)}`} />
           </svg>
-          <span className="text-3xl font-semibold tabular-nums text-white">{mm}:{ss}</span>
+          <span className="text-3xl font-semibold tabular-nums text-slate-100">{mm}:{ss}</span>
         </div>
 
         <div className="mb-4 flex justify-center gap-2">

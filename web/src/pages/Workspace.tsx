@@ -107,7 +107,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   return (
     <button onClick={onClick} title={label}
       className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition sm:px-3 ${
-        active ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+        active ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
       {icon} <span className="hidden sm:inline">{label}</span>
     </button>
   );

@@ -66,7 +66,7 @@ export function BillingView() {
           <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
             {(['invoice', 'quote'] as DocType[]).map((t) => (
               <button key={t} onClick={() => setTab(t)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${tab === t ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${tab === t ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
                 {t}s
               </button>
             ))}
@@ -205,7 +205,7 @@ function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocT
     <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
       <div className="my-auto w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
+          <h2 className="text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
@@ -282,7 +282,7 @@ function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocT
           <div className="w-56 space-y-1 text-sm">
             <div className="flex justify-between text-slate-400"><span>Subtotal</span><span className="tabular-nums">{money(subtotal, currency)}</span></div>
             <div className="flex justify-between text-slate-400"><span>Tax ({taxRate}%)</span><span className="tabular-nums">{money(tax, currency)}</span></div>
-            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-white"><span>Total</span><span className="tabular-nums">{money(subtotal + tax, currency)}</span></div>
+            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="tabular-nums">{money(subtotal + tax, currency)}</span></div>
           </div>
         </div>
 

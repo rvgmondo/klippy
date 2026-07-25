@@ -125,7 +125,7 @@ export function FilesView() {
             {(data?.path ?? []).map((p) => (
               <span key={p.id} className="flex min-w-0 items-center gap-1">
                 <ChevronRight size={13} className="shrink-0 text-slate-600" />
-                <button onClick={() => setCwd(p.id)} className="truncate text-slate-300 hover:text-white">{p.name}</button>
+                <button onClick={() => setCwd(p.id)} className="truncate text-slate-300 hover:text-slate-100">{p.name}</button>
               </span>
             ))}
           </div>
@@ -164,7 +164,7 @@ export function FilesView() {
                   ? <Folder size={16} className="shrink-0 text-violet-400" />
                   : <FileIcon size={16} className="shrink-0 text-slate-500" />}
                 {n.kind === 'folder' ? (
-                  <button onClick={() => setCwd(n.id)} className="min-w-0 flex-1 truncate text-left text-sm text-slate-200 hover:text-white">
+                  <button onClick={() => setCwd(n.id)} className="min-w-0 flex-1 truncate text-left text-sm text-slate-200 hover:text-slate-100">
                     {n.name}
                   </button>
                 ) : (

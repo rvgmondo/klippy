@@ -47,7 +47,7 @@ export function DashboardView() {
               <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
                 <span style={{ color: t.color }}>{t.icon}</span> {t.label}
               </div>
-              <div className="text-3xl font-semibold text-white">{t.value}</div>
+              <div className="text-3xl font-semibold text-slate-100">{t.value}</div>
             </div>
           ))}
         </div>
@@ -55,11 +55,11 @@ export function DashboardView() {
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
             <div className="mb-1 text-xs text-slate-400">Time tracked this week (you)</div>
-            <div className="text-2xl font-semibold text-white">{fmtHours(data.weekSecondsMine)}</div>
+            <div className="text-2xl font-semibold text-slate-100">{fmtHours(data.weekSecondsMine)}</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
             <div className="mb-1 text-xs text-slate-400">Time tracked this week (everyone)</div>
-            <div className="text-2xl font-semibold text-white">{fmtHours(data.weekSecondsAll)}</div>
+            <div className="text-2xl font-semibold text-slate-100">{fmtHours(data.weekSecondsAll)}</div>
           </div>
         </div>
 

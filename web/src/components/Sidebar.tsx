@@ -44,7 +44,7 @@ export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
             {(account?.brandName || 'Klippy')[0]!.toUpperCase()}
           </div>
         )}
-        <span className="truncate font-semibold text-white">{account?.brandName || 'Klippy'}</span>
+        <span className="truncate font-semibold text-slate-100">{account?.brandName || 'Klippy'}</span>
       </div>
 
       <div className="flex items-center justify-between px-4 pb-1 pt-4">

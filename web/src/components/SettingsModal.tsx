@@ -19,14 +19,14 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
       <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-          <h2 className="text-lg font-semibold text-white">Settings</h2>
+          <h2 className="text-lg font-semibold text-slate-100">Settings</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
         <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
           {(['profile', 'appearance', 'workspace', 'branding', 'people', 'teams', 'labels', 'tokens', 'notes'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
               {t}
             </button>
           ))}

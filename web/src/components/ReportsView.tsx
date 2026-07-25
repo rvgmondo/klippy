@@ -39,7 +39,7 @@ export function ReportsView() {
     <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-5xl">
         <div className="mb-5 flex flex-wrap items-end gap-3">
-          <h2 className="mr-auto text-lg font-semibold text-white">Time &amp; billing</h2>
+          <h2 className="mr-auto text-lg font-semibold text-slate-100">Time &amp; billing</h2>
           <div>
             <label className="mb-1 block text-[11px] text-slate-500">From</label>
             <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -118,7 +118,7 @@ function Tile({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
       <div className="mb-1 text-xs text-slate-400">{label}</div>
-      <div className={`text-2xl font-semibold ${accent ? 'text-violet-300' : 'text-white'}`}>{value}</div>
+      <div className={`text-2xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
     </div>
   );
 }
