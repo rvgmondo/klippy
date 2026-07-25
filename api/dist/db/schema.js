@@ -371,6 +371,48 @@ export const pushSubscriptions = mysqlTable('push_subscriptions', {
     uniqueIndex('uniq_push_endpoint').on(t.endpoint),
     index('idx_push_user').on(t.userId),
 ]);
+// ---- Documents: quotes and invoices (same shape, one table) ---------------
+export const documents = mysqlTable('documents', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    type: mysqlEnum('type', ['quote', 'invoice']).notNull(),
+    seq: int('seq', { unsigned: true }).notNull(), // per-account, per-type running number
+    number: varchar('number', { length: 30 }).notNull(), // e.g. INV-0001
+    folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+    clientName: varchar('client_name', { length: 150 }).notNull(),
+    clientEmail: varchar('client_email', { length: 150 }),
+    clientAddress: text('client_address'),
+    issueDate: date('issue_date', { mode: 'string' }).notNull(),
+    dueDate: date('due_date', { mode: 'string' }), // invoice due / quote valid-until
+    status: mysqlEnum('status', ['draft', 'sent', 'accepted', 'paid', 'void']).default('draft').notNull(),
+    currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
+    taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0').notNull(),
+    subtotal: decimal('subtotal', { precision: 12, scale: 2 }).default('0').notNull(),
+    taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).default('0').notNull(),
+    total: decimal('total', { precision: 12, scale: 2 }).default('0').notNull(),
+    notes: text('notes'),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_doc_number').on(t.accountId, t.type, t.seq),
+    index('idx_docs_account_type').on(t.accountId, t.type, t.createdAt),
+]);
+export const documentLines = mysqlTable('document_lines', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    documentId: int('document_id', { unsigned: true }).notNull()
+        .references(() => documents.id, { onDelete: 'cascade' }),
+    description: varchar('description', { length: 500 }).notNull(),
+    quantity: decimal('quantity', { precision: 10, scale: 2 }).default('1').notNull(),
+    unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).default('0').notNull(),
+    amount: decimal('amount', { precision: 12, scale: 2 }).default('0').notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+}, (t) => [
+    index('idx_doclines_account_doc').on(t.accountId, t.documentId, t.position),
+]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
     memberships: many(memberships),

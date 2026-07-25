@@ -24,6 +24,7 @@ import { storageRoutes } from './routes/storage.js';
 import { noteRoutes } from './routes/notes.js';
 import { reportRoutes } from './routes/reports.js';
 import { pushRoutes } from './routes/push.js';
+import { documentRoutes } from './routes/documents.js';
 import { MAX_STORAGE_BYTES } from './lib/storage.js';
 import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
@@ -79,6 +80,7 @@ export function buildServer() {
     app.register(noteRoutes);
     app.register(reportRoutes);
     app.register(pushRoutes);
+    app.register(documentRoutes);
     app.register(teamRoutes);
     app.register(cronRoutes);
     app.register(labelRoutes);

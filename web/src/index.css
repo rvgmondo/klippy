@@ -73,3 +73,15 @@ body {
 
 /* Date inputs render a dark-on-dark icon in dark mode; nudge it back. */
 [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.6); }
+
+/* Printing a quote/invoice: show only the print area, always on white. */
+@media print {
+  body { background: #fff !important; }
+  body * { visibility: hidden !important; }
+  .print-area, .print-area * { visibility: visible !important; }
+  .print-area {
+    position: absolute; inset: 0; width: 100%; margin: 0; padding: 24px;
+    background: #fff !important; color: #111 !important;
+  }
+  .no-print { display: none !important; }
+}

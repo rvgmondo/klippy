@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive, BarChart3 } from 'lucide-react';
+import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive, BarChart3, Receipt } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
 import { CalendarView } from '../components/CalendarView';
 import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
+import { BillingView } from '../components/BillingView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
@@ -13,7 +14,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 
-type View = 'home' | 'board' | 'calendar' | 'files' | 'reports';
+type View = 'home' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
 
 export function Workspace() {
   const { user, account, logout } = useAuth();
@@ -56,6 +57,7 @@ export function Workspace() {
             <TabButton active={view === 'calendar'} onClick={() => setView('calendar')} icon={<CalendarDays size={15} />} label="Calendar" />
             <TabButton active={view === 'files'} onClick={() => setView('files')} icon={<HardDrive size={15} />} label="Files" />
             <TabButton active={view === 'reports'} onClick={() => setView('reports')} icon={<BarChart3 size={15} />} label="Reports" />
+            <TabButton active={view === 'billing'} onClick={() => setView('billing')} icon={<Receipt size={15} />} label="Billing" />
           </div>
 
           <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-3">
@@ -91,6 +93,7 @@ export function Workspace() {
           {view === 'calendar' && <CalendarView />}
           {view === 'files' && <FilesView />}
           {view === 'reports' && <ReportsView />}
+          {view === 'billing' && <BillingView />}
         </main>
       </div>
 
