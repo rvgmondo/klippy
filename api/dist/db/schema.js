@@ -413,6 +413,22 @@ export const documentLines = mysqlTable('document_lines', {
 }, (t) => [
     index('idx_doclines_account_doc').on(t.accountId, t.documentId, t.position),
 ]);
+// ---- Payments recorded against an invoice ---------------------------------
+export const payments = mysqlTable('payments', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    documentId: int('document_id', { unsigned: true }).notNull()
+        .references(() => documents.id, { onDelete: 'cascade' }),
+    amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+    paidOn: date('paid_on', { mode: 'string' }).notNull(),
+    method: varchar('method', { length: 40 }),
+    note: varchar('note', { length: 255 }),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_payments_account_doc').on(t.accountId, t.documentId),
+]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
     memberships: many(memberships),

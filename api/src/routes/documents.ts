@@ -2,10 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, desc, eq, gte, lte, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, folders, boards, tasks, timeEntries } from '../db/schema.js';
+import { documents, documentLines, accounts, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { sendMail } from '../lib/mailer.js';
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(500),
@@ -206,6 +207,110 @@ export async function documentRoutes(app: FastifyInstance) {
     const [created] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, newId))).limit(1);
     return reply.code(201).send({ document: created });
+  });
+
+  // ---- Payments -----------------------------------------------------------
+  // List payments + outstanding balance for a document.
+  app.get('/api/v1/documents/:id/payments', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [doc] = await db.select({ total: documents.total }).from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    const rows = await db.select().from(payments)
+      .where(tenantWhere(payments, accountId, eq(payments.documentId, id))).orderBy(payments.paidOn);
+    const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
+    const total = Number(doc.total);
+    return { payments: rows, paid: Math.round(paid * 100) / 100, outstanding: Math.round((total - paid) * 100) / 100, total };
+  });
+
+  app.post('/api/v1/documents/:id/payments', async (req, reply) => {
+    const { accountId, userId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const parsed = z.object({
+      amount: z.number().positive().max(100_000_000),
+      paidOn: dateStr,
+      method: z.string().trim().max(40).nullable().optional(),
+      note: z.string().trim().max(255).nullable().optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+
+    const [doc] = await db.select().from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!doc) return reply.code(404).send({ error: 'Not found.' });
+
+    await db.insert(payments).values(withTenant(accountId, {
+      documentId: id, amount: money(parsed.data.amount), paidOn: parsed.data.paidOn,
+      method: parsed.data.method ?? null, note: parsed.data.note ?? null, createdBy: userId,
+    }));
+    // Auto-flip to paid once the balance is covered.
+    const rows = await db.select({ amount: payments.amount }).from(payments)
+      .where(tenantWhere(payments, accountId, eq(payments.documentId, id)));
+    const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
+    if (paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
+      await db.update(documents).set({ status: 'paid' })
+        .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+    }
+    return reply.code(201).send({ ok: true, paid: Math.round(paid * 100) / 100 });
+  });
+
+  app.delete('/api/v1/payments/:id', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const res = await db.delete(payments).where(tenantWhere(payments, accountId, eq(payments.id, id)));
+    if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
+    return { ok: true };
+  });
+
+  // ---- Email the document to the client -----------------------------------
+  app.post('/api/v1/documents/:id/email', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const parsed = z.object({ to: z.string().trim().email().optional(), message: z.string().max(2000).optional() }).safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: 'Bad email address.' });
+
+    const [doc] = await db.select().from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    const to = parsed.data.to || doc.clientEmail;
+    if (!to) return reply.code(400).send({ error: 'No client email on this document. Add one or pass "to".' });
+
+    const lines = await db.select().from(documentLines)
+      .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
+    const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+    const brand = account?.brandName ?? 'Klippy';
+    const cur = doc.currency;
+    const fmt = (v: string | number) => `${cur} ${Number(v).toFixed(2)}`;
+
+    const lineText = lines.map((l) => `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`).join('\n');
+    const label = doc.type === 'quote' ? 'Quotation' : 'Invoice';
+    const body = [
+      `Hi ${doc.clientName},`, '',
+      parsed.data.message?.trim() || `Please find ${doc.type} ${doc.number} below.`, '',
+      `${label} ${doc.number}`,
+      `Issued: ${doc.issueDate}${doc.dueDate ? `   ${doc.type === 'quote' ? 'Valid until' : 'Due'}: ${doc.dueDate}` : ''}`, '',
+      lineText, '',
+      `Subtotal: ${fmt(doc.subtotal)}`,
+      `Tax (${Number(doc.taxRate)}%): ${fmt(doc.taxAmount)}`,
+      `Total: ${fmt(doc.total)}`, '',
+      doc.notes?.trim() ? `${doc.notes.trim()}\n` : '',
+      `Regards,`, brand,
+    ].join('\n');
+
+    try {
+      await sendMail(to, `${label} ${doc.number} from ${brand}`, body);
+    } catch (err) {
+      req.log.error({ err }, 'document email failed');
+      return reply.code(502).send({ error: 'Could not send the email. Check the mail settings.' });
+    }
+    if (doc.status === 'draft') {
+      await db.update(documents).set({ status: 'sent' }).where(tenantWhere(documents, accountId, eq(documents.id, id)));
+    }
+    return { ok: true, to };
   });
 
   // Suggest invoice lines from tracked time for a client folder in a date range.
