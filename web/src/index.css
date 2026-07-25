@@ -59,6 +59,8 @@
 }
 
 html, body, #root { height: 100%; }
+/* Use dynamic viewport height so the iOS PWA fills correctly under the URL bar. */
+#root { height: 100dvh; }
 body {
   margin: 0;
   background: var(--app-bg);
@@ -67,6 +69,14 @@ body {
   -webkit-font-smoothing: antialiased;
   transition: background-color .15s ease, color .15s ease;
 }
+
+/* iOS standalone PWA: keep chrome out from under the notch, status bar and
+ * home indicator. viewport-fit=cover exposes these env() insets (0 elsewhere). */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+.h-safe-14 { height: calc(3.5rem + env(safe-area-inset-top)); }
 
 /* Thin, unobtrusive scrollbars for the board columns. */
 * { scrollbar-width: thin; scrollbar-color: var(--color-slate-700) transparent; }

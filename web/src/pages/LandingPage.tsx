@@ -18,7 +18,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
   return (
     <div className="min-h-full bg-slate-950 text-slate-200">
       {/* Nav */}
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+      <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4 pt-safe">
         <div className="flex items-center gap-2">
           <div className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white">K</div>
           <span className="text-lg font-semibold text-white">Klippy</span>

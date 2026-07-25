@@ -28,7 +28,7 @@ export function Workspace() {
     <div className="flex h-full">
       {/* Sidebar: fixed drawer under lg, static column at lg+ */}
       <div
-        className={`fixed inset-y-0 left-0 z-40 w-64 transform bg-slate-950 transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-64 transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
           navOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -42,8 +42,8 @@ export function Workspace() {
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-800 px-2 sm:px-4">
+        {/* Top bar (h-safe-14 + pt-safe keeps it clear of the iOS status bar) */}
+        <header className="flex h-safe-14 shrink-0 items-center gap-2 border-b border-slate-800 px-2 pt-safe pr-safe sm:px-4">
           <button onClick={() => setNavOpen((o) => !o)}
             className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-300 hover:bg-slate-800 lg:hidden">
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
@@ -87,7 +87,7 @@ export function Workspace() {
           <SearchBar />
         </div>
 
-        <main className="min-h-0 flex-1 overflow-hidden">
+        <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
           {view === 'home' && <DashboardView />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
