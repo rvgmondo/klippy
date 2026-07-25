@@ -34,18 +34,29 @@ export function applyAppearance(theme: Theme, accent: Accent) {
  */
 export function ThemeSync() {
   const { user } = useAuth();
-  const theme = (user?.theme ?? readCachedAppearance().theme) as Theme;
-  const accent = (user?.accent ?? readCachedAppearance().accent) as Accent;
-
-  useEffect(() => { applyAppearance(theme, accent); }, [theme, accent]);
+  // Logged-out pages (landing, login) always show the brand's dark/violet look,
+  // regardless of a returning visitor's saved preference. Once signed in, the
+  // person's own theme takes over.
+  const theme = (user ? user.theme ?? readCachedAppearance().theme : 'dark') as Theme;
+  const accent = (user ? user.accent ?? readCachedAppearance().accent : 'violet') as Accent;
 
   useEffect(() => {
-    if (theme !== 'system') return;
+    const root = document.documentElement;
+    root.dataset.theme = theme === 'system'
+      ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : theme;
+    root.dataset.accent = accent;
+    // Only remember the choice for a signed-in user.
+    if (user) applyAppearance(theme, accent);
+  }, [theme, accent, user]);
+
+  useEffect(() => {
+    if (theme !== 'system' || !user) return;
     const mq = window.matchMedia('(prefers-color-scheme: light)');
     const onChange = () => applyAppearance('system', accent);
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
-  }, [theme, accent]);
+  }, [theme, accent, user]);
 
   return null;
 }

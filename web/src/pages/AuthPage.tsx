@@ -4,9 +4,9 @@ import { apiPost } from '../lib/api';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 
-export function AuthPage() {
+export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode; onBack?: () => void }) {
   const { login, signup } = useAuth();
-  const [mode, setMode] = useState<Mode>('login');
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [accountName, setAccountName] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -61,6 +61,9 @@ export function AuthPage() {
   return (
     <div className="h-full grid place-items-center px-4">
       <div className="w-full max-w-sm">
+        {onBack && (
+          <button onClick={onBack} className="mb-4 text-sm text-slate-400 hover:text-slate-200">&larr; Back to home</button>
+        )}
         <div className="mb-8 text-center">
           <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-xl font-bold text-white shadow-lg shadow-violet-500/25">K</div>
           <h1 className="text-2xl font-semibold text-slate-100">Klippy</h1>
