@@ -6,6 +6,8 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { isActiveMember } from '../lib/membership.js';
+import { notify } from '../lib/push.js';
+import { appUrl } from '../lib/mailer.js';
 const priority = z.enum(['none', 'low', 'medium', 'high', 'urgent']);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const recurrence = z.enum(['none', 'daily', 'weekly', 'biweekly', 'monthly']);
@@ -161,6 +163,16 @@ export async function taskRoutes(app) {
         }
         const [updated] = await db.select().from(tasks)
             .where(tenantWhere(tasks, accountId, eq(tasks.id, id))).limit(1);
+        // assignee notification: someone was newly assigned (and it isn't the actor).
+        if (parsed.data.assignedTo && parsed.data.assignedTo !== existing.assignedTo
+            && parsed.data.assignedTo !== authOf(req).userId) {
+            notify(parsed.data.assignedTo, {
+                title: 'Assigned to you',
+                body: existing.title,
+                url: appUrl(),
+                tag: `task-${id}`,
+            });
+        }
         return { task: updated, spawnedTaskId: spawned };
     });
     // Move a card within/between columns of the same board; reindex the target.

@@ -23,6 +23,7 @@ import { brandingRoutes } from './routes/branding.js';
 import { storageRoutes } from './routes/storage.js';
 import { noteRoutes } from './routes/notes.js';
 import { reportRoutes } from './routes/reports.js';
+import { pushRoutes } from './routes/push.js';
 import { MAX_STORAGE_BYTES } from './lib/storage.js';
 import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
@@ -77,6 +78,7 @@ export function buildServer() {
     app.register(storageRoutes);
     app.register(noteRoutes);
     app.register(reportRoutes);
+    app.register(pushRoutes);
     app.register(teamRoutes);
     app.register(cronRoutes);
     app.register(labelRoutes);

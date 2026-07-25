@@ -358,6 +358,19 @@ export const productNotes = mysqlTable('product_notes', {
 }, (t) => [
     index('idx_notes_account_status').on(t.accountId, t.status, t.createdAt),
 ]);
+// ---- Web push subscriptions (one row per browser/device per user) ---------
+export const pushSubscriptions = mysqlTable('push_subscriptions', {
+    id: pk(),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    endpoint: varchar('endpoint', { length: 500 }).notNull(),
+    p256dh: varchar('p256dh', { length: 255 }).notNull(),
+    auth: varchar('auth', { length: 255 }).notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    uniqueIndex('uniq_push_endpoint').on(t.endpoint),
+    index('idx_push_user').on(t.userId),
+]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({
     memberships: many(memberships),

@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { apiPatch } from '../lib/api';
+import { pushSupported, enablePush, disablePush, currentSubscription, sendTestPush } from '../lib/push';
+import { useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 
 export function ProfilePanel() {
@@ -80,6 +82,8 @@ export function ProfilePanel() {
         </label>
       </div>
 
+      <NotificationsToggle />
+
       <form onSubmit={savePassword} className="space-y-2 border-t border-slate-800 pt-5">
         <label className="block text-xs font-medium text-slate-400">Change password</label>
         <input className={field} type="password" placeholder="Current password" autoComplete="current-password"
@@ -93,6 +97,58 @@ export function ProfilePanel() {
           Change password
         </button>
       </form>
+    </div>
+  );
+}
+
+function NotificationsToggle() {
+  const [supported] = useState(pushSupported());
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => { currentSubscription().then((s) => setOn(!!s)); }, []);
+
+  async function toggle(next: boolean) {
+    setBusy(true); setMsg(null);
+    try {
+      if (next) {
+        const r = await enablePush();
+        if (!r.ok) { setMsg(r.error ?? 'Could not enable.'); setOn(false); }
+        else { setOn(true); setMsg('Notifications on for this device.'); }
+      } else {
+        await disablePush(); setOn(false); setMsg('Turned off for this device.');
+      }
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="border-t border-slate-800 pt-5">
+      <div className="mb-1 text-sm text-slate-200">Push notifications</div>
+      {!supported ? (
+        <p className="text-[11px] text-slate-500">
+          This browser cannot do push notifications. On iPhone, add Klippy to your Home Screen first, then enable them from there.
+        </p>
+      ) : (
+        <>
+          <label className="flex cursor-pointer items-start gap-3">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-violet-600" checked={on} disabled={busy}
+              onChange={(e) => toggle(e.target.checked)} />
+            <span>
+              <span className="block text-sm text-slate-300">Notify me on this device</span>
+              <span className="block text-[11px] text-slate-500">
+                When a card is assigned to you or someone comments on your card. Per device, so enable it on each one.
+              </span>
+            </span>
+          </label>
+          {on && (
+            <button onClick={() => sendTestPush()} className="mt-2 rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800">
+              Send a test
+            </button>
+          )}
+          {msg && <p className="mt-2 text-[11px] text-slate-400">{msg}</p>}
+        </>
+      )}
     </div>
   );
 }

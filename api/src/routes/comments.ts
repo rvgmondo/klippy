@@ -6,6 +6,9 @@ import { taskComments, tasks } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { notify } from '../lib/push.js';
+import { appUrl } from '../lib/mailer.js';
+import { users } from '../db/schema.js';
 
 export async function commentRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.requireAuth);
@@ -18,8 +21,8 @@ export async function commentRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
 
-    const [task] = await db.select({ id: tasks.id }).from(tasks)
-      .where(tenantWhere(tasks, accountId, eq(tasks.id, parsed.data.taskId))).limit(1);
+    const [task] = await db.select({ id: tasks.id, title: tasks.title, assignedTo: tasks.assignedTo })
+      .from(tasks).where(tenantWhere(tasks, accountId, eq(tasks.id, parsed.data.taskId))).limit(1);
     if (!task) return reply.code(400).send({ error: 'Task not found.' });
 
     const ins = await db.insert(taskComments).values(withTenant(accountId, {
@@ -27,6 +30,17 @@ export async function commentRoutes(app: FastifyInstance) {
     }));
     const [created] = await db.select().from(taskComments)
       .where(tenantWhere(taskComments, accountId, eq(taskComments.id, Number(ins[0].insertId)))).limit(1);
+
+    // Ping the card's assignee (unless they wrote the comment themselves).
+    if (task.assignedTo && task.assignedTo !== userId) {
+      const [author] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1);
+      notify(task.assignedTo, {
+        title: `New comment from ${author?.name ?? 'someone'}`,
+        body: task.title,
+        url: appUrl(),
+        tag: `task-${parsed.data.taskId}`,
+      });
+    }
     return reply.code(201).send({ comment: created });
   });
 
