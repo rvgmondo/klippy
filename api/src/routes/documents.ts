@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, lte, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, folders } from '../db/schema.js';
+import { documents, documentLines, accounts, folders, boards, tasks, timeEntries } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -209,6 +209,8 @@ export async function documentRoutes(app: FastifyInstance) {
   });
 
   // Suggest invoice lines from tracked time for a client folder in a date range.
+  // One line per board that had time logged, quantity = hours, unit = the
+  // client's inherited hourly rate. Ready to drop straight into a new invoice.
   app.get('/api/v1/documents/from-time', async (req, reply) => {
     const { accountId } = authOf(req);
     const q = z.object({
@@ -217,18 +219,65 @@ export async function documentRoutes(app: FastifyInstance) {
     }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'folderId, from, to required.' });
 
-    const [folder] = await db.select().from(folders)
-      .where(tenantWhere(folders, accountId, eq(folders.id, q.data.folderId))).limit(1);
-    if (!folder) return reply.code(404).send({ error: 'Client not found.' });
+    const allFolders = await db.select({
+      id: folders.id, parentId: folders.parentId, name: folders.name, hourlyRate: folders.hourlyRate,
+    }).from(folders).where(tenantWhere(folders, accountId));
+    const byId = new Map(allFolders.map((f) => [f.id, f]));
+    const client = byId.get(q.data.folderId);
+    if (!client) return reply.code(404).send({ error: 'Client not found.' });
 
-    // Reuse the report logic via a direct call would be nicer; here we query hours
-    // for the client's whole subtree.
-    const rate = folder.hourlyRate != null ? Number(folder.hourlyRate) : 0;
-    return {
-      clientName: folder.name,
-      folderId: folder.id,
-      suggestion: { description: `Consulting: ${folder.name} (${q.data.from} to ${q.data.to})`, rate },
-      note: 'Open the Reports tab to see the exact hours for this client, then add a line here.',
-    };
+    // Rate inherited from the nearest ancestor that sets one.
+    let rate = 0;
+    for (let cur = client, i = 0; cur && i < 100; i++) {
+      if (cur.hourlyRate != null) { rate = Number(cur.hourlyRate); break; }
+      if (cur.parentId == null) break;
+      cur = byId.get(cur.parentId)!;
+    }
+
+    // All folders in this client's subtree (itself + descendants).
+    const subtree = new Set<number>([client.id]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of allFolders) {
+        if (f.parentId != null && subtree.has(f.parentId) && !subtree.has(f.id)) { subtree.add(f.id); grew = true; }
+      }
+    }
+
+    const boardRows = await db.select({ id: boards.id, name: boards.name }).from(boards)
+      .where(tenantWhere(boards, accountId, inArray(boards.folderId, [...subtree])));
+    if (boardRows.length === 0) return { clientName: client.name, rate, lines: [], totalHours: 0 };
+    const boardName = new Map(boardRows.map((b) => [b.id, b.name]));
+
+    const start = new Date(`${q.data.from}T00:00:00.000Z`);
+    const end = new Date(`${q.data.to}T23:59:59.999Z`);
+    const rows = await db.select({
+      boardId: tasks.boardId,
+      seconds: sql<number>`COALESCE(SUM(${timeEntries.durationSeconds}),0)`,
+    }).from(timeEntries)
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .where(tenantWhere(timeEntries, accountId, and(
+        isNotNull(timeEntries.durationSeconds),
+        inArray(tasks.boardId, boardRows.map((b) => b.id)),
+        gte(timeEntries.startTime, start),
+        lte(timeEntries.startTime, end),
+      )))
+      .groupBy(tasks.boardId);
+
+    let totalHours = 0;
+    const lines = rows
+      .map((r) => {
+        const hours = Math.round((Number(r.seconds) / 3600) * 100) / 100;
+        totalHours += hours;
+        return {
+          description: `${boardName.get(r.boardId) ?? 'Work'} (${q.data.from} to ${q.data.to})`,
+          quantity: hours,
+          unitPrice: rate,
+        };
+      })
+      .filter((l) => l.quantity > 0)
+      .sort((a, b) => b.quantity - a.quantity);
+
+    return { clientName: client.name, rate, totalHours: Math.round(totalHours * 100) / 100, lines };
   });
 }

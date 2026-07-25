@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft } from 'lucide-react';
+import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
+
+interface TreeFolder { id: number; parentId: number | null; name: string }
 
 type DocType = 'quote' | 'invoice';
 type Status = 'draft' | 'sent' | 'accepted' | 'paid' | 'void';
@@ -144,6 +146,31 @@ function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocT
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(isNew);
 
+  // "Pull from tracked time" state
+  const [showTime, setShowTime] = useState(false);
+  const [timeFolder, setTimeFolder] = useState<number | ''>('');
+  const [timeFrom, setTimeFrom] = useState(() => todayStr().slice(0, 8) + '01');
+  const [timeTo, setTimeTo] = useState(todayStr());
+  const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TreeFolder[] }>('/folders') });
+  const clients = (folders.data?.folders ?? []).filter((f) => f.parentId === null);
+
+  const pull = useMutation({
+    mutationFn: () => apiGet<{ clientName: string; lines: Line[]; totalHours: number }>(
+      `/documents/from-time?folderId=${timeFolder}&from=${timeFrom}&to=${timeTo}`),
+    onSuccess: (r) => {
+      if (r.lines.length === 0) { setError(`No tracked time for that client between ${timeFrom} and ${timeTo}.`); return; }
+      setError(null);
+      if (!clientName.trim()) setClientName(r.clientName);
+      // Merge onto any real lines already entered.
+      setLines((prev) => {
+        const kept = prev.filter((l) => l.description.trim());
+        return [...kept, ...r.lines];
+      });
+      setShowTime(false);
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : 'Could not pull time.'),
+  });
+
   // Hydrate from the existing document once.
   if (!isNew && existing.data && !ready) {
     const d = existing.data.document;
@@ -192,6 +219,41 @@ function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocT
           <div><label className="mb-1 block text-[11px] text-slate-500">{type === 'quote' ? 'Valid until' : 'Due date'}</label><input type="date" className={field} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
           <div><label className="mb-1 block text-[11px] text-slate-500">Tax %</label><input type="number" className={field} value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} /></div>
         </div>
+
+        {/* Pull from tracked time */}
+        {type === 'invoice' && (
+          <div className="mt-4">
+            {!showTime ? (
+              <button onClick={() => setShowTime(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                <Clock size={13} /> Pull from tracked time
+              </button>
+            ) : (
+              <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                <div className="mb-2 text-xs font-medium text-slate-400">Bill tracked hours for a client</div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+                  <select className={field + ' sm:col-span-2'} value={timeFolder}
+                    onChange={(e) => setTimeFolder(e.target.value ? Number(e.target.value) : '')}>
+                    <option value="">Choose client...</option>
+                    {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <input type="date" className={field} value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} />
+                  <input type="date" className={field} value={timeTo} onChange={(e) => setTimeTo(e.target.value)} />
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={() => timeFolder ? pull.mutate() : setError('Pick a client first.')} disabled={pull.isPending}
+                    className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500 disabled:opacity-60">
+                    {pull.isPending ? 'Loading...' : 'Add lines from time'}
+                  </button>
+                  <button onClick={() => setShowTime(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  Adds one line per board with logged time, using the client's hourly rate. Set a rate on the client (sidebar ⋯ menu) first.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Line items */}
         <div className="mt-4">
