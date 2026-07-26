@@ -8,10 +8,13 @@ import { useAuth } from '../lib/auth';
 import type { Priority, Folder } from '../lib/types';
 import { CardDetail } from './CardDetail';
 
+interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
 interface Dashboard {
-  openCount: number; dueToday: number; overdue: number; flagged: number;
-  weekSecondsAll: number; weekSecondsMine: number;
+  delivery: Bucket; operations: Bucket;
+  weekSecondsMine: number;
   upcoming: { id: number; title: string; priority: Priority; dueDate: string; boardId: number }[];
+  // legacy flat fields still returned by the API
+  openCount: number; dueToday: number; overdue: number; flagged: number; weekSecondsAll: number;
 }
 interface DealSummary { openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number }
 
@@ -57,12 +60,12 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
         {/* DELIVERY */}
         <Pillar icon={<Truck size={16} />} title="Delivery" subtitle="Serve the customer, get paid"
           action={onNavigate ? { label: 'Reports', onClick: () => onNavigate('reports') } : undefined}>
-          <Tile label="Open work" value={String(data?.openCount ?? 0)} icon={<ListTodo size={18} />} color="#8b5cf6" />
-          <Tile label="Due today" value={String(data?.dueToday ?? 0)} icon={<CalendarClock size={18} />} color="#3b82f6" />
-          <Tile label="Overdue" value={String(data?.overdue ?? 0)} icon={<AlarmClock size={18} />} color="#ef4444" />
-          <Tile label="Flagged" value={String(data?.flagged ?? 0)} icon={<Flag size={18} />} color="#f97316" />
+          <Tile label="Open work" value={String(data?.delivery.open ?? 0)} icon={<ListTodo size={18} />} color="#8b5cf6" />
+          <Tile label="Due today" value={String(data?.delivery.dueToday ?? 0)} icon={<CalendarClock size={18} />} color="#3b82f6" />
+          <Tile label="Overdue" value={String(data?.delivery.overdue ?? 0)} icon={<AlarmClock size={18} />} color="#ef4444" />
+          <Tile label="Flagged" value={String(data?.delivery.flagged ?? 0)} icon={<Flag size={18} />} color="#f97316" />
+          <Tile label="Time this week (client work)" value={fmtHours(data?.delivery.weekSeconds ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
           <Tile label="Time this week (you)" value={fmtHours(data?.weekSecondsMine ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
-          <Tile label="Time this week (all)" value={fmtHours(data?.weekSecondsAll ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
         </Pillar>
 
         {(data?.upcoming.length ?? 0) > 0 && (
@@ -83,19 +86,28 @@ export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void
 
         {/* OPERATIONS */}
         <Pillar icon={<Settings2 size={16} />} title="Operations" subtitle="Run the machine (internal work)">
-          {opsFolders.length > 0 ? (
-            opsFolders.slice(0, 4).map((f) => (
-              <div key={f.id} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <Tile label="Open work" value={String(data?.operations.open ?? 0)} icon={<ListTodo size={18} />} color="#8b5cf6" />
+          <Tile label="Due today" value={String(data?.operations.dueToday ?? 0)} icon={<CalendarClock size={18} />} color="#3b82f6" />
+          <Tile label="Overdue" value={String(data?.operations.overdue ?? 0)} icon={<AlarmClock size={18} />} color="#ef4444" />
+          <Tile label="Time this week" value={fmtHours(data?.operations.weekSeconds ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
+        </Pillar>
+
+        {/* Internal areas list (Operations detail) */}
+        {opsFolders.length > 0 ? (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {opsFolders.slice(0, 8).map((f) => (
+              <button key={f.id} onClick={() => onNavigate?.('board')}
+                className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-900">
                 <div className="text-xs text-slate-400">Internal area</div>
                 <div className="truncate text-lg font-semibold text-slate-100">{f.name}</div>
-              </div>
-            ))
-          ) : (
-            <div className="col-span-full rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-              No internal areas yet. In the sidebar, add a folder and set it to <span className="text-slate-200">Operations</span> for things like admin, hiring or finance, separate from client work.
-            </div>
-          )}
-        </Pillar>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+            No internal areas yet. In the sidebar, add a folder and set it to <span className="text-slate-200">Operations</span> for things like admin, hiring or finance, separate from client work.
+          </div>
+        )}
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
