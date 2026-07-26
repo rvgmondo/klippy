@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal } from 'lucide-react';
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal, GripVertical } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
@@ -14,6 +19,20 @@ interface Props {
 function ask(prompt: string, current: string): string | null {
   const v = window.prompt(prompt, current);
   return v && v.trim() ? v.trim() : null;
+}
+
+// Drag handle shared by folder rows and board rows; only shows on row hover.
+function Grip({ setRef, attributes, listeners }: {
+  setRef: (el: HTMLElement | null) => void;
+  attributes: Record<string, unknown>; listeners: Record<string, unknown> | undefined;
+}) {
+  return (
+    <span ref={setRef} {...attributes} {...listeners}
+      title="Drag to reorder"
+      className="shrink-0 cursor-grab text-slate-600 opacity-0 hover:text-slate-300 active:cursor-grabbing group-hover:opacity-100">
+      <GripVertical size={13} />
+    </span>
+  );
 }
 
 export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
@@ -52,25 +71,21 @@ export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {/* DELIVERY: clients */}
-        <SectionHeader label={`Delivery · ${account?.folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
+        <SectionHeader label={`Delivery / ${account?.folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
         {deliveryRoots.length === 0 && (
           <p className="px-2 py-3 text-center text-[11px] text-slate-600">No {account?.folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
         )}
-        {deliveryRoots.map((f) => (
-          <FolderNode key={f.id} folder={f} all={folders} depth={0}
-            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-        ))}
+        <FolderList folders={deliveryRoots} all={folders} depth={0}
+          selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
 
         {/* OPERATIONS: internal work */}
         <div className="mt-4">
-          <SectionHeader label="Operations · Internal" onAdd={() => addTop('operations')} />
+          <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
           {opsRoots.length === 0 && (
             <p className="px-2 py-3 text-center text-[11px] text-slate-600">Admin, hiring, finance...</p>
           )}
-          {opsRoots.map((f) => (
-            <FolderNode key={f.id} folder={f} all={folders} depth={0}
-              selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-          ))}
+          <FolderList folders={opsRoots} all={folders} depth={0}
+            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
         </div>
       </nav>
     </aside>
@@ -88,6 +103,41 @@ function SectionHeader({ label, onAdd }: { label: string; onAdd: () => void }) {
   );
 }
 
+// A drag-sortable list of sibling folders. Persists order via /folders/reorder.
+function FolderList({ folders, all, depth, selectedBoardId, onSelectBoard }: {
+  folders: TFolder[]; all: TFolder[]; depth: number;
+  selectedBoardId: number | null; onSelectBoard: (id: number) => void;
+}) {
+  const qc = useQueryClient();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const reorder = useMutation({
+    mutationFn: (orderedIds: number[]) => apiPost('/folders/reorder', { orderedIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
+  const ids = folders.map((f) => f.id);
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldI = ids.indexOf(Number(String(active.id).slice(2)));
+    const newI = ids.indexOf(Number(String(over.id).slice(2)));
+    if (oldI < 0 || newI < 0) return;
+    reorder.mutate(arrayMove(ids, oldI, newI));
+  }
+
+  if (folders.length === 0) return null;
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids.map((id) => `f-${id}`)} strategy={verticalListSortingStrategy}>
+        {folders.map((f) => (
+          <FolderNode key={f.id} folder={f} all={all} depth={depth}
+            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+        ))}
+      </SortableContext>
+    </DndContext>
+  );
+}
+
 function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
   folder: TFolder; all: TFolder[]; depth: number;
   selectedBoardId: number | null; onSelectBoard: (id: number) => void;
@@ -95,6 +145,9 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
   const qc = useQueryClient();
   const [open, setOpen] = useState(depth === 0);
   const children = all.filter((f) => f.parentId === folder.id);
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id: `f-${folder.id}` });
+  const style = { transform: CSS.Transform.toString(transform), transition };
 
   const boards = useQuery({
     queryKey: ['boards', folder.id],
@@ -153,9 +206,10 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
   const hasKids = children.length > 0 || (boards.data?.boards.length ?? 0) > 0;
 
   return (
-    <div>
+    <div ref={setNodeRef} style={style} className={isDragging ? 'opacity-40' : ''}>
       <div className="group flex items-center gap-1 rounded-md px-1.5 py-1.5 hover:bg-slate-800/60"
         style={{ paddingLeft: depth * 12 + 6 }}>
+        <Grip setRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
         <button onClick={() => setOpen(!open)} className="text-slate-500 hover:text-slate-300">
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
@@ -194,17 +248,48 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
 
       {open && (
         <div>
-          {(boards.data?.boards ?? []).map((b) => (
-            <BoardRow key={b.id} board={b} folderId={folder.id} depth={depth}
-              selected={selectedBoardId === b.id} onSelect={() => onSelectBoard(b.id)} />
-          ))}
-          {children.map((c) => (
-            <FolderNode key={c.id} folder={c} all={all} depth={depth + 1}
-              selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-          ))}
+          <BoardList boards={boards.data?.boards ?? []} folderId={folder.id} depth={depth}
+            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+          <FolderList folders={children} all={all} depth={depth + 1}
+            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
         </div>
       )}
     </div>
+  );
+}
+
+// A drag-sortable list of boards within one folder. Persists order via /boards/reorder.
+function BoardList({ boards, folderId, depth, selectedBoardId, onSelectBoard }: {
+  boards: Board[]; folderId: number; depth: number;
+  selectedBoardId: number | null; onSelectBoard: (id: number) => void;
+}) {
+  const qc = useQueryClient();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const reorder = useMutation({
+    mutationFn: (orderedIds: number[]) => apiPost('/boards/reorder', { orderedIds }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['boards', folderId] }),
+  });
+  const ids = boards.map((b) => b.id);
+
+  function onDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldI = ids.indexOf(Number(String(active.id).slice(2)));
+    const newI = ids.indexOf(Number(String(over.id).slice(2)));
+    if (oldI < 0 || newI < 0) return;
+    reorder.mutate(arrayMove(ids, oldI, newI));
+  }
+
+  if (boards.length === 0) return null;
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids.map((id) => `b-${id}`)} strategy={verticalListSortingStrategy}>
+        {boards.map((b) => (
+          <BoardRow key={b.id} board={b} folderId={folderId} depth={depth}
+            selected={selectedBoardId === b.id} onSelect={() => onSelectBoard(b.id)} />
+        ))}
+      </SortableContext>
+    </DndContext>
   );
 }
 
@@ -212,13 +297,17 @@ function BoardRow({ board, folderId, depth, selected, onSelect }: {
   board: Board; folderId: number; depth: number; selected: boolean; onSelect: () => void;
 }) {
   const qc = useQueryClient();
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id: `b-${board.id}` });
+  const style = { transform: CSS.Transform.toString(transform), transition, paddingLeft: depth * 12 + 30 };
   const invalidate = () => qc.invalidateQueries({ queryKey: ['boards', folderId] });
   const rename = useMutation({ mutationFn: (name: string) => apiPatch(`/boards/${board.id}`, { name }), onSuccess: invalidate });
   const del = useMutation({ mutationFn: () => apiDelete(`/boards/${board.id}`), onSuccess: invalidate });
 
   return (
-    <div className={`group flex items-center gap-2 rounded-md pr-1 ${selected ? 'bg-violet-600/20' : 'hover:bg-slate-800/60'}`}
-      style={{ paddingLeft: depth * 12 + 30 }}>
+    <div ref={setNodeRef} style={style}
+      className={`group flex items-center gap-1 rounded-md pr-1 ${isDragging ? 'opacity-40' : ''} ${selected ? 'bg-violet-600/20' : 'hover:bg-slate-800/60'}`}>
+      <Grip setRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
       <button onClick={onSelect}
         className={`flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm ${selected ? 'text-violet-200' : 'text-slate-400'}`}>
         <SquareKanban size={13} className="shrink-0" />

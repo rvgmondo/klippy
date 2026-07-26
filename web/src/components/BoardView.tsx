@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners, useDroppable,
+  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners,
   type DragStartEvent, type DragOverEvent, type DragEndEvent,
 } from '@dnd-kit/core';
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import {
+  SortableContext, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Flag, MoreHorizontal } from 'lucide-react';
+import { Plus, Flag, MoreHorizontal, GripVertical } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
 import { CardDetail } from './CardDetail';
@@ -70,6 +72,22 @@ export function BoardView({ boardId }: { boardId: number | null }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board', boardId] }),
   });
 
+  const reorderCols = useMutation({
+    mutationFn: (orderedIds: number[]) => apiPost('/columns/reorder', { orderedIds }),
+    onMutate: async (orderedIds) => {
+      await qc.cancelQueries({ queryKey: ['board', boardId] });
+      const prev = qc.getQueryData<BoardFull>(['board', boardId]);
+      if (prev) {
+        const byId = new Map(prev.columns.map((c) => [c.id, c]));
+        const columns = orderedIds.map((id, i) => ({ ...byId.get(id)!, position: i }));
+        qc.setQueryData<BoardFull>(['board', boardId], { ...prev, columns });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => { if (ctx?.prev) qc.setQueryData(['board', boardId], ctx.prev); },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['board', boardId] }),
+  });
+
   if (boardId === null) {
     return (
       <div className="grid h-full place-items-center text-slate-500">
@@ -88,6 +106,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
     const activeKey = String(e.active.id);
     const overKey = e.over ? String(e.over.id) : null;
     if (!overKey) return;
+    if (activeKey.startsWith('col-')) return; // columns reorder on drop only
     const from = findContainer(activeKey);
     const to = findContainer(overKey);
     if (!from || !to || from === to) return;
@@ -108,6 +127,19 @@ export function BoardView({ boardId }: { boardId: number | null }) {
     const overKey = e.over ? String(e.over.id) : null;
     setActiveId(null);
     if (!overKey) return;
+
+    // Reordering a whole column.
+    if (activeKey.startsWith('col-')) {
+      const overCol = overKey.startsWith('col-') ? overKey : findContainer(overKey);
+      if (!overCol || overCol === activeKey || !data) return;
+      const ids = data.columns.map((c) => c.id);
+      const oldIndex = ids.indexOf(idFromKey(activeKey));
+      const newIndex = ids.indexOf(idFromKey(overCol));
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return;
+      reorderCols.mutate(arrayMove(ids, oldIndex, newIndex));
+      return;
+    }
+
     const from = findContainer(activeKey);
     const to = findContainer(overKey);
     if (!from || !to) return;
@@ -128,7 +160,8 @@ export function BoardView({ boardId }: { boardId: number | null }) {
     move.mutate({ id: activeIdNum, columnId, position });
   }
 
-  const activeTask = activeId ? taskMap.get(idFromKey(activeId)) : null;
+  const activeTask = activeId && !activeId.startsWith('col-') ? taskMap.get(idFromKey(activeId)) : null;
+  const activeCol = activeId?.startsWith('col-') ? data.columns.find((c) => colKey(c.id) === activeId) ?? null : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -141,15 +174,25 @@ export function BoardView({ boardId }: { boardId: number | null }) {
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
         onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
-          {data.columns.map((col) => (
-            <ColumnLane key={col.id} column={col} boardId={boardId}
-              taskIds={(containers[colKey(col.id)] ?? []).filter((tid) => { const t = taskMap.get(tid); return t ? applyFilters([t], filters).length > 0 : false; })}
-              taskMap={taskMap} labelsByTask={labelsByTask} userMap={userMap} onOpen={setOpenTaskId} />
-          ))}
+          <SortableContext items={data.columns.map((c) => colKey(c.id))} strategy={horizontalListSortingStrategy}>
+            {data.columns.map((col) => (
+              <ColumnLane key={col.id} column={col} boardId={boardId}
+                taskIds={(containers[colKey(col.id)] ?? []).filter((tid) => { const t = taskMap.get(tid); return t ? applyFilters([t], filters).length > 0 : false; })}
+                taskMap={taskMap} labelsByTask={labelsByTask} userMap={userMap} onOpen={setOpenTaskId} />
+            ))}
+          </SortableContext>
           <AddColumn boardId={boardId} />
         </div>
         <DragOverlay>
           {activeTask ? <CardInner task={activeTask} labels={labelsByTask.get(activeTask.id) ?? []} userMap={userMap} dragging /> : null}
+          {activeCol ? (
+            <div className="w-72 rounded-xl border border-violet-500/60 bg-slate-900 px-3 py-2.5 shadow-xl">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: activeCol.color }} />
+                <span className="text-sm font-medium text-slate-200">{activeCol.name}</span>
+              </div>
+            </div>
+          ) : null}
         </DragOverlay>
       </DndContext>
 
@@ -164,7 +207,9 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
   onOpen: (id: number) => void;
 }) {
   const qc = useQueryClient();
-  const { setNodeRef, isOver } = useDroppable({ id: colKey(column.id) });
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isOver, isDragging } =
+    useSortable({ id: colKey(column.id) });
+  const style = { transform: CSS.Transform.toString(transform), transition };
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
   const invalidateBoard = () => qc.invalidateQueries({ queryKey: ['board', boardId] });
@@ -176,8 +221,13 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
   const deleteCol = useMutation({ mutationFn: () => apiDelete(`/columns/${column.id}`), onSuccess: invalidateBoard });
 
   return (
-    <div className={`group/col flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-900/40 ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
+    <div ref={setNodeRef} style={style}
+      className={`group/col flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-900/40 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 px-3 py-2.5">
+        <span ref={setActivatorNodeRef} {...attributes} {...listeners}
+          className="-ml-1 cursor-grab text-slate-600 hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder">
+          <GripVertical size={14} />
+        </span>
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: column.color }} />
         <span className="text-sm font-medium text-slate-200">{column.name}</span>
         <span className="ml-auto text-xs text-slate-500">{taskIds.length}</span>
@@ -189,7 +239,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
           ]} />
       </div>
 
-      <div ref={setNodeRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         <SortableContext items={taskIds.map(cardKey)} strategy={verticalListSortingStrategy}>
           {taskIds.map((id) => {
             const t = taskMap.get(id);
