@@ -71,6 +71,13 @@
       "when": 1784959855544,
       "tag": "0009_unique_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1785056367699,
+      "tag": "0010_clumsy_human_fly",
+      "breakpoints": true
     }
   ]
 }

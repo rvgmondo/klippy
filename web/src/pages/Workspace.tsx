@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive, BarChart3, Receipt } from 'lucide-react';
+import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive, BarChart3, Receipt, Target } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
@@ -7,6 +7,7 @@ import { CalendarView } from '../components/CalendarView';
 import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
+import { PipelineView } from '../components/PipelineView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
@@ -14,7 +15,7 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 
-type View = 'home' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
+type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
 
 export function Workspace() {
   const { user, account, logout } = useAuth();
@@ -53,6 +54,7 @@ export function Workspace() {
 
           <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 p-1">
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />
+            <TabButton active={view === 'pipeline'} onClick={() => setView('pipeline')} icon={<Target size={15} />} label="Pipeline" />
             <TabButton active={view === 'board'} onClick={() => setView('board')} icon={<LayoutGrid size={15} />} label="Board" />
             <TabButton active={view === 'calendar'} onClick={() => setView('calendar')} icon={<CalendarDays size={15} />} label="Calendar" />
             <TabButton active={view === 'files'} onClick={() => setView('files')} icon={<HardDrive size={15} />} label="Files" />
@@ -88,7 +90,8 @@ export function Workspace() {
         </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
-          {view === 'home' && <DashboardView />}
+          {view === 'home' && <DashboardView onNavigate={(v) => setView(v as View)} />}
+          {view === 'pipeline' && <PipelineView onGoToClients={() => setView('board')} />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
           {view === 'files' && <FilesView />}

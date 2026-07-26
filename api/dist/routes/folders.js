@@ -10,6 +10,7 @@ const createSchema = z.object({
     parentId: z.number().int().positive().nullable().optional(),
     color: z.string().trim().max(20).optional(),
     notes: z.string().max(5000).nullable().optional(),
+    pillar: z.enum(['delivery', 'operations']).optional(),
 });
 const updateSchema = z.object({
     name: z.string().trim().min(1).max(150).optional(),
@@ -18,6 +19,7 @@ const updateSchema = z.object({
     notes: z.string().max(5000).nullable().optional(),
     isArchived: z.boolean().optional(),
     hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
+    pillar: z.enum(['delivery', 'operations']).optional(),
 });
 /** True if `candidateParent` is `folderId` itself or a descendant of it. */
 async function wouldCycle(accountId, folderId, candidateParent) {
@@ -57,7 +59,7 @@ export async function folderRoutes(app) {
             ? sql `account_id = ${accountId} AND parent_id IS NULL`
             : sql `account_id = ${accountId} AND parent_id = ${parentId}`);
         const ins = await db.insert(folders).values(withTenant(accountId, {
-            parentId, name, color: color ?? '#6366f1', notes: notes ?? null, position, createdBy: userId,
+            parentId, name, color: color ?? '#6366f1', notes: notes ?? null, pillar: parsed.data.pillar ?? 'delivery', position, createdBy: userId,
         }));
         const [created] = await db.select().from(folders)
             .where(tenantWhere(folders, accountId, eq(folders.id, Number(ins[0].insertId)))).limit(1);

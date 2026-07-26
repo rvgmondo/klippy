@@ -92,6 +92,8 @@ export const folders = mysqlTable('folders', {
     imagePath: varchar('image_path', { length: 255 }),
     // Billing rate for work logged under this client, in the workspace currency.
     hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }),
+    // Which business pillar this top-level folder belongs to.
+    pillar: mysqlEnum('pillar', ['delivery', 'operations']).default('delivery').notNull(),
     isArchived: boolean('is_archived').default(false).notNull(),
     position: int('position', { unsigned: true }).default(0).notNull(),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
@@ -428,6 +430,29 @@ export const payments = mysqlTable('payments', {
     createdAt: createdAt(),
 }, (t) => [
     index('idx_payments_account_doc').on(t.accountId, t.documentId),
+]);
+// ---- Deals (the Acquisition pillar: a sales pipeline) ---------------------
+export const deals = mysqlTable('deals', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 150 }).notNull(),
+    company: varchar('company', { length: 150 }),
+    contactName: varchar('contact_name', { length: 120 }),
+    contactEmail: varchar('contact_email', { length: 150 }),
+    contactPhone: varchar('contact_phone', { length: 40 }),
+    value: decimal('value', { precision: 12, scale: 2 }).default('0').notNull(),
+    stage: mysqlEnum('stage', ['lead', 'contacted', 'proposal', 'won', 'lost']).default('lead').notNull(),
+    notes: text('notes'),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    // Set when a won deal is turned into a delivery client.
+    clientFolderId: int('client_folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+    wonAt: datetime('won_at'),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_deals_account_stage').on(t.accountId, t.stage, t.position),
 ]);
 // ---- Relations (for db.query.* nested reads) ------------------------------
 export const accountsRelations = relations(accounts, ({ many }) => ({

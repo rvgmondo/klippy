@@ -17,6 +17,7 @@ export interface Account {
   folderLabelPlural: string;
   brandName?: string | null;
   hasLogo?: boolean;
+  currency?: string;
 }
 export interface Folder {
   id: number;
@@ -27,6 +28,7 @@ export interface Folder {
   notes: string | null;
   imagePath?: string | null;
   hourlyRate?: string | null;
+  pillar?: 'delivery' | 'operations';
   isArchived: boolean;
   position: number;
 }
