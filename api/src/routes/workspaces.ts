@@ -55,7 +55,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       const ins = await tx.insert(accounts).values({ name: parsed.data.name, slug });
       const newId = Number(ins[0].insertId);
       await tx.insert(memberships).values({ accountId: newId, userId, role: 'owner' });
-      await seedNewAccount(tx, newId, userId);
+      await seedNewAccount(tx, newId, userId, parsed.data.name);
       return newId;
     });
 

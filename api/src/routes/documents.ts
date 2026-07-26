@@ -6,6 +6,7 @@ import { documents, documentLines, accounts, folders, boards, tasks, timeEntries
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { resolveBusinessId } from '../lib/business.js';
 import { sendMail } from '../lib/mailer.js';
 
 const lineSchema = z.object({
@@ -18,6 +19,7 @@ const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
 const bodySchema = z.object({
   type: docType,
+  businessId: z.number().int().positive().optional(),
   folderId: z.number().int().positive().nullable().optional(),
   clientName: z.string().trim().min(1).max(150),
   clientEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
@@ -44,14 +46,20 @@ export async function documentRoutes(app: FastifyInstance) {
   // List (summary), optionally filtered by type.
   app.get('/api/v1/documents', async (req) => {
     const { accountId } = authOf(req);
-    const q = z.object({ type: docType.optional() }).safeParse(req.query);
-    const extra = q.success && q.data.type ? eq(documents.type, q.data.type) : undefined;
+    const q = z.object({
+      type: docType.optional(),
+      businessId: z.coerce.number().int().positive().optional(),
+    }).safeParse(req.query);
+    const conds = [
+      q.success && q.data.type ? eq(documents.type, q.data.type) : undefined,
+      q.success && q.data.businessId ? eq(documents.businessId, q.data.businessId) : undefined,
+    ];
     const rows = await db.select({
       id: documents.id, type: documents.type, number: documents.number,
       clientName: documents.clientName, issueDate: documents.issueDate, dueDate: documents.dueDate,
       status: documents.status, currency: documents.currency, total: documents.total,
     }).from(documents)
-      .where(tenantWhere(documents, accountId, extra))
+      .where(tenantWhere(documents, accountId, ...conds))
       .orderBy(desc(documents.createdAt));
     return { documents: rows };
   });
@@ -88,9 +96,10 @@ export async function documentRoutes(app: FastifyInstance) {
     const seq = Number(row?.m ?? 0) + 1;
     const number = `${PREFIX[d.type]}${String(seq).padStart(4, '0')}`;
 
+    const businessId = await resolveBusinessId(accountId, d.businessId);
     const docId = await db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
-        type: d.type, seq, number, folderId: d.folderId ?? null,
+        type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
         clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
         issueDate: d.issueDate, dueDate: d.dueDate ?? null, currency,
         taxRate: money(taxRate), subtotal: money(totals.subtotal),
@@ -187,7 +196,7 @@ export async function documentRoutes(app: FastifyInstance) {
 
     const newId = await db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
-        type: 'invoice' as const, seq, number, folderId: quote.folderId,
+        type: 'invoice' as const, seq, number, businessId: quote.businessId, folderId: quote.folderId,
         clientName: quote.clientName, clientEmail: quote.clientEmail, clientAddress: quote.clientAddress,
         issueDate: today, dueDate: null, currency: quote.currency, taxRate: quote.taxRate,
         subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,

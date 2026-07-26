@@ -13,9 +13,16 @@ import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
-import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
+import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
 type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
+
+function loadBusiness(): BusinessSelection {
+  const s = localStorage.getItem('klippy.business');
+  if (!s || s === 'all') return 'all';
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : 'all';
+}
 
 export function Workspace() {
   const { user, account, logout } = useAuth();
@@ -24,6 +31,8 @@ export function Workspace() {
   const [showTimer, setShowTimer] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [businessId, setBusinessId] = useState<BusinessSelection>(loadBusiness);
+  const selectBusiness = (v: BusinessSelection) => { setBusinessId(v); localStorage.setItem('klippy.business', String(v)); };
 
   return (
     <div className="flex h-full">
@@ -35,6 +44,7 @@ export function Workspace() {
       >
         <Sidebar
           selectedBoardId={boardId}
+          businessId={businessId}
           onSelectBoard={(id) => { setBoardId(id); setView('board'); setNavOpen(false); }}
         />
       </div>
@@ -50,7 +60,7 @@ export function Workspace() {
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
           </button>
 
-          <div className="hidden sm:block"><WorkspaceSwitcher /></div>
+          <div className="hidden sm:block"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
 
           <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 p-1">
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />
@@ -90,13 +100,13 @@ export function Workspace() {
         </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
-          {view === 'home' && <DashboardView onNavigate={(v) => setView(v as View)} />}
-          {view === 'pipeline' && <PipelineView onGoToClients={() => setView('board')} />}
+          {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
+          {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
           {view === 'files' && <FilesView />}
           {view === 'reports' && <ReportsView />}
-          {view === 'billing' && <BillingView />}
+          {view === 'billing' && <BillingView businessId={businessId} />}
         </main>
       </div>
 

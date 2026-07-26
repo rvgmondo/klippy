@@ -9,10 +9,12 @@ import { ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, More
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
-import type { Board, Folder as TFolder } from '../lib/types';
+import type { Board, Business, Folder as TFolder } from '../lib/types';
+import type { BusinessSelection } from './BusinessSwitcher';
 
 interface Props {
   selectedBoardId: number | null;
+  businessId: BusinessSelection;
   onSelectBoard: (id: number) => void;
 }
 
@@ -35,26 +37,16 @@ function Grip({ setRef, attributes, listeners }: {
   );
 }
 
-export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
+export function Sidebar({ selectedBoardId, businessId, onSelectBoard }: Props) {
   const { account } = useAuth();
-  const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
   const folders = data?.folders ?? [];
+  const bizData = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
+  const businesses = bizData.data?.businesses ?? [];
 
-  const createFolder = useMutation({
-    mutationFn: (v: { name: string; parentId: number | null; pillar?: 'delivery' | 'operations' }) => apiPost('/folders', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
-  });
-
-  const roots = folders.filter((f) => f.parentId === null);
-  const deliveryRoots = roots.filter((f) => (f.pillar ?? 'delivery') !== 'operations');
-  const opsRoots = roots.filter((f) => f.pillar === 'operations');
-
-  function addTop(pillar: 'delivery' | 'operations') {
-    const what = pillar === 'operations' ? 'internal area' : (account?.folderLabelSingular ?? 'folder');
-    const name = window.prompt(`New ${what} name`);
-    if (name?.trim()) createFolder.mutate({ name: name.trim(), parentId: null, pillar });
-  }
+  // Which businesses to show: all of them, or just the selected one.
+  const shown = businessId === 'all' ? businesses : businesses.filter((b) => b.id === businessId);
+  const showHeaders = businessId === 'all' && businesses.length > 1;
 
   return (
     <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
@@ -70,25 +62,66 @@ export function Sidebar({ selectedBoardId, onSelectBoard }: Props) {
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-        {/* DELIVERY: clients */}
-        <SectionHeader label={`Delivery / ${account?.folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
-        {deliveryRoots.length === 0 && (
-          <p className="px-2 py-3 text-center text-[11px] text-slate-600">No {account?.folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
+        {shown.length === 0 && (
+          <p className="px-2 py-6 text-center text-[11px] text-slate-600">No businesses yet.</p>
         )}
-        <FolderList folders={deliveryRoots} all={folders} depth={0}
-          selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-
-        {/* OPERATIONS: internal work */}
-        <div className="mt-4">
-          <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
-          {opsRoots.length === 0 && (
-            <p className="px-2 py-3 text-center text-[11px] text-slate-600">Admin, hiring, finance...</p>
-          )}
-          <FolderList folders={opsRoots} all={folders} depth={0}
+        {shown.map((biz) => (
+          <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders}
+            folderLabelSingular={account?.folderLabelSingular} folderLabelPlural={account?.folderLabelPlural}
             selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-        </div>
+        ))}
       </nav>
     </aside>
+  );
+}
+
+// One business's slice of the sidebar: its Delivery and Operations sections.
+function BusinessBlock({ business, all, showHeader, folderLabelSingular, folderLabelPlural, selectedBoardId, onSelectBoard }: {
+  business: Business; all: TFolder[]; showHeader: boolean;
+  folderLabelSingular?: string; folderLabelPlural?: string;
+  selectedBoardId: number | null; onSelectBoard: (id: number) => void;
+}) {
+  const qc = useQueryClient();
+  const createFolder = useMutation({
+    mutationFn: (v: { name: string; parentId: number | null; businessId: number; pillar: 'delivery' | 'operations' }) => apiPost('/folders', v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
+
+  const roots = all.filter((f) => f.parentId === null && f.businessId === business.id);
+  const deliveryRoots = roots.filter((f) => (f.pillar ?? 'delivery') !== 'operations');
+  const opsRoots = roots.filter((f) => f.pillar === 'operations');
+
+  function addTop(pillar: 'delivery' | 'operations') {
+    const what = pillar === 'operations' ? 'internal area' : (folderLabelSingular ?? 'folder');
+    const name = window.prompt(`New ${what} name in ${business.name}`);
+    if (name?.trim()) createFolder.mutate({ name: name.trim(), parentId: null, businessId: business.id, pillar });
+  }
+
+  return (
+    <div className={showHeader ? 'mb-2 mt-3 border-t border-slate-800/70 pt-2 first:mt-0 first:border-t-0' : ''}>
+      {showHeader && (
+        <div className="flex items-center gap-2 px-2 pb-1">
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: business.color }} />
+          <span className="truncate text-xs font-semibold text-slate-200">{business.name}</span>
+        </div>
+      )}
+
+      <SectionHeader label={`Delivery / ${folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
+      {deliveryRoots.length === 0 && (
+        <p className="px-2 py-2 text-center text-[11px] text-slate-600">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
+      )}
+      <FolderList folders={deliveryRoots} all={all} depth={0}
+        selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+
+      <div className="mt-4">
+        <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
+        {opsRoots.length === 0 && (
+          <p className="px-2 py-2 text-center text-[11px] text-slate-600">Admin, hiring, finance...</p>
+        )}
+        <FolderList folders={opsRoots} all={all} depth={0}
+          selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+      </div>
+    </div>
   );
 }
 

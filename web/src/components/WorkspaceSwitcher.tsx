@@ -87,7 +87,8 @@ export function WorkspaceList() {
         </div>
       ))}
       <p className="pt-1 text-[11px] text-slate-500">
-        <Plus size={10} className="inline" /> Use the workspace menu in the top bar to switch or create one.
+        A workspace is a separate, walled-off account. Most people just need one and manage several
+        <span className="text-slate-400"> businesses</span> inside it, using the business menu in the top bar.
       </p>
     </div>
   );

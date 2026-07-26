@@ -71,7 +71,7 @@ export async function authRoutes(app: FastifyInstance) {
       });
       const userId = Number(userIns[0].insertId);
       await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
-      await seedNewAccount(tx, accountId, userId);
+      await seedNewAccount(tx, accountId, userId, accountName);
       return { accountId, userId };
     });
 

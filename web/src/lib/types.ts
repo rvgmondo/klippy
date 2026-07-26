@@ -19,9 +19,17 @@ export interface Account {
   hasLogo?: boolean;
   currency?: string;
 }
+export interface Business {
+  id: number;
+  accountId: number;
+  name: string;
+  color: string;
+  position: number;
+}
 export interface Folder {
   id: number;
   accountId: number;
+  businessId: number | null;
   parentId: number | null;
   name: string;
   color: string;

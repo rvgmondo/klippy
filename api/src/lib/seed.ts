@@ -1,5 +1,5 @@
 import { db } from '../db/client.js';
-import { folders, boards, boardColumns, tasks, deals } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, deals } from '../db/schema.js';
 
 // The drizzle transaction handle, typed straight off db.transaction so inserts stay type-safe.
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -50,10 +50,16 @@ async function seedBoard(
  * business, freelancer or startup lands on a working three-pillar operating system instead
  * of a blank app. Everything here is ordinary data the owner can rename or delete.
  */
-export async function seedNewAccount(tx: Tx, accountId: number, userId: number) {
+export async function seedNewAccount(tx: Tx, accountId: number, userId: number, businessName = 'My Business') {
+  // The account's first business; everything seeded below belongs to it.
+  const bizIns = await tx.insert(businesses).values({
+    accountId, name: businessName, position: 0, createdBy: userId,
+  });
+  const businessId = Number(bizIns[0].insertId);
+
   // DELIVERY: a sample client with a project board.
   const deliveryIns = await tx.insert(folders).values({
-    accountId, parentId: null, name: 'Sample Client', pillar: 'delivery', position: 0,
+    accountId, businessId, parentId: null, name: 'Sample Client', pillar: 'delivery', position: 0,
     color: '#6366f1', createdBy: userId,
     notes: 'An example client to show how Delivery works. Rename it or delete it.',
   });
@@ -67,7 +73,7 @@ export async function seedNewAccount(tx: Tx, accountId: number, userId: number) 
 
   // OPERATIONS: the internal machine that keeps the business running.
   const opsIns = await tx.insert(folders).values({
-    accountId, parentId: null, name: 'Operations', pillar: 'operations', position: 0,
+    accountId, businessId, parentId: null, name: 'Operations', pillar: 'operations', position: 0,
     color: '#0ea5e9', createdBy: userId,
     notes: 'Internal work that runs the business, separate from client delivery.',
   });
@@ -81,7 +87,7 @@ export async function seedNewAccount(tx: Tx, accountId: number, userId: number) 
 
   // ACQUISITION: one example deal so the pipeline is not empty.
   await tx.insert(deals).values({
-    accountId, title: 'Your first lead', stage: 'lead', value: '0', position: 0,
+    accountId, businessId, title: 'Your first lead', stage: 'lead', value: '0', position: 0,
     notes: 'Add real leads here and drag them across the stages as they progress.',
     createdBy: userId,
   });

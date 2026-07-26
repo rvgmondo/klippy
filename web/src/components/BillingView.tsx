@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import type { BusinessSelection } from './BusinessSwitcher';
 
 interface TreeFolder { id: number; parentId: number | null; name: string }
 
@@ -36,16 +37,18 @@ function money(v: number | string, currency: string) {
 }
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-export function BillingView() {
+export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<DocType>('invoice');
   const [editing, setEditing] = useState<number | 'new' | null>(null);
   const [printing, setPrinting] = useState<number | null>(null);
   const [paying, setPaying] = useState<DocSummary | null>(null);
+  const bizParam = businessId === 'all' ? '' : `&businessId=${businessId}`;
+  const newBusinessId = businessId === 'all' ? undefined : businessId;
 
   const { data } = useQuery({
-    queryKey: ['documents', tab],
-    queryFn: () => apiGet<{ documents: DocSummary[] }>(`/documents?type=${tab}`),
+    queryKey: ['documents', tab, businessId],
+    queryFn: () => apiGet<{ documents: DocSummary[] }>(`/documents?type=${tab}${bizParam}`),
   });
   const docs = data?.documents ?? [];
   const invalidate = () => qc.invalidateQueries({ queryKey: ['documents'] });
@@ -132,14 +135,14 @@ export function BillingView() {
         </div>
       </div>
 
-      {editing && <Editor id={editing} type={tab} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
+      {editing && <Editor id={editing} type={tab} businessId={newBusinessId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
     </div>
   );
 }
 
-function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocType; onClose: () => void; onSaved: () => void }) {
+function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'; type: DocType; businessId?: number; onClose: () => void; onSaved: () => void }) {
   const isNew = id === 'new';
   const existing = useQuery({
     queryKey: ['document', id], enabled: !isNew,
@@ -202,6 +205,7 @@ function Editor({ id, type, onClose, onSaved }: { id: number | 'new'; type: DocT
         type, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, issueDate, dueDate: dueDate || null,
         taxRate, notes: notes.trim() || null,
+        ...(isNew && businessId ? { businessId } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unitPrice: Number(l.unitPrice) || 0 })),
       };
       return isNew ? apiPost('/documents', body) : apiPut(`/documents/${id}`, body);

@@ -7,6 +7,7 @@ import { Plus, MoreHorizontal, ArrowRightLeft, X } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
+import type { BusinessSelection } from './BusinessSwitcher';
 
 type Stage = 'lead' | 'contacted' | 'proposal' | 'won' | 'lost';
 interface Deal {
@@ -24,7 +25,7 @@ const STAGES: { key: Stage; label: string; color: string }[] = [
   { key: 'lost', label: 'Lost', color: '#ef4444' },
 ];
 
-export function PipelineView({ onGoToClients }: { onGoToClients?: () => void }) {
+export function PipelineView({ businessId, onGoToClients }: { businessId: BusinessSelection; onGoToClients?: () => void }) {
   const qc = useQueryClient();
   const { account } = useAuth();
   const cur = account?.currency ?? 'ZAR';
@@ -35,9 +36,11 @@ export function PipelineView({ onGoToClients }: { onGoToClients?: () => void }) 
   };
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const { data } = useQuery({ queryKey: ['deals'], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>('/deals') });
+  const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
+  const { data } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });
   const deals = data?.deals ?? [];
   const invalidate = () => { qc.invalidateQueries({ queryKey: ['deals'] }); };
+  const newBusinessId = businessId === 'all' ? undefined : businessId;
 
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Deal | null>(null);
@@ -93,7 +96,7 @@ export function PipelineView({ onGoToClients }: { onGoToClients?: () => void }) 
         </div>
       </DndContext>
 
-      {adding && <DealEditor onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
+      {adding && <DealEditor businessId={newBusinessId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
       {editing && <DealEditor deal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
     </div>
   );
@@ -165,7 +168,7 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
   );
 }
 
-function DealEditor({ deal, onClose, onSaved }: { deal?: Deal; onClose: () => void; onSaved: () => void }) {
+function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; businessId?: number; onClose: () => void; onSaved: () => void }) {
   const isNew = !deal;
   const [title, setTitle] = useState(deal?.title ?? '');
   const [company, setCompany] = useState(deal?.company ?? '');
@@ -182,6 +185,7 @@ function DealEditor({ deal, onClose, onSaved }: { deal?: Deal; onClose: () => vo
         title: title.trim(), company: company.trim() || null, contactName: contactName.trim() || null,
         contactEmail: contactEmail.trim() || null, contactPhone: contactPhone.trim() || null,
         value: Number(value) || 0, notes: notes.trim() || null,
+        ...(isNew && businessId ? { businessId } : {}),
       };
       return isNew ? apiPost('/deals', body) : apiPatch(`/deals/${deal!.id}`, body);
     },

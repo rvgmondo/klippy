@@ -6,13 +6,16 @@ import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { Priority, Folder } from '../lib/types';
+import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 
 interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
+interface BizRoll { id: number; name: string; open: number; weekSeconds: number }
 interface Dashboard {
   delivery: Bucket; operations: Bucket;
   weekSecondsMine: number;
   upcoming: { id: number; title: string; priority: Priority; dueDate: string; boardId: number }[];
+  businesses: BizRoll[];
   // legacy flat fields still returned by the API
   openCount: number; dueToday: number; overdue: number; flagged: number; weekSecondsAll: number;
 }
@@ -26,27 +29,55 @@ function fmtHours(seconds: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-export function DashboardView({ onNavigate }: { onNavigate?: (v: string) => void }) {
+export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
+  businessId: BusinessSelection;
+  onNavigate?: (v: string) => void;
+  onPickBusiness?: (id: number) => void;
+}) {
   const { account } = useAuth();
   const cur = account?.currency ?? 'ZAR';
   const money = (v: number) => {
     try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(v); }
     catch { return `${cur} ${v.toFixed(0)}`; }
   };
-  const { data } = useQuery({ queryKey: ['dashboard'], queryFn: () => apiGet<Dashboard>('/dashboard') });
-  const deals = useQuery({ queryKey: ['deals'], queryFn: () => apiGet<{ summary: DealSummary }>('/deals') });
+  const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
+  const { data } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`) });
+  const deals = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ summary: DealSummary }>(`/deals${bizQ}`) });
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
 
-  const opsFolders = (folders.data?.folders ?? []).filter((f) => f.parentId === null && (f as Folder & { pillar?: string }).pillar === 'operations');
+  const opsFolders = (folders.data?.folders ?? []).filter((f) =>
+    f.parentId === null && f.pillar === 'operations' && (businessId === 'all' || f.businessId === businessId));
+  const bizList = data?.businesses ?? [];
+  const heading = businessId === 'all'
+    ? (account?.name ?? 'Your business')
+    : (bizList.find((b) => b.id === businessId)?.name ?? account?.name ?? 'Business');
 
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-6">
         <div>
-          <h1 className="text-xl font-semibold text-slate-100">{account?.name ?? 'Your business'}</h1>
-          <p className="text-sm text-slate-500">The three engines of your business, at a glance.</p>
+          <h1 className="text-xl font-semibold text-slate-100">{heading}</h1>
+          <p className="text-sm text-slate-500">
+            {businessId === 'all' ? 'All your businesses, across the three pillars.' : 'The three engines of this business, at a glance.'}
+          </p>
         </div>
+
+        {/* ALL BUSINESSES overview: one card per business, click to drill in. */}
+        {businessId === 'all' && bizList.length > 1 && (
+          <section>
+            <h2 className="mb-2 text-sm font-semibold text-slate-100">Your businesses</h2>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {bizList.map((b) => (
+                <button key={b.id} onClick={() => onPickBusiness?.(b.id)}
+                  className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-900">
+                  <div className="truncate text-sm font-semibold text-slate-100">{b.name}</div>
+                  <div className="mt-1 text-xs text-slate-400">{b.open} open, {fmtHours(b.weekSeconds)} this week</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ACQUISITION */}
         <Pillar icon={<Target size={16} />} title="Acquisition" subtitle="Bring buyers in the door"
