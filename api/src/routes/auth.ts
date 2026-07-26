@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { db } from '../db/client.js';
 import { accounts, users, memberships } from '../db/schema.js';
 import { getMembership, workspacesFor, addMember } from '../lib/membership.js';
+import { seedNewAccount } from '../lib/seed.js';
 import {
   COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify,
   LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS,
@@ -70,6 +71,7 @@ export async function authRoutes(app: FastifyInstance) {
       });
       const userId = Number(userIns[0].insertId);
       await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
+      await seedNewAccount(tx, accountId, userId);
       return { accountId, userId };
     });
 
