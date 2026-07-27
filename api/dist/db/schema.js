@@ -77,12 +77,34 @@ export const memberships = mysqlTable('memberships', {
     uniqueIndex('uniq_membership').on(t.accountId, t.userId),
     index('idx_memberships_user').on(t.userId),
 ]);
-// ---- Folders (nestable tree; top level = the account's "Clients"/"Businesses") ----
+// ---- Businesses (a company you run, inside your one account) ----------------
+// An account can hold several businesses. Each business has its own pillars,
+// folders, pipeline and invoicing; the Home dashboard rolls them all up. This is
+// the layer the owner actually thinks in. (The account above is just the tenant
+// wall that isolates one customer's data from another when Klippy is sold.)
+export const businesses = mysqlTable('businesses', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 150 }).notNull(),
+    color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
+    position: int('position', { unsigned: true }).default(0).notNull(),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_businesses_account').on(t.accountId, t.position),
+]);
+// ---- Folders (nestable tree; top level = a business's "Clients"/areas) ------
 // parentId NULL => top-level folder. Self-referencing for arbitrary depth.
 export const folders = mysqlTable('folders', {
     id: pk(),
     accountId: int('account_id', { unsigned: true }).notNull()
         .references(() => accounts.id, { onDelete: 'cascade' }),
+    // Which business this folder belongs to (top-level folders carry it; subfolders
+    // inherit their root's business). Nullable during rollout, backfilled on migrate.
+    businessId: int('business_id', { unsigned: true })
+        .references(() => businesses.id, { onDelete: 'cascade' }),
     parentId: int('parent_id', { unsigned: true })
         .references(() => folders.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 150 }).notNull(),
@@ -378,6 +400,8 @@ export const documents = mysqlTable('documents', {
     id: pk(),
     accountId: int('account_id', { unsigned: true }).notNull()
         .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true })
+        .references(() => businesses.id, { onDelete: 'cascade' }),
     type: mysqlEnum('type', ['quote', 'invoice']).notNull(),
     seq: int('seq', { unsigned: true }).notNull(), // per-account, per-type running number
     number: varchar('number', { length: 30 }).notNull(), // e.g. INV-0001
@@ -436,6 +460,8 @@ export const deals = mysqlTable('deals', {
     id: pk(),
     accountId: int('account_id', { unsigned: true }).notNull()
         .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true })
+        .references(() => businesses.id, { onDelete: 'cascade' }),
     title: varchar('title', { length: 150 }).notNull(),
     company: varchar('company', { length: 150 }),
     contactName: varchar('contact_name', { length: 120 }),

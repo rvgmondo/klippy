@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { db } from '../db/client.js';
 import { accounts, users, memberships } from '../db/schema.js';
 import { getMembership, workspacesFor } from '../lib/membership.js';
+import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
@@ -59,6 +60,7 @@ export async function authRoutes(app) {
             });
             const userId = Number(userIns[0].insertId);
             await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
+            await seedNewAccount(tx, accountId, userId, accountName);
             return { accountId, userId };
         });
         const [account] = await db.select().from(accounts).where(eq(accounts.id, result.accountId)).limit(1);

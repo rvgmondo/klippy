@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders } from '../db/schema.js';
+import { folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
     parentId: z.number().int().positive().nullable().optional(),
+    businessId: z.number().int().positive().optional(),
     color: z.string().trim().max(20).optional(),
     notes: z.string().max(5000).nullable().optional(),
     pillar: z.enum(['delivery', 'operations']).optional(),
@@ -49,17 +50,33 @@ export async function folderRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const { name, parentId = null, color, notes } = parsed.data;
+        // A subfolder inherits its parent's business; a top-level folder takes the
+        // businessId the client sends (the currently-selected business).
+        let businessId = parsed.data.businessId ?? null;
         if (parentId) {
-            const [parent] = await db.select({ id: folders.id }).from(folders)
+            const [parent] = await db.select({ id: folders.id, businessId: folders.businessId }).from(folders)
                 .where(tenantWhere(folders, accountId, eq(folders.id, parentId))).limit(1);
             if (!parent)
                 return reply.code(400).send({ error: 'Parent folder not found.' });
+            businessId = parent.businessId;
+        }
+        else if (businessId) {
+            const [biz] = await db.select({ id: businesses.id }).from(businesses)
+                .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1);
+            if (!biz)
+                return reply.code(400).send({ error: 'Business not found.' });
+        }
+        else {
+            // No business given for a top-level folder: fall back to the account's first.
+            const [biz] = await db.select({ id: businesses.id }).from(businesses)
+                .where(tenantWhere(businesses, accountId)).orderBy(asc(businesses.position)).limit(1);
+            businessId = biz?.id ?? null;
         }
         const position = await nextPosition(folders, parentId === null
             ? sql `account_id = ${accountId} AND parent_id IS NULL`
             : sql `account_id = ${accountId} AND parent_id = ${parentId}`);
         const ins = await db.insert(folders).values(withTenant(accountId, {
-            parentId, name, color: color ?? '#6366f1', notes: notes ?? null, pillar: parsed.data.pillar ?? 'delivery', position, createdBy: userId,
+            parentId, businessId, name, color: color ?? '#6366f1', notes: notes ?? null, pillar: parsed.data.pillar ?? 'delivery', position, createdBy: userId,
         }));
         const [created] = await db.select().from(folders)
             .where(tenantWhere(folders, accountId, eq(folders.id, Number(ins[0].insertId)))).limit(1);

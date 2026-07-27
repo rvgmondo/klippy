@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';

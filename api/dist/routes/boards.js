@@ -114,5 +114,19 @@ export async function boardRoutes(app) {
             return reply.code(404).send({ error: 'Board not found.' });
         return { ok: true };
     });
+    // Persist sibling order after drag/drop within a folder.
+    app.post('/api/v1/boards/reorder', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const body = z.object({ orderedIds: z.array(z.number().int().positive()).max(500) }).safeParse(req.body);
+        if (!body.success)
+            return reply.code(400).send({ error: 'orderedIds required.' });
+        await db.transaction(async (tx) => {
+            for (let i = 0; i < body.data.orderedIds.length; i++) {
+                await tx.update(boards).set({ position: i })
+                    .where(and(eq(boards.accountId, accountId), eq(boards.id, body.data.orderedIds[i])));
+            }
+        });
+        return { ok: true };
+    });
 }
 //# sourceMappingURL=boards.js.map

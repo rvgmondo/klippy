@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent,
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners,
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -41,7 +42,7 @@ function ask(prompt: string, current: string): string | null {
 // Drag handle shared by folder rows and board rows; only shows on row hover.
 function Grip({ setRef, attributes, listeners }: {
   setRef: (el: HTMLElement | null) => void;
-  attributes: Record<string, unknown>; listeners: Record<string, unknown> | undefined;
+  attributes: DraggableAttributes; listeners: DraggableSyntheticListeners;
 }) {
   return (
     <span ref={setRef} {...attributes} {...listeners}

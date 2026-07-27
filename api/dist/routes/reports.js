@@ -14,16 +14,21 @@ export async function reportRoutes(app) {
      */
     app.get('/api/v1/reports/time', async (req, reply) => {
         const { accountId } = authOf(req);
-        const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
+        const q = z.object({
+            from: dateStr, to: dateStr,
+            businessId: z.coerce.number().int().positive().optional(),
+        }).safeParse(req.query);
         if (!q.success)
             return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
+        const onlyBusiness = q.data.businessId;
         const start = new Date(`${q.data.from}T00:00:00.000Z`);
         const end = new Date(`${q.data.to}T23:59:59.999Z`);
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
         const currency = account?.currency ?? 'ZAR';
         // Every folder, so we can walk ancestors for rate inheritance and roll-up.
         const allFolders = await db.select({
-            id: folders.id, parentId: folders.parentId, name: folders.name, hourlyRate: folders.hourlyRate,
+            id: folders.id, parentId: folders.parentId, name: folders.name,
+            hourlyRate: folders.hourlyRate, businessId: folders.businessId,
         }).from(folders).where(tenantWhere(folders, accountId));
         const byId = new Map(allFolders.map((f) => [f.id, f]));
         const rootOf = (folderId) => {
@@ -60,8 +65,11 @@ export async function reportRoutes(app) {
             const secs = Number(e.seconds ?? 0);
             if (!secs)
                 continue;
-            totalSeconds += secs;
             const root = rootOf(e.folderId);
+            // When scoped to one business, only count work under that business.
+            if (onlyBusiness !== undefined && root?.businessId !== onlyBusiness)
+                continue;
+            totalSeconds += secs;
             if (root) {
                 const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0 };
                 cur.seconds += secs;

@@ -3,7 +3,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { accounts, memberships } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
-import { getMembership, workspacesFor, addMember } from '../lib/membership.js';
+import { getMembership, workspacesFor } from '../lib/membership.js';
+import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, signToken, slugify } from '../lib/auth.js';
 async function uniqueSlug(base) {
     const slug = slugify(base);
@@ -46,9 +47,13 @@ export async function workspaceRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: 'Give the workspace a name.' });
         const slug = await uniqueSlug(parsed.data.name);
-        const ins = await db.insert(accounts).values({ name: parsed.data.name, slug });
-        const accountId = Number(ins[0].insertId);
-        await addMember(accountId, userId, 'owner');
+        const accountId = await db.transaction(async (tx) => {
+            const ins = await tx.insert(accounts).values({ name: parsed.data.name, slug });
+            const newId = Number(ins[0].insertId);
+            await tx.insert(memberships).values({ accountId: newId, userId, role: 'owner' });
+            await seedNewAccount(tx, newId, userId, parsed.data.name);
+            return newId;
+        });
         // Drop straight into the new workspace.
         reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: accountId, role: 'owner' }), cookieOptions());
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);

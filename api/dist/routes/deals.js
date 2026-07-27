@@ -5,6 +5,7 @@ import { deals, folders, boards, boardColumns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { resolveBusinessId } from '../lib/business.js';
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'];
 const stage = z.enum(STAGES);
 const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -15,11 +16,13 @@ const DEFAULT_COLUMNS = [
 ];
 export async function dealRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
-    // All deals (frontend groups by stage) + a pipeline summary.
+    // All deals (frontend groups by stage) + a pipeline summary. Optional ?businessId filter.
     app.get('/api/v1/deals', async (req) => {
         const { accountId } = authOf(req);
+        const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+        const bizFilter = q.success && q.data.businessId ? eq(deals.businessId, q.data.businessId) : undefined;
         const rows = await db.select().from(deals)
-            .where(tenantWhere(deals, accountId))
+            .where(tenantWhere(deals, accountId, bizFilter))
             .orderBy(asc(deals.stage), asc(deals.position));
         const openStages = ['lead', 'contacted', 'proposal'];
         const open = rows.filter((d) => openStages.includes(d.stage));
@@ -48,14 +51,16 @@ export async function dealRoutes(app) {
             value: z.number().min(0).max(1_000_000_000).optional(),
             stage: stage.optional(),
             notes: z.string().max(5000).nullable().optional(),
+            businessId: z.number().int().positive().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
         const st = d.stage ?? 'lead';
+        const businessId = await resolveBusinessId(accountId, d.businessId);
         const position = await nextPosition(deals, sql `account_id = ${accountId} AND stage = ${st}`);
         const ins = await db.insert(deals).values(withTenant(accountId, {
-            title: d.title, company: d.company ?? null, contactName: d.contactName ?? null,
+            businessId, title: d.title, company: d.company ?? null, contactName: d.contactName ?? null,
             contactEmail: d.contactEmail || null, contactPhone: d.contactPhone ?? null,
             value: money(d.value ?? 0), stage: st, notes: d.notes ?? null, position, createdBy: userId,
         }));
@@ -142,7 +147,7 @@ export async function dealRoutes(app) {
         const folderId = await db.transaction(async (tx) => {
             const position = await nextPosition(folders, sql `account_id = ${accountId} AND parent_id IS NULL`);
             const fIns = await tx.insert(folders).values(withTenant(accountId, {
-                parentId: null, name, pillar: 'delivery', position, createdBy: userId,
+                parentId: null, businessId: deal.businessId, name, pillar: 'delivery', position, createdBy: userId,
             }));
             const fid = Number(fIns[0].insertId);
             const bIns = await tx.insert(boards).values(withTenant(accountId, {
