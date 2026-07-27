@@ -30,6 +30,12 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
     if (data) { setTitle(data.task.title); setDescription(data.task.description ?? ''); }
   }, [data?.task.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: ['board', boardId] });
