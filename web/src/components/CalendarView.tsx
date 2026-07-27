@@ -110,7 +110,7 @@ function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<
                 className="grid h-5 w-5 place-items-center rounded text-slate-500 opacity-0 hover:bg-slate-800 hover:text-violet-300 focus:opacity-100 group-hover/day:opacity-100">
                 <Plus size={12} />
               </button>
-              <span className={`text-[11px] sm:text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : inMonth ? 'text-slate-400' : 'text-slate-600'}`}>{d.getDate()}</span>
+              <span className={`text-[11px] sm:text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : inMonth ? 'text-slate-400' : 'text-slate-500'}`}>{d.getDate()}</span>
             </div>
             <div className="space-y-1">
               {list.slice(0, max).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}

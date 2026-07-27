@@ -168,7 +168,7 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
                   onChange={(e) => setNewComment(e.target.value)} />
               </div>
               <button onClick={() => newComment.trim() && addComment.mutate(newComment.trim())}
-                className="mt-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500">Comment</button>
+                className="mt-1 rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Comment</button>
               <div className="mt-3 space-y-3">
                 {data.comments.map((c) => (
                   <div key={c.id} className="text-sm">

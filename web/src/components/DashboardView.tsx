@@ -1,7 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import {
-  AlarmClock, CalendarClock, Flag, ListTodo, Target, Truck, Settings2, ArrowRight,
-} from 'lucide-react';
+import { Target, Truck, Settings2, ArrowRight, ArrowUpRight } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -16,17 +14,23 @@ interface Dashboard {
   weekSecondsMine: number;
   upcoming: { id: number; title: string; priority: Priority; dueDate: string; boardId: number }[];
   businesses: BizRoll[];
-  // legacy flat fields still returned by the API
   openCount: number; dueToday: number; overdue: number; flagged: number; weekSecondsAll: number;
 }
 interface DealSummary { openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number }
 
 const PRIORITY_COLOR: Record<Priority, string> = {
-  none: '#6366f1', low: '#64748b', medium: '#eab308', high: '#f97316', urgent: '#ef4444',
+  none: '#6b7280', low: '#64748b', medium: '#eab308', high: '#f97316', urgent: '#ef4444',
 };
 function fmtHours(seconds: number): string {
   const h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+}
+function todayLabel(): string {
+  return new Date().toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
 export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
@@ -34,7 +38,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   onNavigate?: (v: string) => void;
   onPickBusiness?: (id: number) => void;
 }) {
-  const { account } = useAuth();
+  const { user, account } = useAuth();
   const cur = account?.currency ?? 'ZAR';
   const money = (v: number) => {
     try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(v); }
@@ -46,97 +50,110 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
 
+  const d = data;
+  const ds = deals.data?.summary;
+  const bizList = d?.businesses ?? [];
   const opsFolders = (folders.data?.folders ?? []).filter((f) =>
     f.parentId === null && f.pillar === 'operations' && (businessId === 'all' || f.businessId === businessId));
-  const bizList = data?.businesses ?? [];
+
   const heading = businessId === 'all'
-    ? (account?.name ?? 'Your business')
+    ? `${greeting()}, ${user?.name?.split(' ')[0] ?? 'there'}`
     : (bizList.find((b) => b.id === businessId)?.name ?? account?.name ?? 'Business');
+  const sub = businessId === 'all'
+    ? "Here's where your businesses stand today."
+    : 'The three engines of this business, at a glance.';
 
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-6xl space-y-6">
-        <div>
-          <h1 className="text-xl font-semibold text-slate-100">{heading}</h1>
-          <p className="text-sm text-slate-500">
-            {businessId === 'all' ? 'All your businesses, across the three pillars.' : 'The three engines of this business, at a glance.'}
-          </p>
+      <div className="mx-auto max-w-6xl space-y-5">
+        {/* Hero */}
+        <div className="flex items-end justify-between gap-4">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-slate-100">{heading}</h1>
+            <p className="mt-0.5 text-sm text-slate-500">{sub}</p>
+          </div>
+          <div className="hidden text-right text-xs text-slate-500 sm:block">
+            <span className="num text-slate-300">{todayLabel()}</span>
+            {businessId === 'all' && bizList.length > 0 && (
+              <><span className="mx-2 inline-block h-1 w-1 rounded-full bg-slate-600 align-middle"></span>{bizList.length} {bizList.length === 1 ? 'business' : 'businesses'}</>
+            )}
+          </div>
         </div>
 
-        {/* ALL BUSINESSES overview: one card per business, click to drill in. */}
-        {businessId === 'all' && bizList.length > 1 && (
-          <section>
-            <h2 className="mb-2 text-sm font-semibold text-slate-100">Your businesses</h2>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {bizList.map((b) => (
-                <button key={b.id} onClick={() => onPickBusiness?.(b.id)}
-                  className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-900">
-                  <div className="truncate text-sm font-semibold text-slate-100">{b.name}</div>
-                  <div className="mt-1 text-xs text-slate-400">{b.open} open, {fmtHours(b.weekSeconds)} this week</div>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        {/* Pillar bento */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <PillarCard
+            icon={<Target size={15} />} name="Acquisition" accent
+            status="Bring buyers in" hero={money(ds?.pipelineValue ?? 0)} heroLabel="Pipeline value"
+            onOpen={onNavigate ? () => onNavigate('pipeline') : undefined}
+            subs={[['Open deals', String(ds?.openCount ?? 0)], ['Won / mo', String(ds?.wonThisMonth ?? 0)], ['Won value', money(ds?.wonValueThisMonth ?? 0)]]} />
+          <PillarCard
+            icon={<Truck size={15} />} name="Delivery"
+            status={`${d?.delivery.open ?? 0} open`} hero={String(d?.delivery.open ?? 0)} heroLabel="Open work"
+            onOpen={onNavigate ? () => onNavigate('reports') : undefined}
+            subs={[['Due today', String(d?.delivery.dueToday ?? 0)], ['Overdue', String(d?.delivery.overdue ?? 0)], ['This week', fmtHours(d?.delivery.weekSeconds ?? 0)]]} />
+          <PillarCard
+            icon={<Settings2 size={15} />} name="Operations"
+            status={`${opsFolders.length} area${opsFolders.length === 1 ? '' : 's'}`} hero={String(d?.operations.open ?? 0)} heroLabel="Open work"
+            subs={[['Due today', String(d?.operations.dueToday ?? 0)], ['Overdue', String(d?.operations.overdue ?? 0)], ['This week', fmtHours(d?.operations.weekSeconds ?? 0)]]} />
+        </div>
 
-        {/* ACQUISITION */}
-        <Pillar icon={<Target size={16} />} title="Acquisition" subtitle="Bring buyers in the door"
-          action={onNavigate ? { label: 'Open pipeline', onClick: () => onNavigate('pipeline') } : undefined}>
-          <Tile label="Open deals" value={String(deals.data?.summary.openCount ?? 0)} icon={<Target size={18} />} color="#8b5cf6" />
-          <Tile label="Pipeline value" value={money(deals.data?.summary.pipelineValue ?? 0)} icon={<Target size={18} />} color="#6366f1" />
-          <Tile label="Won this month" value={String(deals.data?.summary.wonThisMonth ?? 0)} icon={<Target size={18} />} color="#22c55e" />
-          <Tile label="Won value (month)" value={money(deals.data?.summary.wonValueThisMonth ?? 0)} icon={<Target size={18} />} color="#22c55e" />
-        </Pillar>
+        {/* Up next + side */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <Panel className="lg:col-span-2">
+            <PanelHead title="Up next" meta="delivery" action={onNavigate ? { label: 'Calendar', onClick: () => onNavigate('calendar') } : undefined} />
+            {(d?.upcoming.length ?? 0) === 0 ? (
+              <p className="py-6 text-center text-sm text-slate-500">Nothing due. Clear runway.</p>
+            ) : (
+              <div className="-mx-1">
+                {d!.upcoming.slice(0, 6).map((t) => (
+                  <button key={t.id} onClick={() => setOpenTask({ id: t.id, boardId: t.boardId })}
+                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-slate-800/50">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
+                    <span className="flex-1 truncate text-sm text-slate-200">{t.title}</span>
+                    <span className="num text-[11px] text-slate-500">{t.dueDate}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </Panel>
 
-        {/* DELIVERY */}
-        <Pillar icon={<Truck size={16} />} title="Delivery" subtitle="Serve the customer, get paid"
-          action={onNavigate ? { label: 'Reports', onClick: () => onNavigate('reports') } : undefined}>
-          <Tile label="Open work" value={String(data?.delivery.open ?? 0)} icon={<ListTodo size={18} />} color="#8b5cf6" />
-          <Tile label="Due today" value={String(data?.delivery.dueToday ?? 0)} icon={<CalendarClock size={18} />} color="#3b82f6" />
-          <Tile label="Overdue" value={String(data?.delivery.overdue ?? 0)} icon={<AlarmClock size={18} />} color="#ef4444" />
-          <Tile label="Flagged" value={String(data?.delivery.flagged ?? 0)} icon={<Flag size={18} />} color="#f97316" />
-          <Tile label="Time this week (client work)" value={fmtHours(data?.delivery.weekSeconds ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
-          <Tile label="Time this week (you)" value={fmtHours(data?.weekSecondsMine ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
-        </Pillar>
+          {businessId === 'all' && bizList.length > 1 ? (
+            <Panel>
+              <PanelHead title="Businesses" meta="tap to focus" />
+              <div className="-mx-1">
+                {bizList.map((b) => (
+                  <button key={b.id} onClick={() => onPickBusiness?.(b.id)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-slate-800/50">
+                    <span className="flex-1 truncate text-sm text-slate-200">{b.name}</span>
+                    <span className="num text-[11px] text-slate-500">{b.open} open, {fmtHours(b.weekSeconds)}</span>
+                    <ArrowUpRight size={13} className="text-slate-600" />
+                  </button>
+                ))}
+              </div>
+            </Panel>
+          ) : (
+            <Panel>
+              <PanelHead title="This week" meta="your time" />
+              <div className="flex h-[calc(100%-2rem)] flex-col justify-center">
+                <div className="num text-4xl font-semibold text-violet-300">{fmtHours(d?.weekSecondsMine ?? 0)}</div>
+                <div className="mt-1 text-xs text-slate-500">tracked by you</div>
+              </div>
+            </Panel>
+          )}
+        </div>
 
-        {(data?.upcoming.length ?? 0) > 0 && (
-          <div>
-            <h3 className="mb-2 text-sm font-semibold text-slate-300">Coming up</h3>
-            <div className="space-y-2">
-              {data!.upcoming.map((t) => (
-                <button key={t.id} onClick={() => setOpenTask({ id: t.id, boardId: t.boardId })}
-                  className="flex w-full items-center gap-3 rounded-xl border border-slate-800 p-3 text-left hover:bg-slate-900">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
-                  <span className="flex-1 truncate text-sm text-slate-200">{t.title}</span>
-                  <span className="text-xs text-slate-500">{t.dueDate}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* KPI strip */}
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <Kpi label="Won this month" value={money(ds?.wonValueThisMonth ?? 0)} accent />
+          <Kpi label="Pipeline" value={money(ds?.pipelineValue ?? 0)} />
+          <Kpi label="Overdue" value={String((d?.delivery.overdue ?? 0) + (d?.operations.overdue ?? 0))} />
+          <Kpi label="Time this week" value={fmtHours(d?.weekSecondsAll ?? 0)} />
+        </div>
 
-        {/* OPERATIONS */}
-        <Pillar icon={<Settings2 size={16} />} title="Operations" subtitle="Run the machine (internal work)">
-          <Tile label="Open work" value={String(data?.operations.open ?? 0)} icon={<ListTodo size={18} />} color="#8b5cf6" />
-          <Tile label="Due today" value={String(data?.operations.dueToday ?? 0)} icon={<CalendarClock size={18} />} color="#3b82f6" />
-          <Tile label="Overdue" value={String(data?.operations.overdue ?? 0)} icon={<AlarmClock size={18} />} color="#ef4444" />
-          <Tile label="Time this week" value={fmtHours(data?.operations.weekSeconds ?? 0)} icon={<CalendarClock size={18} />} color="#06b6d4" />
-        </Pillar>
-
-        {/* Internal areas list (Operations detail) */}
-        {opsFolders.length > 0 ? (
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {opsFolders.slice(0, 8).map((f) => (
-              <button key={f.id} onClick={() => onNavigate?.('board')}
-                className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-900">
-                <div className="text-xs text-slate-400">Internal area</div>
-                <div className="truncate text-lg font-semibold text-slate-100">{f.name}</div>
-              </button>
-            ))}
-          </div>
-        ) : (
+        {opsFolders.length === 0 && businessId !== 'all' && (
           <div className="rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
-            No internal areas yet. In the sidebar, add a folder and set it to <span className="text-slate-200">Operations</span> for things like admin, hiring or finance, separate from client work.
+            No internal areas yet. In the sidebar, add a folder and set it to <span className="text-slate-200">Operations</span> for admin, hiring or finance, separate from client work.
           </div>
         )}
       </div>
@@ -146,35 +163,58 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   );
 }
 
-function Pillar({ icon, title, subtitle, action, children }: {
-  icon: ReactNode; title: string; subtitle: string; action?: { label: string; onClick: () => void }; children: ReactNode;
+function PillarCard({ icon, name, status, hero, heroLabel, subs, accent, onOpen }: {
+  icon: ReactNode; name: string; status: string; hero: string; heroLabel: string;
+  subs: [string, string][]; accent?: boolean; onOpen?: () => void;
 }) {
   return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-violet-600/15 text-violet-300">{icon}</span>
-        <div>
-          <h2 className="text-sm font-semibold text-slate-100">{title}</h2>
-          <p className="text-[11px] text-slate-500">{subtitle}</p>
-        </div>
-        {action && (
-          <button onClick={action.onClick} className="ml-auto flex items-center gap-1 text-xs text-violet-300 hover:text-violet-200">
-            {action.label} <ArrowRight size={13} />
+    <div className="group rounded-2xl border border-slate-800 bg-slate-900 p-5 transition hover:-translate-y-0.5 hover:border-slate-700">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-slate-800 text-violet-300">{icon}</span>
+        <span className="font-display text-[15px] font-semibold text-slate-100">{name}</span>
+        {onOpen ? (
+          <button onClick={onOpen} className="ml-auto flex items-center gap-1 text-[11px] uppercase tracking-wide text-violet-300 opacity-70 hover:opacity-100">
+            {status} <ArrowRight size={12} />
           </button>
+        ) : (
+          <span className="ml-auto text-[11px] uppercase tracking-wide text-slate-500">{status}</span>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">{children}</div>
-    </section>
+      <div className={`num text-4xl font-semibold leading-none ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{hero}</div>
+      <div className="mt-1 text-[11px] uppercase tracking-wide text-slate-500">{heroLabel}</div>
+      <div className="mt-4 flex gap-5 border-t border-slate-800 pt-4">
+        {subs.map(([k, v]) => (
+          <div key={k}>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">{k}</div>
+            <div className="num mt-1 text-base text-slate-200">{v}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
-function Tile({ label, value, icon, color }: { label: string; value: string; icon: ReactNode; color: string }) {
+function Panel({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <div className={`rounded-2xl border border-slate-800 bg-slate-900 p-5 ${className}`}>{children}</div>;
+}
+function PanelHead({ title, meta, action }: { title: string; meta?: string; action?: { label: string; onClick: () => void } }) {
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-      <div className="mb-2 flex items-center gap-2 text-xs text-slate-400">
-        <span style={{ color }}>{icon}</span> {label}
-      </div>
-      <div className="text-2xl font-semibold text-slate-100">{value}</div>
+    <div className="mb-3 flex items-center gap-2">
+      <span className="font-display text-sm font-semibold text-slate-100">{title}</span>
+      {meta && <span className="text-[11px] text-slate-500">{meta}</span>}
+      {action && (
+        <button onClick={action.onClick} className="ml-auto flex items-center gap-1 text-[11px] text-violet-300 hover:opacity-80">
+          {action.label} <ArrowRight size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+function Kpi({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className={`num mt-1.5 text-xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
     </div>
   );
 }

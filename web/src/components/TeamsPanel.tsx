@@ -61,7 +61,7 @@ export function TeamsPanel() {
           ))}
         </div>
         <button onClick={() => name.trim() && create.mutate()} disabled={!name.trim()}
-          className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-500 disabled:opacity-60">
+          className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-sm text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
           <Plus size={15} /> Add team
         </button>
       </div>

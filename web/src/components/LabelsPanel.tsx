@@ -28,7 +28,7 @@ export function LabelsPanel() {
             <button onClick={() => { if (confirm(`Delete label "${l.name}"?`)) del.mutate(l.id); }} className="hidden text-slate-500 hover:text-red-400 group-hover:block"><Trash2 size={14} /></button>
           </div>
         ))}
-        {labels.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-600">No labels yet.</p>}
+        {labels.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-500">No labels yet.</p>}
       </div>
 
       <div className="rounded-lg border border-slate-700 bg-slate-900 p-3">
@@ -42,7 +42,7 @@ export function LabelsPanel() {
             onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) create.mutate(); }}
             placeholder="New label name"
             className="flex-1 rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
-          <button onClick={() => name.trim() && create.mutate()} className="grid w-10 place-items-center rounded-lg bg-violet-600 text-white hover:bg-violet-500"><Plus size={16} /></button>
+          <button onClick={() => name.trim() && create.mutate()} className="grid w-10 place-items-center rounded-lg bg-violet-600 text-[var(--accent-ink)] hover:bg-violet-500"><Plus size={16} /></button>
         </div>
       </div>
     </div>

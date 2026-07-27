@@ -82,7 +82,7 @@ export function TimeSection({ taskId }: { taskId: number }) {
             value={note} onChange={(e) => setNote(e.target.value)} />
           <button
             onClick={() => { const m = parseInt(minutes, 10); if (m > 0) manual.mutate({ minutes: m, note: note.trim() || undefined }); }}
-            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500">Add</button>
+            className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Add</button>
         </div>
       )}
 

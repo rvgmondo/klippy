@@ -47,7 +47,7 @@ function Grip({ setRef, attributes, listeners }: {
   return (
     <span ref={setRef} {...attributes} {...listeners}
       title="Drag to reorder"
-      className="shrink-0 cursor-grab text-slate-600 opacity-0 hover:text-slate-300 active:cursor-grabbing group-hover:opacity-100">
+      className="shrink-0 cursor-grab text-slate-500 opacity-0 hover:text-slate-300 active:cursor-grabbing group-hover:opacity-100 max-lg:opacity-100">
       <GripVertical size={13} />
     </span>
   );
@@ -70,7 +70,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         {account?.hasLogo ? (
           <img src="/api/v1/account/logo" alt="" className="h-7 w-7 shrink-0 rounded-lg object-contain" />
         ) : (
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 text-sm font-bold text-white">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[var(--accent)] text-sm font-bold text-[var(--accent-ink)]">
             {(account?.brandName || 'Klippy')[0]!.toUpperCase()}
           </div>
         )}
@@ -90,8 +90,10 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
           return (
             <button key={n.key} onClick={() => onNavigate(n.key)}
               className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
-                active ? 'bg-violet-600/15 text-violet-200' : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
-              <Icon size={16} className="shrink-0" /> {n.label}
+                active
+                  ? 'bg-[var(--accent-quiet)] text-violet-300'
+                  : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
+              <Icon size={16} className={`shrink-0 ${active ? 'text-violet-300' : ''}`} /> {n.label}
             </button>
           );
         })}
@@ -100,7 +102,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
       {/* Boards tree */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {shown.length === 0 && (
-          <p className="px-2 py-6 text-center text-[11px] text-slate-600">No businesses yet.</p>
+          <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
         )}
         {shown.map((biz) => (
           <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders}
@@ -145,7 +147,7 @@ function BusinessBlock({ business, all, showHeader, folderLabelSingular, folderL
 
       <SectionHeader label={`Delivery / ${folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
       {deliveryRoots.length === 0 && (
-        <p className="px-2 py-2 text-center text-[11px] text-slate-600">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
+        <p className="px-2 py-2 text-center text-[11px] text-slate-500">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
       )}
       <FolderList folders={deliveryRoots} all={all} depth={0}
         selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
@@ -153,7 +155,7 @@ function BusinessBlock({ business, all, showHeader, folderLabelSingular, folderL
       <div className="mt-4">
         <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
         {opsRoots.length === 0 && (
-          <p className="px-2 py-2 text-center text-[11px] text-slate-600">Admin, hiring, finance...</p>
+          <p className="px-2 py-2 text-center text-[11px] text-slate-500">Admin, hiring, finance...</p>
         )}
         <FolderList folders={opsRoots} all={all} depth={0}
           selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
@@ -292,11 +294,11 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
         <button onClick={() => setOpen(!open)} className="flex-1 truncate text-left text-sm text-slate-200">{folder.name}</button>
         <button title="Add board"
           onClick={() => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); }}
-          className="hidden text-slate-500 hover:text-slate-200 group-hover:block">
+          className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block">
           <Plus size={14} />
         </button>
         <Menu
-          trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block"><MoreHorizontal size={14} /></span>}
+          trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={14} /></span>}
           items={[
             { label: 'Add board', onClick: () => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); } },
             { label: 'Add subfolder', onClick: () => { const n = ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
@@ -384,7 +386,7 @@ function BoardRow({ board, folderId, depth, selected, onSelect }: {
         <span className="truncate">{board.name}</span>
       </button>
       <Menu
-        trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block"><MoreHorizontal size={13} /></span>}
+        trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={13} /></span>}
         items={[
           { label: 'Rename', onClick: () => { const n = ask('Rename board', board.name); if (n) rename.mutate(n); } },
           { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete board "${board.name}" and its cards? This cannot be undone.`)) del.mutate(); } },

@@ -122,7 +122,7 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
       <div className="mb-3 flex justify-center gap-2">
         {PRESETS.map((m) => (
           <button key={m} onClick={() => startCountdown(m)}
-            className={`rounded-lg px-3 py-1 text-xs ${mode === 'countdown' && target === m * 60 ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+            className={`rounded-lg px-3 py-1 text-xs ${mode === 'countdown' && target === m * 60 ? 'bg-violet-600 text-[var(--accent-ink)]' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
             {m}m
           </button>
         ))}
@@ -137,12 +137,12 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-center gap-2">
         {active ? (
-          <button onClick={() => setActive(false)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+          <button onClick={() => setActive(false)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
             <Pause size={15} /> Pause
           </button>
         ) : (
           <button onClick={() => (secs > 0 || mode === 'stopwatch' ? setActive(true) : startCountdown(25))}
-            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
             <Play size={15} /> Start
           </button>
         )}

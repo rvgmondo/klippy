@@ -81,7 +81,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
             ))}
           </div>
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500">
+            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
             <Plus size={15} /> New {tab}
           </button>
         </div>
@@ -257,7 +257,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
                 </div>
                 <div className="mt-2 flex gap-2">
                   <button onClick={() => timeFolder ? pull.mutate() : setError('Pick a client first.')} disabled={pull.isPending}
-                    className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500 disabled:opacity-60">
+                    className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
                     {pull.isPending ? 'Loading...' : 'Add lines from time'}
                   </button>
                   <button onClick={() => setShowTime(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
@@ -305,7 +305,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         {error && <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         <div className="mt-4 flex gap-2">
           <button onClick={() => clientName.trim() ? save.mutate() : setError('Client name is required.')} disabled={save.isPending}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
@@ -353,7 +353,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
           <input className={field} type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
           <input className={field + ' w-24'} placeholder="Method" value={method} onChange={(e) => setMethod(e.target.value)} />
           <button onClick={() => Number(amount) > 0 && add.mutate()} disabled={!(Number(amount) > 0)}
-            className="rounded-lg bg-violet-600 px-3 py-2 text-sm text-white hover:bg-violet-500 disabled:opacity-60">Record</button>
+            className="rounded-lg bg-violet-600 px-3 py-2 text-sm text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">Record</button>
         </div>
 
         <div className="space-y-1">
@@ -363,7 +363,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
               <span className="text-slate-300">{p.paidOn}</span>
               <span className="text-slate-500">{p.method}</span>
               <span className="ml-auto tabular-nums text-slate-200">{money(p.amount, doc.currency)}</span>
-              <button onClick={() => del.mutate(p.id)} className="text-slate-600 hover:text-red-400"><Trash2 size={13} /></button>
+              <button onClick={() => del.mutate(p.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={13} /></button>
             </div>
           ))}
         </div>
@@ -383,7 +383,7 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
       <div className="mx-auto my-4 max-w-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="no-print mb-3 flex justify-end gap-2">
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
             <Printer size={15} /> Print / Save as PDF
           </button>
           <button onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Close</button>
@@ -399,7 +399,7 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
             </div>
             <div className="text-right">
               <div className="text-2xl font-bold uppercase tracking-wide">{d.type}</div>
-              <div className="text-sm text-slate-600">{d.number}</div>
+              <div className="text-sm text-slate-500">{d.number}</div>
             </div>
           </div>
 
@@ -407,8 +407,8 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
             <div>
               <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Bill to</div>
               <div className="font-medium">{d.clientName}</div>
-              {d.clientEmail && <div className="text-slate-600">{d.clientEmail}</div>}
-              {d.clientAddress && <div className="whitespace-pre-wrap text-slate-600">{d.clientAddress}</div>}
+              {d.clientEmail && <div className="text-slate-500">{d.clientEmail}</div>}
+              {d.clientAddress && <div className="whitespace-pre-wrap text-slate-500">{d.clientAddress}</div>}
             </div>
             <div className="text-right">
               <div><span className="text-slate-500">Issued: </span>{d.issueDate}</div>

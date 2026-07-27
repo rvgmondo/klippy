@@ -101,7 +101,7 @@ function WorkspaceTab() {
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
       {isAdmin && (
         <div className="flex items-center gap-3">
-          <button type="submit" disabled={busy} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+          <button type="submit" disabled={busy} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {busy ? 'Saving...' : 'Save changes'}
           </button>
           {saved && <span className="text-sm text-green-400">Saved</span>}

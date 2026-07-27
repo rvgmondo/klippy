@@ -58,7 +58,7 @@ export function ProfilePanel() {
         <label className="block text-xs font-medium text-slate-400">Your name</label>
         <input className={field} value={name} onChange={(e) => setName(e.target.value)} />
         <button type="submit" disabled={busy || !name.trim()}
-          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
           Save name
         </button>
       </form>
@@ -93,7 +93,7 @@ export function ProfilePanel() {
         <input className={field} type="password" placeholder="Confirm new password" autoComplete="new-password"
           value={confirm} onChange={(e) => setConfirm(e.target.value)} />
         <button type="submit" disabled={busy || !current || next.length < 8}
-          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+          className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
           Change password
         </button>
       </form>

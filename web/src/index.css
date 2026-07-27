@@ -11,52 +11,97 @@
  *  - The accent re-points the violet ramp at whichever colour the user picked.
  */
 
+/*
+ * MIDNIGHT SIGNAL — warm charcoal, one signal accent, mono numerals.
+ * The whole app is re-skinned by remapping Tailwind's slate + violet ramps to
+ * CSS variables. slate = the neutral surface/text ramp; violet = the accent.
+ * `--accent` / `--accent-ink` are the semantic accent tokens (ink = text that
+ * sits ON an accent fill, dark for bright accents so nothing goes white-on-lime).
+ */
 :root {
   color-scheme: dark;
-  --app-bg: #0b0f17;
-  --app-fg: #e5e7eb;
+  --app-bg: #0e1013;
+  --app-fg: #e7e9ee;
+
+  /* Neutral ramp: warm charcoal surfaces -> soft off-white text. */
+  --color-slate-950: #0e1013;
+  --color-slate-900: #15181e;
+  --color-slate-800: #242932;
+  --color-slate-700: #343b46;
+  --color-slate-600: #464e5b;
+  --color-slate-500: #868d99;  /* muted text, AA on charcoal */
+  --color-slate-400: #a7adb8;
+  --color-slate-300: #c3c8d0;
+  --color-slate-200: #d9dce2;
+  --color-slate-100: #e7e9ee;
+  --color-slate-50:  #f4f5f7;
+
+  /* Default accent: lime signal (dark ink on the bright fill). */
+  --accent: #c9f24e; --accent-ink: #14180b; --accent-quiet: rgba(201, 242, 78, .13);
+  --color-violet-700: #9fd12f; --color-violet-600: #c9f24e; --color-violet-500: #d2f65f;
+  --color-violet-400: #c9f24e; --color-violet-300: #d8f877; --color-violet-200: #e6fbaa;
 }
 
-/* ---- Light theme: invert the slate ramp ---------------------------------- */
+/* ---- Light theme: clean neutral, same accent -----------------------------
+ * Inverts the neutral ramp (surface -> near-white, text -> near-black). */
 [data-theme="light"] {
   color-scheme: light;
-  --app-bg: #f8fafc;
-  --app-fg: #0f172a;
+  --app-bg: #f6f7f9;
+  --app-fg: #14171c;
 
   --color-slate-950: #ffffff;
-  --color-slate-900: #f1f5f9;
-  --color-slate-800: #e2e8f0;
-  --color-slate-700: #cbd5e1;
-  --color-slate-600: #94a3b8;
-  --color-slate-500: #64748b;
-  --color-slate-400: #475569;
-  --color-slate-300: #334155;
-  --color-slate-200: #1e293b;
-  --color-slate-100: #0f172a;
-  --color-slate-50: #020617;
+  --color-slate-900: #f2f4f6;
+  --color-slate-800: #e4e7eb;
+  --color-slate-700: #cdd2d9;
+  --color-slate-600: #6a7280;
+  --color-slate-500: #55607a;
+  --color-slate-400: #47505f;
+  --color-slate-300: #333a45;
+  --color-slate-200: #1f2530;
+  --color-slate-100: #14171c;
+  --color-slate-50:  #05060a;
 }
 
-/* ---- Accent colours: re-point the violet ramp ----------------------------- */
+/* ---- Accent options: re-point the accent ramp + tokens -------------------- */
+[data-accent="lime"] {
+  --accent: #c9f24e; --accent-ink: #14180b; --accent-quiet: rgba(201, 242, 78, .13);
+  --color-violet-700: #9fd12f; --color-violet-600: #c9f24e; --color-violet-500: #d2f65f;
+  --color-violet-400: #c9f24e; --color-violet-300: #d8f877; --color-violet-200: #e6fbaa;
+}
+[data-accent="amber"] {
+  --accent: #f5b027; --accent-ink: #201603; --accent-quiet: rgba(245, 176, 39, .14);
+  --color-violet-700: #b45309; --color-violet-600: #f5b027; --color-violet-500: #f59e0b;
+  --color-violet-400: #fbbf24; --color-violet-300: #fcd34d; --color-violet-200: #fde68a;
+}
+[data-accent="cyan"] {
+  --accent: #34e0e0; --accent-ink: #04201f; --accent-quiet: rgba(52, 224, 224, .13);
+  --color-violet-700: #0e7490; --color-violet-600: #34e0e0; --color-violet-500: #22d3ee;
+  --color-violet-400: #67e8f9; --color-violet-300: #a5f3fc; --color-violet-200: #cffafe;
+}
+[data-accent="violet"] {
+  --accent: #8b5cf6; --accent-ink: #ffffff; --accent-quiet: rgba(139, 92, 246, .16);
+  --color-violet-700: #6d28d9; --color-violet-600: #7c3aed; --color-violet-500: #8b5cf6;
+  --color-violet-400: #a78bfa; --color-violet-300: #c4b5fd; --color-violet-200: #ddd6fe;
+}
 [data-accent="blue"] {
-  --color-violet-700: #1d4ed8; --color-violet-600: #2563eb; --color-violet-500: #3b82f6;
+  --accent: #4a8dff; --accent-ink: #ffffff; --accent-quiet: rgba(74, 141, 255, .15);
+  --color-violet-700: #1d4ed8; --color-violet-600: #2f6fe0; --color-violet-500: #3b82f6;
   --color-violet-400: #60a5fa; --color-violet-300: #93c5fd; --color-violet-200: #bfdbfe;
 }
-[data-accent="emerald"] {
-  --color-violet-700: #047857; --color-violet-600: #059669; --color-violet-500: #10b981;
-  --color-violet-400: #34d399; --color-violet-300: #6ee7b7; --color-violet-200: #a7f3d0;
-}
 [data-accent="rose"] {
+  --accent: #fb5c7d; --accent-ink: #ffffff; --accent-quiet: rgba(251, 92, 125, .15);
   --color-violet-700: #be123c; --color-violet-600: #e11d48; --color-violet-500: #f43f5e;
   --color-violet-400: #fb7185; --color-violet-300: #fda4af; --color-violet-200: #fecdd3;
 }
-[data-accent="amber"] {
-  --color-violet-700: #b45309; --color-violet-600: #d97706; --color-violet-500: #f59e0b;
-  --color-violet-400: #fbbf24; --color-violet-300: #fcd34d; --color-violet-200: #fde68a;
-}
-[data-accent="slate"] {
-  --color-violet-700: #334155; --color-violet-600: #475569; --color-violet-500: #64748b;
-  --color-violet-400: #94a3b8; --color-violet-300: #cbd5e1; --color-violet-200: #e2e8f0;
-}
+
+/* Accent text is legible on dark surfaces (above). In LIGHT mode, re-point the
+ * pale accent shades used as text to the darker end so they read on white. */
+[data-theme="light"] { --color-violet-400: #7a911f; --color-violet-300: #6b8018; --color-violet-200: #6b8018; }
+[data-theme="light"][data-accent="amber"]  { --color-violet-400: #b45309; --color-violet-300: #92400e; --color-violet-200: #92400e; }
+[data-theme="light"][data-accent="cyan"]   { --color-violet-400: #0e7490; --color-violet-300: #155e75; --color-violet-200: #155e75; }
+[data-theme="light"][data-accent="violet"] { --color-violet-400: #7c3aed; --color-violet-300: #6d28d9; --color-violet-200: #6d28d9; }
+[data-theme="light"][data-accent="blue"]   { --color-violet-400: #2563eb; --color-violet-300: #1d4ed8; --color-violet-200: #1d4ed8; }
+[data-theme="light"][data-accent="rose"]   { --color-violet-400: #e11d48; --color-violet-300: #be123c; --color-violet-200: #be123c; }
 
 html, body, #root { height: 100%; }
 /* Use dynamic viewport height so the iOS PWA fills correctly under the URL bar. */
@@ -65,10 +110,14 @@ body {
   margin: 0;
   background: var(--app-bg);
   color: var(--app-fg);
-  font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition: background-color .15s ease, color .15s ease;
 }
+
+/* Type roles for the Midnight Signal system. */
+.font-display { font-family: "Bricolage Grotesque", "Hanken Grotesk", sans-serif; letter-spacing: -0.01em; }
+.num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
 /* iOS standalone PWA: keep chrome out from under the notch, status bar and
  * home indicator. viewport-fit=cover exposes these env() insets (0 elsewhere). */

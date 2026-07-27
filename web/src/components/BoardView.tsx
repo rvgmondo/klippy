@@ -225,7 +225,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
       className={`group/col flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-900/40 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <span ref={setActivatorNodeRef} {...attributes} {...listeners}
-          className="-ml-1 cursor-grab text-slate-600 hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder">
+          className="-ml-1 cursor-grab text-slate-500 hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder">
           <GripVertical size={14} />
         </span>
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: column.color }} />
@@ -254,7 +254,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
               placeholder="Card title..." rows={2}
               className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none" />
             <div className="mt-1 flex gap-2">
-              <button onClick={() => title.trim() && createTask.mutate(title.trim())} className="rounded bg-violet-600 px-2 py-1 text-xs text-white hover:bg-violet-500">Add</button>
+              <button onClick={() => title.trim() && createTask.mutate(title.trim())} className="rounded bg-violet-600 px-2 py-1 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Add</button>
               <button onClick={() => setAdding(false)} className="px-2 py-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
             </div>
           </div>
@@ -333,7 +333,7 @@ function AddColumn({ boardId }: { boardId: number }) {
         onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) create.mutate(name.trim()); if (e.key === 'Escape') setAdding(false); }}
         placeholder="Column name" className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none" />
       <div className="mt-1 flex gap-2">
-        <button onClick={() => name.trim() && create.mutate(name.trim())} className="rounded bg-violet-600 px-2 py-1 text-xs text-white hover:bg-violet-500">Add</button>
+        <button onClick={() => name.trim() && create.mutate(name.trim())} className="rounded bg-violet-600 px-2 py-1 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Add</button>
         <button onClick={() => setAdding(false)} className="px-2 py-1 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
       </div>
     </div>

@@ -54,7 +54,7 @@ export function LabelsSection({ taskId, boardId, current }: { taskId: number; bo
                 {l.name}
               </button>
             ))}
-            {all.filter((l) => !currentIds.has(l.id)).length === 0 && <span className="text-xs text-slate-600">No other labels yet.</span>}
+            {all.filter((l) => !currentIds.has(l.id)).length === 0 && <span className="text-xs text-slate-500">No other labels yet.</span>}
           </div>
           <div className="mt-2 flex items-center gap-2 border-t border-slate-800 pt-2">
             <div className="flex gap-1">
@@ -68,7 +68,7 @@ export function LabelsSection({ taskId, boardId, current }: { taskId: number; bo
               onKeyDown={(e) => { if (e.key === 'Enter' && newName.trim()) createLabel.mutate({ name: newName.trim(), color: newColor }); }}
               placeholder="New label name" className="flex-1 rounded bg-slate-950 border border-slate-700 px-2 py-1 text-xs text-slate-100 outline-none focus:border-violet-500" />
             <button onClick={() => newName.trim() && createLabel.mutate({ name: newName.trim(), color: newColor })}
-              className="grid w-8 place-items-center rounded bg-violet-600 text-white hover:bg-violet-500"><Plus size={14} /></button>
+              className="grid w-8 place-items-center rounded bg-violet-600 text-[var(--accent-ink)] hover:bg-violet-500"><Plus size={14} /></button>
           </div>
         </div>
       )}

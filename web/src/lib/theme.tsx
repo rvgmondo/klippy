@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { useAuth } from './auth';
 
 export type Theme = 'system' | 'dark' | 'light';
-export const ACCENTS = ['violet', 'blue', 'emerald', 'rose', 'amber', 'slate'] as const;
+export const ACCENTS = ['lime', 'amber', 'cyan', 'violet', 'blue', 'rose'] as const;
 export type Accent = (typeof ACCENTS)[number];
 
 const STORAGE_KEY = 'klippy-appearance';
@@ -13,7 +13,7 @@ export function readCachedAppearance(): { theme: Theme; accent: Accent } {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch { /* ignore */ }
-  return { theme: 'dark', accent: 'violet' };
+  return { theme: 'dark', accent: 'lime' };
 }
 
 function resolve(theme: Theme): 'dark' | 'light' {
@@ -38,7 +38,7 @@ export function ThemeSync() {
   // regardless of a returning visitor's saved preference. Once signed in, the
   // person's own theme takes over.
   const theme = (user ? user.theme ?? readCachedAppearance().theme : 'dark') as Theme;
-  const accent = (user ? user.accent ?? readCachedAppearance().accent : 'violet') as Accent;
+  const accent = (user ? user.accent ?? readCachedAppearance().accent : 'lime') as Accent;
 
   useEffect(() => {
     const root = document.documentElement;

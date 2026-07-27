@@ -74,7 +74,7 @@ export function BrandingPanel() {
           <input className={field} value={brand} placeholder="Klippy"
             onChange={(e) => setBrand(e.target.value)} />
           <button onClick={saveName} disabled={busy}
-            className="shrink-0 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+            className="shrink-0 rounded-lg bg-violet-600 px-4 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             Save
           </button>
         </div>

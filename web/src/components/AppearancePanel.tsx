@@ -5,8 +5,8 @@ import { useAuth } from '../lib/auth';
 import { ACCENTS, applyAppearance, type Accent, type Theme } from '../lib/theme';
 
 const SWATCH: Record<Accent, string> = {
-  violet: '#8b5cf6', blue: '#3b82f6', emerald: '#10b981',
-  rose: '#f43f5e', amber: '#f59e0b', slate: '#64748b',
+  lime: '#c9f24e', amber: '#f5b027', cyan: '#34e0e0',
+  violet: '#8b5cf6', blue: '#4a8dff', rose: '#fb5c7d',
 };
 
 const MODES: { value: Theme; label: string; icon: React.ReactNode }[] = [
@@ -18,7 +18,7 @@ const MODES: { value: Theme; label: string; icon: React.ReactNode }[] = [
 export function AppearancePanel() {
   const { user, refresh } = useAuth();
   const [theme, setTheme] = useState<Theme>((user?.theme as Theme) ?? 'dark');
-  const [accent, setAccent] = useState<Accent>((user?.accent as Accent) ?? 'violet');
+  const [accent, setAccent] = useState<Accent>((user?.accent as Accent) ?? 'lime');
   const [error, setError] = useState<string | null>(null);
 
   async function save(next: { theme?: Theme; accent?: Accent }) {
@@ -68,7 +68,7 @@ export function AppearancePanel() {
               className={`grid h-9 w-9 place-items-center rounded-full border-2 ${
                 accent === a ? 'border-slate-100' : 'border-transparent'}`}
               style={{ background: SWATCH[a] }}>
-              {accent === a && <Check size={15} className="text-white" />}
+              {accent === a && <Check size={15} className="text-[var(--accent-ink)]" />}
             </button>
           ))}
         </div>

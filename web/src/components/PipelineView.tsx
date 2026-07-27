@@ -81,7 +81,7 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
             <Stat label="Won this month" value={`${s.wonThisMonth}, ${money(s.wonValueThisMonth)}`} />
           </div>
         )}
-        <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500">
+        <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
           <Plus size={15} /> New deal
         </button>
       </div>
@@ -216,7 +216,7 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
           <textarea className={field + ' min-h-16 resize-y'} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
           {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
           <button onClick={() => title.trim() ? save.mutate() : setError('Give the deal a title.')} disabled={save.isPending}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
         </div>

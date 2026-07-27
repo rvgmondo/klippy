@@ -124,7 +124,7 @@ export function FilesView() {
             <button onClick={() => setCwd(null)} className="shrink-0 text-slate-400 hover:text-slate-200">All files</button>
             {(data?.path ?? []).map((p) => (
               <span key={p.id} className="flex min-w-0 items-center gap-1">
-                <ChevronRight size={13} className="shrink-0 text-slate-600" />
+                <ChevronRight size={13} className="shrink-0 text-slate-500" />
                 <button onClick={() => setCwd(p.id)} className="truncate text-slate-300 hover:text-slate-100">{p.name}</button>
               </span>
             ))}
@@ -134,7 +134,7 @@ export function FilesView() {
             <FolderPlus size={14} /> New folder
           </button>
           <button onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload'}
           </button>
           <input ref={fileRef} type="file" multiple className="hidden"
@@ -174,7 +174,7 @@ export function FilesView() {
                   </a>
                 )}
                 <span className="hidden shrink-0 text-xs text-slate-500 sm:block">{fmtBytes(n.size)}</span>
-                <span className="hidden shrink-0 text-xs text-slate-600 lg:block">
+                <span className="hidden shrink-0 text-xs text-slate-500 lg:block">
                   {new Date(n.updatedAt).toLocaleDateString()}
                 </span>
                 {n.kind === 'file' && (

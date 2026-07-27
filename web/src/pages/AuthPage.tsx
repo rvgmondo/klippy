@@ -88,7 +88,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
           {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
           {notice && <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">{notice}</div>}
 
-          <button type="submit" disabled={busy} className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white transition hover:bg-violet-500 disabled:opacity-60">
+          <button type="submit" disabled={busy} className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-[var(--accent-ink)] transition hover:bg-violet-500 disabled:opacity-60">
             {busy ? 'Please wait...'
               : mode === 'login' ? 'Sign in'
               : mode === 'signup' ? 'Create workspace'

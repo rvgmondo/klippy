@@ -20,7 +20,7 @@ const KIND_ICON: Record<Kind, React.ReactNode> = {
   question: <HelpCircle size={14} className="text-violet-400" />,
 };
 const STATUS_COLOR: Record<Status, string> = {
-  open: 'text-slate-300', planned: 'text-blue-300', done: 'text-green-400', dropped: 'text-slate-600 line-through',
+  open: 'text-slate-300', planned: 'text-blue-300', done: 'text-green-400', dropped: 'text-slate-500 line-through',
 };
 
 export function NotesPanel() {
@@ -86,7 +86,7 @@ export function NotesPanel() {
             <option value="high">High</option>
           </select>
           <button onClick={() => title.trim() && add.mutate()} disabled={!title.trim()}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-xs font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-2 text-xs font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             <Plus size={14} /> Add note
           </button>
         </div>
@@ -114,7 +114,7 @@ export function NotesPanel() {
               <div className="min-w-0 flex-1">
                 <div className={`text-sm font-medium ${STATUS_COLOR[n.status]}`}>{n.title}</div>
                 {n.body && <p className="mt-0.5 whitespace-pre-wrap text-xs text-slate-400">{n.body}</p>}
-                <div className="mt-1 text-[11px] text-slate-600">
+                <div className="mt-1 text-[11px] text-slate-500">
                   {n.priority} priority, {n.authorName ?? 'someone'}, {new Date(n.createdAt).toLocaleDateString()}
                 </div>
               </div>
@@ -126,7 +126,7 @@ export function NotesPanel() {
                 <option value="dropped">Dropped</option>
               </select>
               <button onClick={() => { if (confirm('Delete this note?')) del.mutate(n.id); }}
-                className="shrink-0 text-slate-600 hover:text-red-400"><Trash2 size={14} /></button>
+                className="shrink-0 text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
             </div>
           </div>
         ))}

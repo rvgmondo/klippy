@@ -84,7 +84,7 @@ export function FilesSection({ taskId }: { taskId: number }) {
           </div>
         ))}
         {(data?.files.length ?? 0) === 0 && (
-          <p className="px-1 text-xs text-slate-600">No attachments yet. 15MB max per file.</p>
+          <p className="px-1 text-xs text-slate-500">No attachments yet. 15MB max per file.</p>
         )}
       </div>
     </div>

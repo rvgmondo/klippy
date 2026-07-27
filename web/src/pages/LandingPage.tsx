@@ -25,7 +25,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
         </div>
         <div className="flex items-center gap-2">
           <button onClick={onLogin} className="rounded-lg px-3 py-2 text-sm text-slate-300 hover:text-white">Log in</button>
-          <button onClick={onGetStarted} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-500">Get started</button>
+          <button onClick={onGetStarted} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">Get started</button>
         </div>
       </header>
 
@@ -45,7 +45,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
             hours become invoices and nothing falls through the cracks.
           </p>
           <div className="mt-8 flex items-center justify-center gap-3">
-            <button onClick={onGetStarted} className="flex items-center gap-2 rounded-lg bg-violet-600 px-6 py-3 text-sm font-medium text-white hover:bg-violet-500">
+            <button onClick={onGetStarted} className="flex items-center gap-2 rounded-lg bg-violet-600 px-6 py-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
               Start free <ArrowRight size={16} />
             </button>
             <button onClick={onLogin} className="rounded-lg border border-slate-700 px-6 py-3 text-sm text-slate-200 hover:bg-slate-900">
@@ -82,7 +82,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
         <p className="mt-6 text-center text-xs text-slate-500">Prices shown as an example. Final pricing set at launch.</p>
       </section>
 
-      <footer className="border-t border-slate-800 py-8 text-center text-xs text-slate-600">
+      <footer className="border-t border-slate-800 py-8 text-center text-xs text-slate-500">
         Klippy, built for people who run the whole show.
       </footer>
     </div>
@@ -106,7 +106,7 @@ function PlanCard({ name, price, period, features, highlight, cta, onClick }: {
           </li>
         ))}
       </ul>
-      <button onClick={onClick} className={`w-full rounded-lg py-2.5 text-sm font-medium ${highlight ? 'bg-violet-600 text-white hover:bg-violet-500' : 'border border-slate-700 text-slate-200 hover:bg-slate-800'}`}>
+      <button onClick={onClick} className={`w-full rounded-lg py-2.5 text-sm font-medium ${highlight ? 'bg-violet-600 text-[var(--accent-ink)] hover:bg-violet-500' : 'border border-slate-700 text-slate-200 hover:bg-slate-800'}`}>
         {cta}
       </button>
     </div>

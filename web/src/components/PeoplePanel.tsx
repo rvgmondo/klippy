@@ -46,7 +46,7 @@ export function PeoplePanel() {
   return (
     <div>
       {isAdmin && !adding && (
-        <button onClick={() => setAdding(true)} className="mb-3 flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-500">
+        <button onClick={() => setAdding(true)} className="mb-3 flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:bg-violet-500">
           <UserPlus size={14} /> Add person
         </button>
       )}
@@ -66,7 +66,7 @@ export function PeoplePanel() {
           </p>
           {error && <div className="rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-300">{error}</div>}
           <div className="flex gap-2">
-            <button onClick={() => create.mutate()} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-white hover:bg-violet-500">Create</button>
+            <button onClick={() => create.mutate()} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Create</button>
             <button onClick={() => { setAdding(false); setError(null); }} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
           </div>
         </div>

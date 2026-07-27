@@ -92,7 +92,7 @@ export function QuickAddTask({ dueDate, onClose }: { dueDate: string; onClose: (
             {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
 
             <button onClick={() => title.trim() && create.mutate()} disabled={!title.trim() || create.isPending}
-              className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-60">
+              className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
               {create.isPending ? 'Adding...' : 'Add card'}
             </button>
           </div>
