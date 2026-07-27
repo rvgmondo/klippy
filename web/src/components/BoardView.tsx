@@ -166,7 +166,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-800 px-6 py-3">
-        <h2 className="text-lg font-semibold text-slate-100">{data.board.name}</h2>
+        <h2 className="font-display text-lg font-semibold text-slate-100">{data.board.name}</h2>
         {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
         <div className="mt-2"><BoardFilters value={filters} onChange={setFilters} /></div>
       </div>

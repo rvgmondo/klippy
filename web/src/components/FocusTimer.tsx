@@ -114,7 +114,7 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
               strokeDasharray={`${2 * Math.PI * 45}`} strokeDashoffset={`${2 * Math.PI * 45 * (1 - pct / 100)}`} />
           )}
         </svg>
-        <span className={`text-2xl font-semibold tabular-nums ${done ? 'text-green-400' : 'text-slate-100'}`}>{fmt(secs)}</span>
+        <span className={`text-2xl font-semibold num ${done ? 'text-green-400' : 'text-slate-100'}`}>{fmt(secs)}</span>
       </div>
 
       {done && <p className="mb-2 text-center text-xs text-green-400">Time's up.</p>}
@@ -185,5 +185,5 @@ function WorkClock({ startTime }: { startTime: string }) {
   const [, tick] = useState(0);
   useEffect(() => { const t = window.setInterval(() => tick((n) => n + 1), 1000); return () => window.clearInterval(t); }, []);
   const secs = Math.max(0, Math.floor((Date.now() - new Date(startTime).getTime()) / 1000));
-  return <span className="shrink-0 text-xs font-medium tabular-nums text-green-300">{fmt(secs)}</span>;
+  return <span className="shrink-0 text-xs font-medium num text-green-300">{fmt(secs)}</span>;
 }

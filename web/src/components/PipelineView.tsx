@@ -71,7 +71,7 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3 sm:px-6">
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">Pipeline</h2>
+          <h2 className="font-display text-lg font-semibold text-slate-100">Pipeline</h2>
           <p className="text-xs text-slate-500">Acquisition. Turn leads into clients.</p>
         </div>
         {s && (
@@ -106,7 +106,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div>
       <div className="text-[11px] text-slate-500">{label}</div>
-      <div className={`font-semibold ${accent ? 'text-violet-300' : 'text-slate-200'}`}>{value}</div>
+      <div className={`num font-semibold ${accent ? 'text-violet-300' : 'text-slate-200'}`}>{value}</div>
     </div>
   );
 }
@@ -118,11 +118,11 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onGoToCli
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.key}` });
   const total = deals.reduce((s, d) => s + Number(d.value), 0);
   return (
-    <div ref={setNodeRef} className={`flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-900/40 ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
+    <div ref={setNodeRef} className={`flex max-h-full w-72 shrink-0 flex-col rounded-2xl border bg-slate-900 ${isOver ? 'border-[var(--accent)]/60 bg-[var(--accent-quiet)]' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
-        <span className="text-sm font-medium text-slate-200">{stage.label}</span>
-        <span className="ml-auto text-xs text-slate-500">{deals.length}, {money(total)}</span>
+        <span className="font-display text-sm font-semibold text-slate-200">{stage.label}</span>
+        <span className="num ml-auto text-xs text-slate-500">{deals.length}, {money(total)}</span>
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {deals.map((d) => (
@@ -159,7 +159,7 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
         />
       </div>
       <div className="mt-2 flex items-center justify-between text-[11px]">
-        <span className="font-medium text-violet-300">{money(deal.value)}</span>
+        <span className="num font-medium text-violet-300">{money(deal.value)}</span>
         {deal.clientFolderId && (
           <span className="inline-flex items-center gap-1 rounded bg-green-600/20 px-1.5 py-0.5 text-green-300"><ArrowRightLeft size={10} /> client</span>
         )}

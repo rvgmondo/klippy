@@ -113,7 +113,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                       {(['draft', 'sent', 'accepted', 'paid', 'void'] as Status[]).map((s) => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-slate-100">{money(d.total, d.currency)}</td>
+                  <td className="px-3 py-2 text-right num text-slate-100">{money(d.total, d.currency)}</td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setPrinting(d.id)} title="Print / PDF" className="text-slate-500 hover:text-slate-200"><Printer size={15} /></button>
@@ -220,7 +220,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
       <div className="my-auto w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
+          <h2 className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
@@ -295,9 +295,9 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
 
         <div className="mt-4 flex justify-end">
           <div className="w-56 space-y-1 text-sm">
-            <div className="flex justify-between text-slate-400"><span>Subtotal</span><span className="tabular-nums">{money(subtotal, currency)}</span></div>
-            <div className="flex justify-between text-slate-400"><span>Tax ({taxRate}%)</span><span className="tabular-nums">{money(tax, currency)}</span></div>
-            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="tabular-nums">{money(subtotal + tax, currency)}</span></div>
+            <div className="flex justify-between text-slate-400"><span>Subtotal</span><span className="num">{money(subtotal, currency)}</span></div>
+            <div className="flex justify-between text-slate-400"><span>Tax ({taxRate}%)</span><span className="num">{money(tax, currency)}</span></div>
+            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="num">{money(subtotal + tax, currency)}</span></div>
           </div>
         </div>
 
@@ -338,7 +338,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-100">Payments for {doc.number}</h2>
+          <h2 className="font-display text-lg font-semibold text-slate-100">Payments for {doc.number}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
@@ -362,7 +362,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
             <div key={p.id} className="group flex items-center gap-2 rounded-lg border border-slate-800 px-3 py-1.5 text-sm">
               <span className="text-slate-300">{p.paidOn}</span>
               <span className="text-slate-500">{p.method}</span>
-              <span className="ml-auto tabular-nums text-slate-200">{money(p.amount, doc.currency)}</span>
+              <span className="ml-auto num text-slate-200">{money(p.amount, doc.currency)}</span>
               <button onClick={() => del.mutate(p.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={13} /></button>
             </div>
           ))}
@@ -429,9 +429,9 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
               {data.lines.map((l, i) => (
                 <tr key={i} className="border-b border-slate-200">
                   <td className="py-2">{l.description}</td>
-                  <td className="py-2 text-right tabular-nums">{Number(l.quantity)}</td>
-                  <td className="py-2 text-right tabular-nums">{money(l.unitPrice, cur)}</td>
-                  <td className="py-2 text-right tabular-nums">{money(l.amount, cur)}</td>
+                  <td className="py-2 text-right num">{Number(l.quantity)}</td>
+                  <td className="py-2 text-right num">{money(l.unitPrice, cur)}</td>
+                  <td className="py-2 text-right num">{money(l.amount, cur)}</td>
                 </tr>
               ))}
             </tbody>
@@ -439,9 +439,9 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
 
           <div className="mb-6 flex justify-end">
             <div className="w-64 space-y-1 text-sm">
-              <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="tabular-nums">{money(d.subtotal, cur)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Tax ({Number(d.taxRate)}%)</span><span className="tabular-nums">{money(d.taxAmount, cur)}</span></div>
-              <div className="flex justify-between border-t-2 border-slate-300 pt-1 text-base font-bold"><span>Total</span><span className="tabular-nums">{money(d.total, cur)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="num">{money(d.subtotal, cur)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Tax ({Number(d.taxRate)}%)</span><span className="num">{money(d.taxAmount, cur)}</span></div>
+              <div className="flex justify-between border-t-2 border-slate-300 pt-1 text-base font-bold"><span>Total</span><span className="num">{money(d.total, cur)}</span></div>
             </div>
           </div>
 

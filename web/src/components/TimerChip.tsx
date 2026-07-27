@@ -48,7 +48,7 @@ export function TimerChip() {
     <div className="flex items-center gap-2 rounded-lg border border-green-500/30 bg-green-500/10 px-2.5 py-1.5">
       <Clock size={13} className="text-green-400" />
       <span className="max-w-32 truncate text-xs text-green-200">{running.taskTitle ?? 'Working...'}</span>
-      <span className="text-xs font-medium tabular-nums text-green-300">
+      <span className="text-xs font-medium num text-green-300">
         {hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`}
       </span>
       <button onClick={() => stop.mutate()} title="Stop timer"

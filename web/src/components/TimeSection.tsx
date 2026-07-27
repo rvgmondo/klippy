@@ -92,7 +92,7 @@ export function TimeSection({ taskId }: { taskId: number }) {
             <div key={e.id} className="group flex items-center gap-2 rounded-md px-1 py-1 text-xs hover:bg-slate-900">
               <span className="text-slate-400">{new Date(e.startTime).toLocaleDateString()}</span>
               <span className="flex-1 truncate text-slate-500">{e.note ?? (e.isManual ? 'manual entry' : 'timer')}</span>
-              <span className="tabular-nums text-slate-300">
+              <span className="num text-slate-300">
                 {e.endTime === null ? 'running...' : fmt(e.durationSeconds ?? 0)}
               </span>
               <button onClick={() => del.mutate(e.id)}

@@ -41,7 +41,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
     <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-5xl">
         <div className="mb-5 flex flex-wrap items-end gap-3">
-          <h2 className="mr-auto text-lg font-semibold text-slate-100">Time &amp; billing</h2>
+          <h2 className="mr-auto font-display text-lg font-semibold text-slate-100">Time &amp; billing</h2>
           <div>
             <label className="mb-1 block text-[11px] text-slate-500">From</label>
             <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -80,11 +80,11 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
                   {data.clients.map((c) => (
                     <tr key={c.folderId} className="border-t border-slate-800">
                       <td className="px-3 py-2 text-slate-200">{c.name}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-300">{c.hours.toFixed(2)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                      <td className="px-3 py-2 text-right num text-slate-300">{c.hours.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right num text-slate-400">
                         {c.rate == null ? <span className="text-amber-400/80">no rate</span> : money(c.rate, cur)}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-100">
+                      <td className="px-3 py-2 text-right num text-slate-100">
                         {c.amount == null ? '-' : money(c.amount, cur)}
                       </td>
                     </tr>
@@ -105,7 +105,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
               {data.people.map((p) => (
                 <div key={p.userId} className="flex items-center justify-between rounded-lg border border-slate-800 px-3 py-2">
                   <span className="text-sm text-slate-200">{p.name}</span>
-                  <span className="tabular-nums text-sm text-slate-300">{p.hours.toFixed(2)} h</span>
+                  <span className="num text-sm text-slate-300">{p.hours.toFixed(2)} h</span>
                 </div>
               ))}
             </div>
@@ -120,7 +120,7 @@ function Tile({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
       <div className="mb-1 text-xs text-slate-400">{label}</div>
-      <div className={`text-2xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
+      <div className={`num text-2xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
     </div>
   );
 }
