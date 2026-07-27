@@ -5,18 +5,33 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal, GripVertical } from 'lucide-react';
+import {
+  ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal, GripVertical,
+  Home, Target, CalendarDays, HardDrive, BarChart3, Receipt, type LucideIcon,
+} from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
+import { BusinessSwitcher, type BusinessSelection } from './BusinessSwitcher';
 import type { Board, Business, Folder as TFolder } from '../lib/types';
-import type { BusinessSelection } from './BusinessSwitcher';
 
 interface Props {
   selectedBoardId: number | null;
   businessId: BusinessSelection;
+  view: string;
+  onNavigate: (v: string) => void;
+  onBusinessChange: (v: BusinessSelection) => void;
   onSelectBoard: (id: number) => void;
 }
+
+const NAV: { key: string; label: string; icon: LucideIcon }[] = [
+  { key: 'home', label: 'Home', icon: Home },
+  { key: 'pipeline', label: 'Pipeline', icon: Target },
+  { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { key: 'files', label: 'Files', icon: HardDrive },
+  { key: 'reports', label: 'Reports', icon: BarChart3 },
+  { key: 'billing', label: 'Billing', icon: Receipt },
+];
 
 function ask(prompt: string, current: string): string | null {
   const v = window.prompt(prompt, current);
@@ -37,7 +52,7 @@ function Grip({ setRef, attributes, listeners }: {
   );
 }
 
-export function Sidebar({ selectedBoardId, businessId, onSelectBoard }: Props) {
+export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusinessChange, onSelectBoard }: Props) {
   const { account } = useAuth();
   const { data } = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
   const folders = data?.folders ?? [];
@@ -61,6 +76,27 @@ export function Sidebar({ selectedBoardId, businessId, onSelectBoard }: Props) {
         <span className="truncate font-semibold text-slate-100">{account?.brandName || 'Klippy'}</span>
       </div>
 
+      {/* Business switcher */}
+      <div className="border-b border-slate-800 px-2 py-2">
+        <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
+      </div>
+
+      {/* Primary navigation */}
+      <div className="space-y-0.5 border-b border-slate-800 px-2 py-2">
+        {NAV.map((n) => {
+          const Icon = n.icon;
+          const active = view === n.key;
+          return (
+            <button key={n.key} onClick={() => onNavigate(n.key)}
+              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
+                active ? 'bg-violet-600/15 text-violet-200' : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
+              <Icon size={16} className="shrink-0" /> {n.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Boards tree */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {shown.length === 0 && (
           <p className="px-2 py-6 text-center text-[11px] text-slate-600">No businesses yet.</p>

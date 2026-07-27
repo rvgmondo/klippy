@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutGrid, CalendarDays, Timer, LogOut, Home, Settings, Menu as MenuIcon, X, HardDrive, BarChart3, Receipt, Target } from 'lucide-react';
+import { Timer, LogOut, Settings, Menu as MenuIcon, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
@@ -13,9 +13,15 @@ import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
-import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
+import type { BusinessSelection } from '../components/BusinessSwitcher';
 
 type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
+
+const VIEW_LABELS: Record<View, string> = {
+  home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
+  files: 'Files', reports: 'Reports', billing: 'Billing',
+};
+const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
 function loadBusiness(): BusinessSelection {
   const s = localStorage.getItem('klippy.business');
@@ -45,6 +51,9 @@ export function Workspace() {
         <Sidebar
           selectedBoardId={boardId}
           businessId={businessId}
+          view={view}
+          onNavigate={(v) => { setView(v as View); setNavOpen(false); }}
+          onBusinessChange={selectBusiness}
           onSelectBoard={(id) => { setBoardId(id); setView('board'); setNavOpen(false); }}
         />
       </div>
@@ -60,20 +69,11 @@ export function Workspace() {
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
           </button>
 
-          <div className="hidden shrink-0 sm:block"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
+          {/* Current section name, shown where the sidebar is hidden */}
+          <span className="truncate text-sm font-semibold text-slate-100 lg:hidden">{viewLabel(view)}</span>
 
-          <div className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-lg bg-slate-900 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />
-            <TabButton active={view === 'pipeline'} onClick={() => setView('pipeline')} icon={<Target size={15} />} label="Pipeline" />
-            <TabButton active={view === 'board'} onClick={() => setView('board')} icon={<LayoutGrid size={15} />} label="Board" />
-            <TabButton active={view === 'calendar'} onClick={() => setView('calendar')} icon={<CalendarDays size={15} />} label="Calendar" />
-            <TabButton active={view === 'files'} onClick={() => setView('files')} icon={<HardDrive size={15} />} label="Files" />
-            <TabButton active={view === 'reports'} onClick={() => setView('reports')} icon={<BarChart3 size={15} />} label="Reports" />
-            <TabButton active={view === 'billing'} onClick={() => setView('billing')} icon={<Receipt size={15} />} label="Billing" />
-          </div>
-
-          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-3">
-            <div className="hidden lg:block lg:w-56 xl:w-64"><SearchBar /></div>
+          <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-3">
+            <div className="hidden min-w-0 flex-1 sm:block sm:max-w-xs"><SearchBar /></div>
             <TimerChip />
             <button onClick={() => setShowTimer(true)} title="Focus timer"
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
@@ -94,10 +94,9 @@ export function Workspace() {
           </div>
         </header>
 
-        {/* Below lg: business switcher (phones only) + search live under the bar so they stay usable */}
-        <div className="flex items-center gap-2 border-b border-slate-800 px-2 py-2 lg:hidden">
-          <div className="shrink-0 sm:hidden"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
-          <div className="min-w-0 flex-1"><SearchBar /></div>
+        {/* Search on the smallest screens sits under the bar so it stays usable */}
+        <div className="border-b border-slate-800 px-2 py-2 sm:hidden">
+          <SearchBar />
         </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
@@ -114,15 +113,5 @@ export function Workspace() {
       {showTimer && <FocusTimer onClose={() => setShowTimer(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
-  );
-}
-
-function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return (
-    <button onClick={onClick} title={label}
-      className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
-        active ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-      {icon}{active && <span>{label}</span>}
-    </button>
   );
 }

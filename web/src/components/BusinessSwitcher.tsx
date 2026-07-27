@@ -7,9 +7,10 @@ import type { Business } from '../lib/types';
 export type BusinessSelection = number | 'all';
 
 // Picks which business you're looking at, or "All businesses" for the combined view.
-export function BusinessSwitcher({ value, onChange }: {
+export function BusinessSwitcher({ value, onChange, full }: {
   value: BusinessSelection;
   onChange: (v: BusinessSelection) => void;
+  full?: boolean;
 }) {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
@@ -37,10 +38,11 @@ export function BusinessSwitcher({ value, onChange }: {
   return (
     <Menu
       align="left"
+      fullWidth={full}
       trigger={
-        <span className="flex max-w-52 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800">
+        <span className={`flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 ${full ? 'w-full' : 'max-w-52'}`}>
           <Layers size={13} className="shrink-0 text-violet-300" />
-          <span className="truncate">{current}</span>
+          <span className="flex-1 truncate text-left">{current}</span>
           <ChevronDown size={13} className="shrink-0 text-slate-400" />
         </span>
       }

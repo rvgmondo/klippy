@@ -7,7 +7,7 @@ export interface MenuItem {
 }
 
 /** Lightweight click-to-open dropdown. Closes on outside click or Escape. */
-export function Menu({ trigger, items, align = 'right' }: { trigger: ReactNode; items: MenuItem[]; align?: 'left' | 'right' }) {
+export function Menu({ trigger, items, align = 'right', fullWidth }: { trigger: ReactNode; items: MenuItem[]; align?: 'left' | 'right'; fullWidth?: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -21,8 +21,8 @@ export function Menu({ trigger, items, align = 'right' }: { trigger: ReactNode; 
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className="flex items-center">
+    <div ref={ref} className={`relative ${fullWidth ? 'w-full' : ''}`}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className={`flex items-center ${fullWidth ? 'w-full' : ''}`}>
         {trigger}
       </button>
       {open && (
