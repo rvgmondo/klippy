@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
+import type { BusinessSelection } from './BusinessSwitcher';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
@@ -23,13 +24,14 @@ function startOfMonth() {
 }
 function today() { return new Date().toISOString().slice(0, 10); }
 
-export function ReportsView() {
+export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   const [from, setFrom] = useState(startOfMonth());
   const [to, setTo] = useState(today());
+  const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['report', from, to],
-    queryFn: () => apiGet<Report>(`/reports/time?from=${from}&to=${to}`),
+    queryKey: ['report', from, to, businessId],
+    queryFn: () => apiGet<Report>(`/reports/time?from=${from}&to=${to}${bizQ}`),
   });
 
   const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-500';

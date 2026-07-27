@@ -105,7 +105,7 @@ export function Workspace() {
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
           {view === 'files' && <FilesView />}
-          {view === 'reports' && <ReportsView />}
+          {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
         </main>
       </div>
