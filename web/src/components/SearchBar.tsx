@@ -31,7 +31,7 @@ export function SearchBar() {
   const results = data?.tasks ?? [];
 
   return (
-    <div ref={ref} className="relative w-72">
+    <div ref={ref} className="relative w-full">
       <Search size={14} className="pointer-events-none absolute left-3 top-2.5 text-slate-500" />
       <input value={q} onChange={(e) => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)}
         placeholder="Search cards..."

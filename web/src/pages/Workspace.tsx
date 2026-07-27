@@ -60,9 +60,9 @@ export function Workspace() {
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
           </button>
 
-          <div className="hidden sm:block"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
+          <div className="hidden shrink-0 sm:block"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
 
-          <div className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-900 p-1">
+          <div className="flex min-w-0 items-center gap-1 overflow-x-auto rounded-lg bg-slate-900 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TabButton active={view === 'home'} onClick={() => setView('home')} icon={<Home size={15} />} label="Home" />
             <TabButton active={view === 'pipeline'} onClick={() => setView('pipeline')} icon={<Target size={15} />} label="Pipeline" />
             <TabButton active={view === 'board'} onClick={() => setView('board')} icon={<LayoutGrid size={15} />} label="Board" />
@@ -72,8 +72,8 @@ export function Workspace() {
             <TabButton active={view === 'billing'} onClick={() => setView('billing')} icon={<Receipt size={15} />} label="Billing" />
           </div>
 
-          <div className="ml-auto flex min-w-0 items-center gap-1.5 sm:gap-3">
-            <div className="hidden min-w-0 md:block"><SearchBar /></div>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <div className="hidden lg:block lg:w-56 xl:w-64"><SearchBar /></div>
             <TimerChip />
             <button onClick={() => setShowTimer(true)} title="Focus timer"
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
@@ -94,9 +94,10 @@ export function Workspace() {
           </div>
         </header>
 
-        {/* Search on small screens sits under the bar so it stays usable */}
-        <div className="border-b border-slate-800 px-2 py-2 md:hidden">
-          <SearchBar />
+        {/* Below lg: business switcher (phones only) + search live under the bar so they stay usable */}
+        <div className="flex items-center gap-2 border-b border-slate-800 px-2 py-2 lg:hidden">
+          <div className="shrink-0 sm:hidden"><BusinessSwitcher value={businessId} onChange={selectBusiness} /></div>
+          <div className="min-w-0 flex-1"><SearchBar /></div>
         </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
@@ -119,9 +120,9 @@ export function Workspace() {
 function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
     <button onClick={onClick} title={label}
-      className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition sm:px-3 ${
+      className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
         active ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-      {icon} <span className="hidden sm:inline">{label}</span>
+      {icon}{active && <span>{label}</span>}
     </button>
   );
 }

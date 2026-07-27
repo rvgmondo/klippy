@@ -338,7 +338,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-100">Payments · {doc.number}</h2>
+          <h2 className="text-lg font-semibold text-slate-100">Payments for {doc.number}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 

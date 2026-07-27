@@ -83,7 +83,7 @@ export function ReportsView() {
                         {c.rate == null ? <span className="text-amber-400/80">no rate</span> : money(c.rate, cur)}
                       </td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-100">
-                        {c.amount == null ? '—' : money(c.amount, cur)}
+                        {c.amount == null ? '-' : money(c.amount, cur)}
                       </td>
                     </tr>
                   ))}

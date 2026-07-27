@@ -72,13 +72,13 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3 sm:px-6">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Pipeline</h2>
-          <p className="text-xs text-slate-500">Acquisition · turn leads into clients</p>
+          <p className="text-xs text-slate-500">Acquisition. Turn leads into clients.</p>
         </div>
         {s && (
           <div className="flex gap-4 text-xs">
             <Stat label="Open deals" value={String(s.openCount)} />
             <Stat label="Pipeline value" value={money(s.pipelineValue)} accent />
-            <Stat label="Won this month" value={`${s.wonThisMonth} · ${money(s.wonValueThisMonth)}`} />
+            <Stat label="Won this month" value={`${s.wonThisMonth}, ${money(s.wonValueThisMonth)}`} />
           </div>
         )}
         <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-violet-500">
@@ -122,7 +122,7 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onGoToCli
       <div className="flex items-center gap-2 px-3 py-2.5">
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
         <span className="text-sm font-medium text-slate-200">{stage.label}</span>
-        <span className="ml-auto text-xs text-slate-500">{deals.length} · {money(total)}</span>
+        <span className="ml-auto text-xs text-slate-500">{deals.length}, {money(total)}</span>
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {deals.map((d) => (

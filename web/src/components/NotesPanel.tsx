@@ -115,7 +115,7 @@ export function NotesPanel() {
                 <div className={`text-sm font-medium ${STATUS_COLOR[n.status]}`}>{n.title}</div>
                 {n.body && <p className="mt-0.5 whitespace-pre-wrap text-xs text-slate-400">{n.body}</p>}
                 <div className="mt-1 text-[11px] text-slate-600">
-                  {n.priority} priority · {n.authorName ?? 'someone'} · {new Date(n.createdAt).toLocaleDateString()}
+                  {n.priority} priority, {n.authorName ?? 'someone'}, {new Date(n.createdAt).toLocaleDateString()}
                 </div>
               </div>
               <select value={n.status} onChange={(e) => patch.mutate({ id: n.id, body: { status: e.target.value } })}

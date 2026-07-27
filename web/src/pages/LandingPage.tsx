@@ -83,7 +83,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
       </section>
 
       <footer className="border-t border-slate-800 py-8 text-center text-xs text-slate-600">
-        Klippy · built for people who run the whole show.
+        Klippy, built for people who run the whole show.
       </footer>
     </div>
   );

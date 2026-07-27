@@ -112,7 +112,7 @@ export function FilesView() {
         </div>
         {usage.data && (
           <div className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
-            {usage.data.files} file{usage.data.files === 1 ? '' : 's'} · {fmtBytes(usage.data.bytes) || '0 B'}
+            {usage.data.files} file{usage.data.files === 1 ? '' : 's'}, {fmtBytes(usage.data.bytes) || '0 B'}
           </div>
         )}
       </aside>
