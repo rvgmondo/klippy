@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Layers } from 'lucide-react';
-import { apiGet, apiPost } from '../lib/api';
+import { apiGet, apiPost, apiDelete, ApiError } from '../lib/api';
 import { Menu } from './Menu';
 import type { Business } from '../lib/types';
 
@@ -24,6 +24,17 @@ export function BusinessSwitcher({ value, onChange, full }: {
     },
   });
 
+  const del = useMutation({
+    mutationFn: (id: number) => apiDelete<{ ok: true }>(`/businesses/${id}`),
+    onSuccess: (_res, id) => {
+      qc.invalidateQueries({ queryKey: ['businesses'] });
+      if (value === id) onChange('all');
+    },
+    onError: (err) => {
+      alert(err instanceof ApiError ? err.message : 'Failed to delete business.');
+    },
+  });
+
   const current = value === 'all' ? 'All businesses' : (list.find((b) => b.id === value)?.name ?? 'Business');
 
   const items = [
@@ -31,6 +42,10 @@ export function BusinessSwitcher({ value, onChange, full }: {
     ...list.map((b) => ({
       label: `${b.id === value ? '✓ ' : '   '}${b.name}`,
       onClick: () => onChange(b.id),
+      onDelete: () => {
+        if (list.length <= 1) { alert('You need at least one business.'); return; }
+        if (confirm(`Delete "${b.name}"? This cannot be undone.`)) del.mutate(b.id);
+      },
     })),
     { label: '+ New business', onClick: () => { const n = window.prompt('Name for the new business'); if (n?.trim()) create.mutate(n.trim()); } },
   ];
