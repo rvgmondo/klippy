@@ -76,4 +76,33 @@ export async function workspaceRoutes(app: FastifyInstance) {
     await db.delete(memberships).where(eq(memberships.id, m.id));
     return { ok: true };
   });
+
+  // Delete a workspace entirely (must be owner)
+  app.delete('/api/v1/workspaces/:id', async (req, reply) => {
+    const { userId } = authOf(req);
+    const id = Number((req.params as { id: string }).id);
+    
+    if (!Number.isInteger(id) || id <= 0) {
+      return reply.code(400).send({ error: 'Bad id.' });
+    }
+
+    const m = await getMembership(id, userId);
+    
+    if (!m) {
+      return reply.code(404).send({ error: 'You are not in that workspace.' });
+    }
+    
+    if (m.role !== 'owner') {
+      return reply.code(403).send({ error: 'Only the workspace owner can delete the workspace.' });
+    }
+
+    // Because your schema uses onDelete: 'cascade', deleting the account 
+    // will automatically delete all memberships, businesses, folders, tasks, etc.
+    await db.delete(accounts).where(eq(accounts.id, id));
+
+    // Optional: Clear the cookie if they just deleted their active workspace
+    // reply.clearCookie(COOKIE_NAME, cookieOptions());
+
+    return { ok: true, message: 'Workspace deleted successfully.' };
+  });
 }
