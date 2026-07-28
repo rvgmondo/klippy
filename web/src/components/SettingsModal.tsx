@@ -110,3 +110,67 @@ function WorkspaceTab() {
     </form>
   );
 }
+
+
+import { useState } from 'react';
+
+// Assuming you have access to the current workspace's ID via props or a context
+export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) {
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    // 1. Force the user to confirm since this destroys ALL data
+    const confirmed = window.confirm(
+      "Are you absolutely sure? This will permanently delete this workspace, including all businesses, boards, tasks, and files. This action CANNOT be undone."
+    );
+
+    if (!confirmed) return;
+
+    setIsDeleting(true);
+
+    try {
+      // 2. Call your new DELETE endpoint
+      const response = await fetch(`/api/v1/workspaces/${workspaceId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // 3. Success! Redirect them out of the deleted workspace.
+        // Sending them to the root URL is usually safest so the app can 
+        // re-evaluate which workspaces they still have access to.
+        window.location.href = '/'; 
+      } else {
+        const data = await response.json();
+        alert(data.error || 'Failed to delete workspace.');
+        setIsDeleting(false);
+      }
+    } catch (error) {
+      console.error("Error deleting workspace:", error);
+      alert('An unexpected error occurred.');
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: '2rem', padding: '1rem', border: '1px solid red', borderRadius: '8px' }}>
+      <h3 style={{ color: 'red', margin: '0 0 0.5rem 0' }}>Danger Zone</h3>
+      <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>
+        Permanently delete this workspace and all of its data.
+      </p>
+      <button 
+        onClick={handleDelete} 
+        disabled={isDeleting}
+        style={{
+          backgroundColor: 'red',
+          color: 'white',
+          padding: '0.5rem 1rem',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: isDeleting ? 'not-allowed' : 'pointer'
+        }}
+      >
+        {isDeleting ? 'Deleting...' : 'Delete Workspace'}
+      </button>
+    </div>
+  );
+}
