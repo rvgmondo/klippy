@@ -62,7 +62,9 @@ function WorkspaceTab() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
+  const isOwner = user?.role === 'owner'; // Only owners can delete the workspace
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -78,48 +80,52 @@ function WorkspaceTab() {
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 disabled:opacity-50';
 
   return (
-    <form onSubmit={save} className="space-y-4">
-      {!isAdmin && <p className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">Only workspace admins can change these settings.</p>}
-      <div>
-        <label className="mb-1 block text-xs font-medium text-slate-400">Workspace name</label>
-        <input className={field} value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} placeholder="Mondobase" />
-      </div>
-      <div>
-        <div className="mb-1 text-xs font-medium text-slate-400">What do you call your top-level folders?</div>
-        <p className="mb-2 text-[11px] text-slate-500">Rename "Clients" to whatever fits: Businesses, Customers, Projects. Shown in the sidebar.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">Singular</label>
-            <input className={field} value={singular} disabled={!isAdmin} onChange={(e) => setSingular(e.target.value)} placeholder="Client" />
-          </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">Plural</label>
-            <input className={field} value={plural} disabled={!isAdmin} onChange={(e) => setPlural(e.target.value)} placeholder="Clients" />
+    <div className="space-y-8">
+      <form onSubmit={save} className="space-y-4">
+        {!isAdmin && <p className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">Only workspace admins can change these settings.</p>}
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-400">Workspace name</label>
+          <input className={field} value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} placeholder="Mondobase" />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-slate-400">What do you call your top-level folders?</div>
+          <p className="mb-2 text-[11px] text-slate-500">Rename "Clients" to whatever fits: Businesses, Customers, Projects. Shown in the sidebar.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">Singular</label>
+              <input className={field} value={singular} disabled={!isAdmin} onChange={(e) => setSingular(e.target.value)} placeholder="Client" />
+            </div>
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">Plural</label>
+              <input className={field} value={plural} disabled={!isAdmin} onChange={(e) => setPlural(e.target.value)} placeholder="Clients" />
+            </div>
           </div>
         </div>
-      </div>
-      {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
-      {isAdmin && (
-        <div className="flex items-center gap-3">
-          <button type="submit" disabled={busy} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
-            {busy ? 'Saving...' : 'Save changes'}
-          </button>
-          {saved && <span className="text-sm text-green-400">Saved</span>}
+        {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <button type="submit" disabled={busy} className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
+              {busy ? 'Saving...' : 'Save changes'}
+            </button>
+            {saved && <span className="text-sm text-green-400">Saved</span>}
+          </div>
+        )}
+      </form>
+
+      {/* Render the delete button for owners only */}
+      {isOwner && account?.id && (
+        <div className="pt-4 border-t border-slate-800">
+          <DeleteWorkspaceButton workspaceId={account.id} />
         </div>
       )}
-    </form>
+    </div>
   );
 }
 
-
-import { useState } from 'react';
-
-// Assuming you have access to the current workspace's ID via props or a context
 export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
-    // 1. Force the user to confirm since this destroys ALL data
     const confirmed = window.confirm(
       "Are you absolutely sure? This will permanently delete this workspace, including all businesses, boards, tasks, and files. This action CANNOT be undone."
     );
@@ -129,15 +135,11 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
     setIsDeleting(true);
 
     try {
-      // 2. Call your new DELETE endpoint
       const response = await fetch(`/api/v1/workspaces/${workspaceId}`, {
         method: 'DELETE',
       });
 
       if (response.ok) {
-        // 3. Success! Redirect them out of the deleted workspace.
-        // Sending them to the root URL is usually safest so the app can 
-        // re-evaluate which workspaces they still have access to.
         window.location.href = '/'; 
       } else {
         const data = await response.json();
@@ -152,22 +154,15 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
   };
 
   return (
-    <div style={{ marginTop: '2rem', padding: '1rem', border: '1px solid red', borderRadius: '8px' }}>
-      <h3 style={{ color: 'red', margin: '0 0 0.5rem 0' }}>Danger Zone</h3>
-      <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>
-        Permanently delete this workspace and all of its data.
+    <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-4">
+      <h3 className="mb-1 text-sm font-semibold text-red-400">Danger Zone</h3>
+      <p className="mb-4 text-xs text-red-300/70">
+        Permanently delete this workspace and all of its data. This cannot be undone.
       </p>
       <button 
         onClick={handleDelete} 
         disabled={isDeleting}
-        style={{
-          backgroundColor: 'red',
-          color: 'white',
-          padding: '0.5rem 1rem',
-          border: 'none',
-          borderRadius: '4px',
-          cursor: isDeleting ? 'not-allowed' : 'pointer'
-        }}
+        className="rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
       >
         {isDeleting ? 'Deleting...' : 'Delete Workspace'}
       </button>
