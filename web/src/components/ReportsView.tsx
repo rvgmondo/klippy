@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { ErrorNote } from './ErrorNote';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
@@ -57,16 +58,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
         {error ? (
           // Without this the page sat on "Loading..." forever whenever the request
           // failed, which looks like the report is simply broken.
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
-            <p className="text-sm font-medium text-red-300">This report could not load.</p>
-            <p className="mt-1 text-xs text-red-300/80">
-              {error instanceof Error ? error.message : 'Something went wrong.'}
-            </p>
-            <button onClick={() => refetch()}
-              className="mt-3 rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-500/10">
-              Try again
-            </button>
-          </div>
+          <ErrorNote error={error} onRetry={() => refetch()} />
         ) : isLoading || !data ? (
           <p className="text-sm text-slate-500">Loading...</p>
         ) : (

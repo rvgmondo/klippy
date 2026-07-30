@@ -2,9 +2,12 @@ const BASE = '/api/v1';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** The database driver's own message, when the API could identify one. */
+  cause?: string;
+  constructor(message: string, status: number, cause?: string) {
     super(message);
     this.status = status;
+    this.cause = cause;
   }
 }
 
@@ -24,8 +27,9 @@ async function api<T>(path: string, opts: RequestInit = {}): Promise<T> {
     try { data = JSON.parse(text); } catch { data = null; }
   }
   if (!res.ok) {
-    const msg = (data as { error?: string } | null)?.error ?? `Request failed (${res.status})`;
-    throw new ApiError(msg, res.status);
+    const body = data as { error?: string; cause?: string } | null;
+    const msg = body?.error ?? `Request failed (${res.status})`;
+    throw new ApiError(msg, res.status, body?.cause);
   }
   return data as T;
 }

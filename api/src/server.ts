@@ -83,10 +83,15 @@ export function buildServer() {
         sqlMessage: err.sqlMessage,
       }, 'request failed');
     }
+    // Drizzle wraps driver failures in a generic "Failed query", which hides the one
+    // line that actually identifies the problem ("Unknown column ...", "Table doesn't
+    // exist ..."). Put the driver's own message in the reply so a report of a broken
+    // page carries the cause with it.
     reply.code(status).send({
       error: status >= 500
         ? `Something broke handling ${req.method} ${req.url}. ${err.message}`
         : err.message,
+      ...(status >= 500 && err.sqlMessage ? { cause: err.sqlMessage, dbCode: err.code } : {}),
     });
   });
 
