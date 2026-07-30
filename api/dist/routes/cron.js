@@ -2,7 +2,7 @@ import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions } from '../db/schema.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
-import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
+import { addOneMonth, anchorDayOf, generateSubscriptionInvoice } from '../lib/billing.js';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 function renderDigest(name, today, overdue) {
     const line = (t) => {
@@ -94,7 +94,10 @@ export async function cronRoutes(app) {
                     createdBy: sub.createdBy,
                 });
                 await db.update(subscriptions).set({
-                    nextBillDate: addOneMonth(sub.nextBillDate), lastBilledAt: new Date(),
+                    // Anchor on the day the subscription started so month-end bills spring
+                    // back (31 Jan -> 28 Feb -> 31 Mar) instead of sticking on the 28th.
+                    nextBillDate: addOneMonth(sub.nextBillDate, anchorDayOf(sub.startedOn)),
+                    lastBilledAt: new Date(),
                 }).where(eq(subscriptions.id, sub.id));
                 billed++;
             }

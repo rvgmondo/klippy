@@ -9,3 +9,9 @@ api/.env
 
 # Build outputs (web/dist, api/dist) ARE committed on purpose:
 # cPanel Git deploys them straight to the server, so no build runs on the host.
+
+# Local archives / snapshots (never commit these, they bloat the repo)
+*.zip
+!deploy/klippy-api.zip
+!deploy/klippy-web.zip
+!klippyextension.zip

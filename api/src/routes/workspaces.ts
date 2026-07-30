@@ -96,13 +96,31 @@ export async function workspaceRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'Only the workspace owner can delete the workspace.' });
     }
 
-    // Because your schema uses onDelete: 'cascade', deleting the account 
-    // will automatically delete all memberships, businesses, folders, tasks, etc.
+    // Refuse to delete the last one, so a login is never left with no workspace
+    // at all (same rule as businesses).
+    const remaining = await workspacesFor(userId);
+    if (remaining.length <= 1) {
+      return reply.code(400).send({ error: 'You need at least one workspace.' });
+    }
+
+    const { accountId: activeAccountId } = authOf(req);
+
+    // Schema uses onDelete: 'cascade', so this also removes the memberships,
+    // businesses, folders, boards, tasks and documents underneath it.
     await db.delete(accounts).where(eq(accounts.id, id));
 
-    // Optional: Clear the cookie if they just deleted their active workspace
-    // reply.clearCookie(COOKIE_NAME, cookieOptions());
+    // If they just deleted the workspace they were *in*, the session cookie still
+    // points at a row that no longer exists, which breaks every later request.
+    // Re-issue it against another workspace they still belong to.
+    let switchedTo: number | null = null;
+    if (activeAccountId === id) {
+      const next = remaining.find((w) => w.accountId !== id);
+      if (next) {
+        reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: next.accountId, role: next.role }), cookieOptions());
+        switchedTo = next.accountId;
+      }
+    }
 
-    return { ok: true, message: 'Workspace deleted successfully.' };
+    return { ok: true, message: 'Workspace deleted successfully.', switchedTo };
   });
 }

@@ -5,10 +5,32 @@ import { tenantWhere, withTenant } from './tenant.js';
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
-export function addOneMonth(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00.000Z`);
-  d.setUTCMonth(d.getUTCMonth() + 1);
-  return d.toISOString().slice(0, 10);
+/**
+ * Next billing date, one month on.
+ *
+ * Two traps this avoids, both of which quietly cost real money:
+ *  1. Naive month arithmetic OVERFLOWS: 31 Jan + 1 month becomes 3 Mar, skipping
+ *     February entirely and pushing every later bill further out.
+ *  2. Clamping alone STICKS: 31 Jan -> 28 Feb -> 28 Mar, so a month-end
+ *     subscription silently moves to the 28th forever.
+ *
+ * So we clamp against the month's length but always measure from `anchorDay` (the
+ * day the subscription started), which lets it spring back:
+ * 31 Jan -> 28 Feb -> 31 Mar -> 30 Apr -> 31 May.
+ */
+export function addOneMonth(dateStr: string, anchorDay?: number): string {
+  const [y, m, d] = dateStr.split('-').map(Number) as [number, number, number];
+  const day = anchorDay ?? d;
+  // First of the following month, then clamp the anchor day to that month's length.
+  const target = new Date(Date.UTC(y, m, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+/** Day-of-month a subscription bills on, taken from the date it started. */
+export function anchorDayOf(startedOn: string): number {
+  return Number(startedOn.split('-')[2]);
 }
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00.000Z`);
