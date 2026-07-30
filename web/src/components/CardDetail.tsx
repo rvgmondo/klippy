@@ -7,6 +7,13 @@ import { TimeSection } from './TimeSection';
 import { FilesSection } from './FilesSection';
 import { LabelsSection } from './LabelsSection';
 
+/** A UTC timestamp as the local value a datetime-local input expects. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 const PRIORITIES: { value: Priority; label: string; color: string }[] = [
   { value: 'none', label: 'None', color: '#64748b' },
   { value: 'low', label: 'Low', color: '#64748b' },
@@ -87,6 +94,30 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
                 <label className="mb-1 block text-xs text-slate-500">Due date</label>
                 <input type="date" className={field} value={t?.dueDate ?? ''}
                   onChange={(e) => patchTask.mutate({ dueDate: e.target.value || null })} />
+              </div>
+            </div>
+
+            {/* Time blocking. A due date is when it must be done; these are how long
+                you think it takes and when you plan to actually do it. Editable here
+                as well as in Today, so planning is not trapped in one screen. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">Estimate</label>
+                <select className={field} value={t?.estimateMinutes ?? ''}
+                  onChange={(e) => patchTask.mutate({ estimateMinutes: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">No estimate</option>
+                  {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((m) => (
+                    <option key={m} value={m}>{m < 60 ? `${m}m` : `${m / 60}h`}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">Do it on</label>
+                <input type="datetime-local" className={field}
+                  value={t?.scheduledStart ? toLocalInput(t.scheduledStart) : ''}
+                  onChange={(e) => patchTask.mutate({
+                    scheduledStart: e.target.value ? new Date(e.target.value).toISOString() : null,
+                  })} />
               </div>
             </div>
 

@@ -110,6 +110,9 @@ export interface Task {
   description: string | null;
   priority: Priority;
   dueDate: string | null;
+  // Time blocking: how long it should take, and when it is planned for.
+  estimateMinutes: number | null;
+  scheduledStart: string | null;
   recurrence: 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
   assignedTo: number | null;
   position: number;

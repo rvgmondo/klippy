@@ -4,8 +4,8 @@ import {
   DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
   rectIntersection, type DragEndEvent, type CollisionDetection,
 } from '@dnd-kit/core';
-import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus } from 'lucide-react';
-import { apiGet, apiPatch } from '../lib/api';
+import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus, Play, Square } from 'lucide-react';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
 import type { Priority } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
@@ -124,6 +124,24 @@ export function TodayView({ businessId, onNavigate }: {
     onSuccess: invalidate,
   });
 
+  // The running timer, so a block can show whether it is the one being worked on.
+  // This is what turns the plan into the doing: block it out, then hit play.
+  const timer = useQuery({
+    queryKey: ['timer'],
+    queryFn: () => apiGet<{ current: { id: number; taskId: number } | null }>('/timer/current'),
+    refetchInterval: 30000,
+  });
+  const runningTaskId = timer.data?.current?.taskId ?? null;
+  const toggleTimer = useMutation({
+    mutationFn: (taskId: number) => (runningTaskId === taskId
+      ? apiPost('/timer/stop', {})
+      : apiPost('/timer/start', { taskId })),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['timer'] });
+      qc.invalidateQueries({ queryKey: ['day'] });
+    },
+  });
+
   function onDragEnd(e: DragEndEvent) {
     const taskId = Number(String(e.active.id).replace('t-', ''));
     const over = e.over?.id ? String(e.over.id) : null;
@@ -222,7 +240,8 @@ export function TodayView({ businessId, onNavigate }: {
                 {isToday && <NowLine />}
                 {/* Blocks */}
                 {(data?.scheduled ?? []).map((t) => (
-                  <Block key={t.id} task={t}
+                  <Block key={t.id} task={t} running={runningTaskId === t.id}
+                    onToggleTimer={() => toggleTimer.mutate(t.id)}
                     onOpen={() => setOpenTask({ id: t.id, boardId: t.boardId })}
                     onUnschedule={() => patch.mutate({ id: t.id, body: { scheduledStart: null } })}
                     onEstimate={(m) => patch.mutate({ id: t.id, body: { estimateMinutes: m } })} />
@@ -279,8 +298,9 @@ function NowLine() {
   );
 }
 
-function Block({ task, onOpen, onUnschedule, onEstimate }: {
-  task: DayTask; onOpen: () => void; onUnschedule: () => void; onEstimate: (m: number) => void;
+function Block({ task, running, onToggleTimer, onOpen, onUnschedule, onEstimate }: {
+  task: DayTask; running: boolean; onToggleTimer: () => void;
+  onOpen: () => void; onUnschedule: () => void; onEstimate: (m: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `t-${task.id}` });
   const mins = task.estimateMinutes ?? DEFAULT_ESTIMATE;
@@ -291,7 +311,10 @@ function Block({ task, onOpen, onUnschedule, onEstimate }: {
   };
   return (
     <div ref={setNodeRef} style={style}
-      className={`group absolute left-14 right-1 z-20 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 shadow-sm ${isDragging ? 'opacity-50' : ''} ${task.isCompleted ? 'opacity-60' : ''}`}>
+      className={`group absolute left-14 right-1 z-20 overflow-hidden rounded-lg border px-2.5 py-1.5 shadow-sm ${isDragging ? 'opacity-50' : ''} ${task.isCompleted ? 'opacity-60' : ''} ${
+        running
+          ? 'border-[var(--accent)] bg-[var(--accent-quiet)] ring-1 ring-[var(--accent)]/40'
+          : 'border-slate-700 bg-slate-800'}`}>
       <div className="flex h-full items-start gap-2">
         <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[task.priority] }} />
         <div className="min-w-0 flex-1 cursor-grab active:cursor-grabbing" {...listeners} {...attributes}>
@@ -301,7 +324,15 @@ function Block({ task, onOpen, onUnschedule, onEstimate }: {
             {task.folderName ? `, ${task.folderName}` : ''}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 max-lg:opacity-100">
+        {/* The timer button stays visible while running, so it is obvious what is
+            being worked on and one click stops it. */}
+        <div className={`flex shrink-0 items-center gap-0.5 group-hover:opacity-100 max-lg:opacity-100 ${running ? '' : 'opacity-0'}`}>
+          <button onClick={onToggleTimer} title={running ? 'Stop timer' : 'Start timer'}
+            className={`rounded p-1 ${running
+              ? 'text-[var(--accent)] hover:bg-slate-800'
+              : 'text-slate-500 hover:bg-slate-700 hover:text-slate-200'}`}>
+            {running ? <Square size={12} /> : <Play size={12} />}
+          </button>
           <EstimateMenu value={task.estimateMinutes} onPick={onEstimate} />
           <button onClick={onOpen} title="Open card"
             className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200"><Clock size={12} /></button>

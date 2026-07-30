@@ -1,0 +1,1 @@
+ALTER TABLE `users` MODIFY COLUMN `accent` varchar(20) NOT NULL DEFAULT 'lime';

@@ -54,7 +54,7 @@ export const users = mysqlTable('users', {
     dailyDigest: boolean('daily_digest').default(true).notNull(),
     // Appearance is a personal preference, not a workspace one.
     theme: mysqlEnum('theme', ['system', 'dark', 'light']).default('dark').notNull(),
-    accent: varchar('accent', { length: 20 }).default('violet').notNull(),
+    accent: varchar('accent', { length: 20 }).default('lime').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [
