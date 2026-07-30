@@ -30,9 +30,10 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   const [to, setTo] = useState(today());
   const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['report', from, to, businessId],
     queryFn: () => apiGet<Report>(`/reports/time?from=${from}&to=${to}${bizQ}`),
+    retry: false,
   });
 
   const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-500';
@@ -53,7 +54,20 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           </div>
         </div>
 
-        {isLoading || !data ? (
+        {error ? (
+          // Without this the page sat on "Loading..." forever whenever the request
+          // failed, which looks like the report is simply broken.
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+            <p className="text-sm font-medium text-red-300">This report could not load.</p>
+            <p className="mt-1 text-xs text-red-300/80">
+              {error instanceof Error ? error.message : 'Something went wrong.'}
+            </p>
+            <button onClick={() => refetch()}
+              className="mt-3 rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-200 hover:bg-red-500/10">
+              Try again
+            </button>
+          </div>
+        ) : isLoading || !data ? (
           <p className="text-sm text-slate-500">Loading...</p>
         ) : (
           <>
@@ -155,10 +169,18 @@ const dur = (m: number) => {
  */
 function EstimateAccuracy({ from, to, businessId }: { from: string; to: string; businessId: BusinessSelection }) {
   const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
-  const { data } = useQuery({
+  const { data, error } = useQuery({
     queryKey: ['estimates', from, to, businessId],
     queryFn: () => apiGet<EstimateReport>(`/reports/estimates?from=${from}&to=${to}${bizQ}`),
+    retry: false,
   });
+  if (error) {
+    return (
+      <div className="mt-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-xs text-red-300">
+        Estimate vs actual could not load. {error instanceof Error ? error.message : ''}
+      </div>
+    );
+  }
   if (!data || data.totals.compared === 0) {
     return (
       <div className="mt-6 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">

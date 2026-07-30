@@ -64,6 +64,32 @@ export function buildServer() {
     credentials: true,
   });
 
+  /**
+   * Any unhandled error would otherwise surface as a bare "Internal Server Error",
+   * which tells whoever hit it nothing and leaves no trail. Log the whole thing
+   * (route, and the database's own message when it is a driver error) and hand back
+   * something a person can actually report.
+   */
+  app.setErrorHandler((rawErr, req, reply) => {
+    const err = rawErr as Error & { statusCode?: number; code?: string; sqlMessage?: string };
+    const status = err.statusCode && err.statusCode >= 400 ? err.statusCode : 500;
+    if (status >= 500) {
+      req.log.error({
+        err,
+        url: req.url,
+        method: req.method,
+        // mysql2 puts the useful part here.
+        dbCode: err.code,
+        sqlMessage: err.sqlMessage,
+      }, 'request failed');
+    }
+    reply.code(status).send({
+      error: status >= 500
+        ? `Something broke handling ${req.method} ${req.url}. ${err.message}`
+        : err.message,
+    });
+  });
+
   app.get('/api/v1/health', async () => ({
     ok: true,
     service: 'klippy-api',
