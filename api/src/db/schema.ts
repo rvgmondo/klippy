@@ -11,7 +11,7 @@
  */
 import {
   mysqlTable, int, varchar, text, boolean, datetime, date,
-  mysqlEnum, timestamp, decimal, index, uniqueIndex, type AnyMySqlColumn,
+  mysqlEnum, timestamp, decimal, index, uniqueIndex, json, type AnyMySqlColumn,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 
@@ -95,6 +95,15 @@ export const businesses = mysqlTable('businesses', {
   accountId: int('account_id', { unsigned: true }).notNull()
     .references(() => accounts.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 150 }).notNull(),
+  // What kind of business this is. Drives the example content it's seeded with
+  // and (eventually) which type-specific modules show up (inventory, MRR, etc).
+  type: mysqlEnum('type', ['services', 'products', 'code', 'content']).default('services').notNull(),
+  // A business is rarely just one thing (e.g. an agency that also sells a productized
+  // tool). `type` stays fixed after creation (it drove the one-time seed content);
+  // these are additional type-specific modules turned on later, purely additive -
+  // they just widen which offering fields show by default. Empty array is common.
+  secondaryTypes: json('secondary_types').$type<('services' | 'products' | 'code' | 'content')[]>()
+    .default([]).notNull(),
   color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
   position: int('position', { unsigned: true }).default(0).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
@@ -483,6 +492,78 @@ export const payments = mysqlTable('payments', {
   createdAt: createdAt(),
 }, (t) => [
   index('idx_payments_account_doc').on(t.accountId, t.documentId),
+]);
+
+// ---- Offerings ("The Offering": what the business actually sells. Shape is the
+// same table for every business type - only which fields matter changes: a
+// services catalog uses price+unit, Products additionally uses cost/stockQty/
+// reorderPoint, Code marks recurring=true for MRR, Content just uses price+unit.)
+export const offerings = mysqlTable('offerings', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 150 }).notNull(),
+  description: text('description'),
+  price: decimal('price', { precision: 12, scale: 2 }).default('0').notNull(),
+  cost: decimal('cost', { precision: 12, scale: 2 }),          // COGS - mainly Products
+  unit: varchar('unit', { length: 30 }),                        // "hour" / "unit" / "month" / "post"...
+  recurring: boolean('recurring').default(false).notNull(),    // contributes to MRR - mainly Code
+  stockQty: int('stock_qty'),                                   // mainly Products
+  reorderPoint: int('reorder_point'),                           // mainly Products
+  active: boolean('active').default(true).notNull(),
+  position: int('position', { unsigned: true }).default(0).notNull(),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_offerings_account_business').on(t.accountId, t.businessId, t.position),
+]);
+
+// ---- Expenses ("Financial Viability"'s missing half: cost structure, not just
+// revenue. Deliberately simple - a dated ledger line, not full accounting.)
+export const expenses = mysqlTable('expenses', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  // Optional: which client/project this cost belongs to, so profit can be shown per
+  // client, not just for the business overall. Null means general overhead.
+  folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+  description: varchar('description', { length: 200 }).notNull(),
+  category: varchar('category', { length: 60 }),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  incurredOn: date('incurred_on', { mode: 'string' }).notNull(),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_expenses_account_business').on(t.accountId, t.businessId, t.incurredOn),
+]);
+
+// ---- Subscriptions (recurring billing: ties a recurring Offering to a specific
+// client/folder, and drives the monthly invoice the cron job generates) ----------
+export const subscriptions = mysqlTable('subscriptions', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  offeringId: int('offering_id', { unsigned: true }).notNull()
+    .references(() => offerings.id, { onDelete: 'cascade' }),
+  folderId: int('folder_id', { unsigned: true }).notNull()
+    .references(() => folders.id, { onDelete: 'cascade' }),
+  status: mysqlEnum('status', ['active', 'paused', 'canceled']).default('active').notNull(),
+  startedOn: date('started_on', { mode: 'string' }).notNull(),
+  nextBillDate: date('next_bill_date', { mode: 'string' }).notNull(),
+  lastBilledAt: datetime('last_billed_at'),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_subscriptions_account_status').on(t.accountId, t.status, t.nextBillDate),
 ]);
 
 // ---- Deals (the Acquisition pillar: a sales pipeline) ---------------------

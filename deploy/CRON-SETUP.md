@@ -1,10 +1,8 @@
-# Turning on the morning digest email
+# Turning on the cron jobs (digest email + recurring billing)
 
-The digest is a daily email listing what is due today and what is overdue. It is only
-sent to people who have it enabled (Settings > Profile) and only when they actually have
-something due, so it never nags with an empty message.
-
-It runs from a cPanel cron job that calls a protected endpoint.
+Both of these are cPanel cron jobs that call a protected endpoint, using the same
+shared secret. If you already set up the digest, you only need to do step 2 again
+(add one more cron job) - the secret and env vars are shared.
 
 ## 1. Add the secret to the Node app
 
@@ -18,30 +16,52 @@ Also confirm `APP_URL` is set to `https://klippy.mondobase.com` so the email lin
 
 Click **Save**, then **Restart** (env vars only load on restart).
 
-## 2. Add the cron job
+## 2. Add the cron jobs
 
-cPanel > **Cron Jobs** > Add New Cron Job.
+cPanel > **Cron Jobs** > Add New Cron Job. Add both of these as separate jobs.
 
-- Common Settings: **Once Per Day** (or set the minute/hour you want the mail to land,
-  e.g. minute `0`, hour `7` for 07:00 server time).
+### Morning digest
+A daily email listing what is due today and what is overdue. Only sent to people who
+have it enabled (Settings > Profile) and only when they actually have something due.
+
+- Common Settings: **Once Per Day** (e.g. minute `0`, hour `7` for 07:00 server time).
 - Command (replace `YOUR_SECRET` with the value from step 1):
 
 ```
 curl -s -X POST -H "X-Cron-Key: YOUR_SECRET" https://klippy.mondobase.com/api/v1/cron/daily-digest > /dev/null 2>&1
 ```
 
-## 3. Test it without waiting for morning
+### Recurring billing
+Generates a draft invoice for every active subscription whose next bill date has
+arrived, then rolls it forward a month. Safe to run more than once a day - anything
+not yet due is simply skipped.
 
-Run the same command from cPanel Terminal, or temporarily set the cron to run in a couple
-of minutes. A successful call returns:
+- Common Settings: **Once Per Day** is enough (subscriptions bill monthly either way).
+- Command (same secret):
 
+```
+curl -s -X POST -H "X-Cron-Key: YOUR_SECRET" https://klippy.mondobase.com/api/v1/cron/bill-subscriptions > /dev/null 2>&1
+```
+
+## 3. Test without waiting
+
+Run either command from cPanel Terminal, or temporarily set the cron to run in a
+couple of minutes.
+
+Digest returns:
 ```json
 {"ok":true,"considered":1,"sent":1}
 ```
+- `considered` = people with the digest enabled, `sent` = how many actually got mail.
 
-- `considered` = people with the digest enabled
-- `sent` = how many actually got mail (people with nothing due are skipped)
+Billing returns:
+```json
+{"ok":true,"due":2,"billed":2,"failed":0}
+```
+- `due` = subscriptions whose next bill date had arrived, `billed` = invoices actually
+  created, `failed` = errored (check the app log for why - e.g. the client folder or
+  offering was deleted).
 
-If it returns `{"error":"Bad cron key."}` the secret in the cron command does not match
-`CRON_SECRET`. If it returns `{"error":"CRON_SECRET is not configured."}` the env var is
-missing or the app was not restarted after adding it.
+If either returns `{"error":"Bad cron key."}` the secret in the cron command does not
+match `CRON_SECRET`. If it returns `{"error":"CRON_SECRET is not configured."}` the env
+var is missing or the app was not restarted after adding it.

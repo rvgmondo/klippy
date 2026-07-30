@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `type` enum('services','products','code','content') DEFAULT 'services' NOT NULL;

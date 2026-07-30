@@ -19,10 +19,52 @@ export interface Account {
   hasLogo?: boolean;
   currency?: string;
 }
+export interface Subscription {
+  id: number;
+  businessId: number;
+  status: 'active' | 'paused' | 'canceled';
+  startedOn: string;
+  nextBillDate: string;
+  lastBilledAt: string | null;
+  offeringId: number;
+  offeringName: string;
+  price: string;
+  unit: string | null;
+  folderId: number;
+  clientName: string;
+}
+export interface Offering {
+  id: number;
+  accountId: number;
+  businessId: number;
+  name: string;
+  description: string | null;
+  price: string;
+  cost: string | null;
+  unit: string | null;
+  recurring: boolean;
+  stockQty: number | null;
+  reorderPoint: number | null;
+  active: boolean;
+  position: number;
+}
+export interface Expense {
+  id: number;
+  accountId: number;
+  businessId: number;
+  folderId: number | null;
+  description: string;
+  category: string | null;
+  amount: string;
+  incurredOn: string;
+}
+export type BusinessType = 'services' | 'products' | 'code' | 'content';
 export interface Business {
   id: number;
   accountId: number;
   name: string;
+  type: BusinessType;
+  secondaryTypes: BusinessType[];
   color: string;
   position: number;
 }

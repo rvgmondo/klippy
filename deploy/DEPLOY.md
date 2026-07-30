@@ -74,15 +74,30 @@ signup creates your real workspace. Everyone signing up gets their own isolated
 workspace; from your own workspace you cannot see theirs and they cannot see yours.
 
 ## Updating later
-1. On your PC: `bash scripts/make-deploy.sh`
+1. On your PC: `bash scripts/make-deploy.sh` (or build `api` and `web` separately if
+   you're on Windows without bash - `npm run build` in each folder).
 2. Re-upload + extract `klippy-web.zip` into the docroot (overwrite).
 3. If the API changed: re-upload + extract `klippy-api.zip` into `klippy_api`,
    then Restart the app in Setup Node.js App. Run NPM Install only if
    `package.json` changed.
-4. If the database changed: import the new migration SQL Claude gives you via
-   phpMyAdmin. Never re-import the full `schema.sql` over live data.
+4. If the database changed: **do nothing extra.** The API runs any pending
+   migrations itself on startup (see `api/src/db/migrate.ts`), tracked in a
+   `__drizzle_migrations` table - restarting the app in step 3 is enough.
+   Do NOT also run the migration SQL by hand via phpMyAdmin; if you do, the
+   app's own migration runner will try to run it again on next restart, get a
+   "Duplicate column"/"Table already exists" error, and refuse to start
+   (crashes the whole app - shows as a 503). If that already happened, fix it
+   by manually inserting one row into `__drizzle_migrations` marking the
+   latest migration's timestamp as applied, then restart again.
 
 ## Troubleshooting
+- **App won't start / site shows 503**: Setup Node.js App > open your app > read the
+  log. Two common causes:
+  - `ERR_MODULE_NOT_FOUND` for a package (e.g. `dotenv`): node_modules is out of
+    date - click **Run NPM Install**, then Restart.
+  - `klippy-api migration failed: ... Duplicate column` or `... already exists`: a
+    migration was applied twice - once by hand via phpMyAdmin, once by the app's
+    own migration runner on boot. See point 4 above for the fix.
 - **/api/v1/health works but login fails**: check SSL is active (step 1); the cookie
   requires HTTPS. Also confirm JWT_SECRET is set.
 - **500 errors mentioning the database**: DATABASE_URL wrong (prefixed names!) or the

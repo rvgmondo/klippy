@@ -1,0 +1,2 @@
+ALTER TABLE `expenses` ADD `folder_id` int unsigned;--> statement-breakpoint
+ALTER TABLE `expenses` ADD CONSTRAINT `expenses_folder_id_folders_id_fk` FOREIGN KEY (`folder_id`) REFERENCES `folders`(`id`) ON DELETE set null ON UPDATE no action;

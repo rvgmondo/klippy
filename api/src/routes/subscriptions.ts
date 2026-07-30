@@ -1,0 +1,103 @@
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { desc, eq } from 'drizzle-orm';
+import { db } from '../db/client.js';
+import { subscriptions, offerings, folders } from '../db/schema.js';
+import { authOf } from '../lib/context.js';
+import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { intId } from '../lib/http.js';
+import { resolveBusinessId } from '../lib/business.js';
+import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+const status = z.enum(['active', 'paused', 'canceled']);
+
+export async function subscriptionRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', app.requireAuth);
+
+  // List, with the offering name/price and client name joined in for display.
+  app.get('/api/v1/subscriptions', async (req) => {
+    const { accountId } = authOf(req);
+    const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+    const bizFilter = q.success && q.data.businessId ? eq(subscriptions.businessId, q.data.businessId) : undefined;
+    const rows = await db.select({
+      id: subscriptions.id, businessId: subscriptions.businessId, status: subscriptions.status,
+      startedOn: subscriptions.startedOn, nextBillDate: subscriptions.nextBillDate,
+      lastBilledAt: subscriptions.lastBilledAt,
+      offeringId: subscriptions.offeringId, offeringName: offerings.name, price: offerings.price, unit: offerings.unit,
+      folderId: subscriptions.folderId, clientName: folders.name,
+    }).from(subscriptions)
+      .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
+      .innerJoin(folders, eq(folders.id, subscriptions.folderId))
+      .where(tenantWhere(subscriptions, accountId, bizFilter))
+      .orderBy(desc(subscriptions.createdAt));
+    return { subscriptions: rows };
+  });
+
+  // Start a subscription: bills the first cycle immediately (as a draft invoice) so
+  // the result is visible right away, then schedules the next one a month out.
+  app.post('/api/v1/subscriptions', async (req, reply) => {
+    const { accountId, userId } = authOf(req);
+    const parsed = z.object({
+      businessId: z.number().int().positive().optional(),
+      offeringId: z.number().int().positive(),
+      folderId: z.number().int().positive(),
+      startedOn: dateStr.optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const d = parsed.data;
+
+    const [offering] = await db.select().from(offerings)
+      .where(tenantWhere(offerings, accountId, eq(offerings.id, d.offeringId))).limit(1);
+    if (!offering) return reply.code(404).send({ error: 'Offering not found.' });
+    const [folder] = await db.select().from(folders)
+      .where(tenantWhere(folders, accountId, eq(folders.id, d.folderId))).limit(1);
+    if (!folder) return reply.code(404).send({ error: 'Client not found.' });
+
+    const businessId = await resolveBusinessId(accountId, d.businessId ?? offering.businessId);
+    if (!businessId) return reply.code(400).send({ error: 'No business found for this account.' });
+    const startedOn = d.startedOn ?? todayStr();
+
+    const ins = await db.insert(subscriptions).values(withTenant(accountId, {
+      businessId, offeringId: d.offeringId, folderId: d.folderId, status: 'active' as const,
+      startedOn, nextBillDate: addOneMonth(startedOn), createdBy: userId,
+    }));
+    const id = Number(ins[0].insertId);
+
+    try {
+      await generateSubscriptionInvoice(accountId, { businessId, offeringId: d.offeringId, folderId: d.folderId, createdBy: userId });
+      await db.update(subscriptions).set({ lastBilledAt: new Date() })
+        .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
+    } catch (err) {
+      req.log.error({ err }, 'first subscription invoice failed');
+    }
+
+    const [created] = await db.select().from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
+    return reply.code(201).send({ subscription: created });
+  });
+
+  app.patch('/api/v1/subscriptions/:id', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const parsed = z.object({ status }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const res = await db.update(subscriptions).set({ status: parsed.data.status })
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
+    if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subscription not found.' });
+    const [updated] = await db.select().from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
+    return { subscription: updated };
+  });
+
+  app.delete('/api/v1/subscriptions/:id', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const res = await db.delete(subscriptions).where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
+    if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subscription not found.' });
+    return { ok: true };
+  });
+}

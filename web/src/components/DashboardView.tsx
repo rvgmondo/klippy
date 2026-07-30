@@ -17,6 +17,13 @@ interface Dashboard {
   openCount: number; dueToday: number; overdue: number; flagged: number; weekSecondsAll: number;
 }
 interface DealSummary { openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number }
+interface MoneyTotals { expenses: number; profit: number; mrr: number }
+
+function monthStart(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+function todayStr(): string { return new Date().toISOString().slice(0, 10); }
 
 const PRIORITY_COLOR: Record<Priority, string> = {
   none: '#6b7280', low: '#64748b', medium: '#eab308', high: '#f97316', urgent: '#ef4444',
@@ -47,6 +54,10 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`) });
   const deals = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ summary: DealSummary }>(`/deals${bizQ}`) });
+  const money_ = useQuery({
+    queryKey: ['dashboard-money', businessId],
+    queryFn: () => apiGet<{ totals: MoneyTotals }>(`/reports/time?from=${monthStart()}&to=${todayStr()}${bizQ ? '&' + bizQ.slice(1) : ''}`),
+  });
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
 
@@ -144,9 +155,13 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         </div>
 
         {/* KPI strip */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
           <Kpi label="Won this month" value={money(ds?.wonValueThisMonth ?? 0)} accent />
           <Kpi label="Pipeline" value={money(ds?.pipelineValue ?? 0)} />
+          <Kpi label="Profit this month" value={money(money_.data?.totals.profit ?? 0)}
+            accent={(money_.data?.totals.profit ?? 0) >= 0} warn={(money_.data?.totals.profit ?? 0) < 0} />
+          <Kpi label="MRR" value={money(money_.data?.totals.mrr ?? 0)}
+            onClick={onNavigate ? () => onNavigate('offerings') : undefined} />
           <Kpi label="Overdue" value={String((d?.delivery.overdue ?? 0) + (d?.operations.overdue ?? 0))} />
           <Kpi label="Time this week" value={fmtHours(d?.weekSecondsAll ?? 0)} />
         </div>
@@ -210,11 +225,12 @@ function PanelHead({ title, meta, action }: { title: string; meta?: string; acti
     </div>
   );
 }
-function Kpi({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Kpi({ label, value, accent, warn, onClick }: { label: string; value: string; accent?: boolean; warn?: boolean; onClick?: () => void }) {
+  const Comp = onClick ? 'button' : 'div';
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+    <Comp onClick={onClick} className={`rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-left ${onClick ? 'hover:border-slate-700 hover:bg-slate-900' : ''}`}>
       <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
-      <div className={`num mt-1.5 text-xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
-    </div>
+      <div className={`num mt-1.5 text-xl font-semibold ${warn ? 'text-red-400' : accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
+    </Comp>
   );
 }

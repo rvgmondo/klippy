@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { and, eq, isNotNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions } from '../db/schema.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
+import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -76,5 +77,42 @@ export async function cronRoutes(app: FastifyInstance) {
       }
     }
     return { ok: true, considered: recipients.length, sent };
+  });
+
+  /**
+   * Recurring billing. Generates a draft invoice for every active subscription whose
+   * next_bill_date has arrived, across every account (there's no logged-in user here,
+   * same pattern as the digest above), then rolls next_bill_date forward a month.
+   * Called by a cPanel cron job, same auth as the digest:
+   *   curl -s -X POST -H "X-Cron-Key: SECRET" https://your-site/api/v1/cron/bill-subscriptions
+   */
+  app.post('/api/v1/cron/bill-subscriptions', async (req, reply) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
+    const given = (req.headers['x-cron-key'] as string | undefined) ?? '';
+    if (given !== secret) return reply.code(401).send({ error: 'Bad cron key.' });
+
+    const today = todayStr();
+    const due = await db.select().from(subscriptions)
+      .where(and(eq(subscriptions.status, 'active'), lte(subscriptions.nextBillDate, today)));
+
+    let billed = 0;
+    let failed = 0;
+    for (const sub of due) {
+      try {
+        await generateSubscriptionInvoice(sub.accountId, {
+          businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
+          createdBy: sub.createdBy,
+        });
+        await db.update(subscriptions).set({
+          nextBillDate: addOneMonth(sub.nextBillDate), lastBilledAt: new Date(),
+        }).where(eq(subscriptions.id, sub.id));
+        billed++;
+      } catch (err) {
+        req.log.error({ err, subscriptionId: sub.id }, 'subscription billing failed');
+        failed++;
+      }
+    }
+    return { ok: true, due: due.length, billed, failed };
   });
 }

@@ -5,12 +5,13 @@ import type { BusinessSelection } from './BusinessSwitcher';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
+  cost: number; profit: number | null;
 }
 interface Report {
   currency: string;
   clients: ClientRow[];
   people: { userId: number; name: string; hours: number }[];
-  totals: { hours: number; amount: number; unratedClients: number };
+  totals: { hours: number; amount: number; unratedClients: number; expenses: number; profit: number; mrr: number };
 }
 
 function money(v: number, currency: string) {
@@ -56,11 +57,18 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           <p className="text-sm text-slate-500">Loading...</p>
         ) : (
           <>
-            <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <Tile label="Total time" value={`${data.totals.hours.toFixed(2)} h`} />
               <Tile label="Billable" value={money(data.totals.amount, cur)} accent />
+              <Tile label="Expenses" value={money(data.totals.expenses, cur)} />
+              <Tile label="Profit" value={money(data.totals.profit, cur)} accent={data.totals.profit >= 0} warn={data.totals.profit < 0} />
               <Tile label="Clients without a rate" value={String(data.totals.unratedClients)} />
             </div>
+            {data.totals.mrr > 0 && (
+              <p className="-mt-3 mb-5 text-xs text-slate-500">
+                Plus <span className="font-medium text-violet-300">{money(data.totals.mrr, cur)}</span> in monthly recurring revenue (not date-ranged - see Offerings).
+              </p>
+            )}
 
             <h3 className="mb-2 text-sm font-semibold text-slate-300">By client</h3>
             <div className="overflow-x-auto rounded-xl border border-slate-800">
@@ -71,11 +79,13 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
                     <th className="px-3 py-2 text-right font-medium">Hours</th>
                     <th className="px-3 py-2 text-right font-medium">Rate</th>
                     <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Cost</th>
+                    <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Profit</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.clients.length === 0 && (
-                    <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-500">No time tracked in this range.</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">No time tracked in this range.</td></tr>
                   )}
                   {data.clients.map((c) => (
                     <tr key={c.folderId} className="border-t border-slate-800">
@@ -86,6 +96,12 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
                       </td>
                       <td className="px-3 py-2 text-right num text-slate-100">
                         {c.amount == null ? '-' : money(c.amount, cur)}
+                      </td>
+                      <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">
+                        {c.cost > 0 ? money(c.cost, cur) : '-'}
+                      </td>
+                      <td className="hidden px-3 py-2 text-right num sm:table-cell">
+                        {c.profit == null ? '-' : <span className={c.profit < 0 ? 'text-red-400' : 'text-slate-100'}>{money(c.profit, cur)}</span>}
                       </td>
                     </tr>
                   ))}
@@ -116,11 +132,11 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   );
 }
 
-function Tile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Tile({ label, value, accent, warn }: { label: string; value: string; accent?: boolean; warn?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
       <div className="mb-1 text-xs text-slate-400">{label}</div>
-      <div className={`num text-2xl font-semibold ${accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
+      <div className={`num text-2xl font-semibold ${warn ? 'text-red-400' : accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { CalendarView } from '../components/CalendarView';
 import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
+import { OfferingsView } from '../components/OfferingsView';
+import { ExpensesView } from '../components/ExpensesView';
 import { PipelineView } from '../components/PipelineView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
@@ -15,11 +17,11 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'reports' | 'billing';
+type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing';
 
 const VIEW_LABELS: Record<View, string> = {
   home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
-  files: 'Files', reports: 'Reports', billing: 'Billing',
+  files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
 };
 const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
@@ -105,6 +107,8 @@ export function Workspace() {
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}
           {view === 'files' && <FilesView />}
+          {view === 'offerings' && <OfferingsView businessId={businessId} />}
+          {view === 'expenses' && <ExpensesView businessId={businessId} />}
           {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
         </main>

@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `secondary_types` json DEFAULT ('[]') NOT NULL;

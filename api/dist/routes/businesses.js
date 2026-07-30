@@ -5,13 +5,17 @@ import { businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { seedNewBusiness } from '../lib/seed.js';
+const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
+    type: businessType.default('services'),
     color: z.string().trim().max(20).optional(),
 });
 const updateSchema = z.object({
     name: z.string().trim().min(1).max(150).optional(),
     color: z.string().trim().max(20).optional(),
+    secondaryTypes: z.array(businessType).max(4).optional(),
 });
 export async function businessRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
@@ -29,11 +33,17 @@ export async function businessRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const position = await nextPosition(businesses, sql `account_id = ${accountId}`);
-        const ins = await db.insert(businesses).values(withTenant(accountId, {
-            name: parsed.data.name, color: parsed.data.color ?? '#6366f1', position, createdBy: userId,
-        }));
-        const [created] = await db.select().from(businesses)
-            .where(tenantWhere(businesses, accountId, eq(businesses.id, Number(ins[0].insertId)))).limit(1);
+        const created = await db.transaction(async (tx) => {
+            const ins = await tx.insert(businesses).values(withTenant(accountId, {
+                name: parsed.data.name, type: parsed.data.type, color: parsed.data.color ?? '#6366f1',
+                position, createdBy: userId,
+            }));
+            const businessId = Number(ins[0].insertId);
+            await seedNewBusiness(tx, accountId, userId, businessId, parsed.data.type);
+            const [row] = await tx.select().from(businesses)
+                .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1);
+            return row;
+        });
         return reply.code(201).send({ business: created });
     });
     app.patch('/api/v1/businesses/:id', async (req, reply) => {
@@ -44,7 +54,13 @@ export async function businessRoutes(app) {
         const parsed = updateSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-        const res = await db.update(businesses).set(parsed.data)
+        const patch = { ...parsed.data };
+        if (parsed.data.secondaryTypes) {
+            const [existing] = await db.select({ type: businesses.type }).from(businesses)
+                .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
+            patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
+        }
+        const res = await db.update(businesses).set(patch)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Business not found.' });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, eq, gte, isNotNull, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { timeEntries, tasks, boards, folders, users, accounts } from '../db/schema.js';
+import { timeEntries, tasks, boards, folders, users, accounts, expenses, offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -71,7 +71,7 @@ export async function reportRoutes(app) {
                 continue;
             totalSeconds += secs;
             if (root) {
-                const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0 };
+                const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0, cost: 0 };
                 cur.seconds += secs;
                 perClient.set(root.id, cur);
             }
@@ -79,14 +79,33 @@ export async function reportRoutes(app) {
             p.seconds += secs;
             perPerson.set(e.userId, p);
         }
+        // The cost side: expenses dated in the same range, scoped the same way by business.
+        // Attribute each one (if tagged to a client) to that client's root folder, same
+        // rollup rule as time, so per-client profit is possible - not just business totals.
+        const expenseFilter = onlyBusiness !== undefined ? eq(expenses.businessId, onlyBusiness) : undefined;
+        const expenseRows = await db.select({ amount: expenses.amount, folderId: expenses.folderId }).from(expenses)
+            .where(tenantWhere(expenses, accountId, and(expenseFilter, gte(expenses.incurredOn, q.data.from), lte(expenses.incurredOn, q.data.to))));
+        const expenseTotal = Math.round(expenseRows.reduce((s, e) => s + Number(e.amount), 0) * 100) / 100;
+        for (const e of expenseRows) {
+            if (e.folderId == null)
+                continue; // general overhead, not attributed to a client
+            const root = rootOf(e.folderId);
+            if (!root || (onlyBusiness !== undefined && root.businessId !== onlyBusiness))
+                continue;
+            const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0, cost: 0 };
+            cur.cost += Number(e.amount);
+            perClient.set(root.id, cur);
+        }
         const clients = [...perClient.entries()].map(([folderId, v]) => {
             const rate = rateFor(folderId);
             const hours = v.seconds / 3600;
+            const amount = rate == null ? null : Math.round(hours * rate * 100) / 100;
+            const cost = Math.round(v.cost * 100) / 100;
             return {
                 folderId, name: v.name, seconds: v.seconds,
                 hours: Math.round(hours * 100) / 100,
-                rate,
-                amount: rate == null ? null : Math.round(hours * rate * 100) / 100,
+                rate, amount, cost,
+                profit: amount == null ? null : Math.round((amount - cost) * 100) / 100,
             };
         }).sort((a, b) => b.seconds - a.seconds);
         const people = [...perPerson.entries()].map(([userId, v]) => ({
@@ -94,6 +113,12 @@ export async function reportRoutes(app) {
             hours: Math.round((v.seconds / 3600) * 100) / 100,
         })).sort((a, b) => b.seconds - a.seconds);
         const billable = clients.reduce((sum, c) => sum + (c.amount ?? 0), 0);
+        // MRR is a snapshot, not date-ranged: sum of active recurring offerings right now.
+        const offeringFilter = onlyBusiness !== undefined ? eq(offerings.businessId, onlyBusiness) : undefined;
+        const offeringRows = await db.select({ price: offerings.price, recurring: offerings.recurring, active: offerings.active })
+            .from(offerings).where(tenantWhere(offerings, accountId, offeringFilter));
+        const mrr = Math.round(offeringRows.filter((o) => o.recurring && o.active)
+            .reduce((s, o) => s + Number(o.price), 0) * 100) / 100;
         return {
             currency,
             from: q.data.from,
@@ -105,6 +130,9 @@ export async function reportRoutes(app) {
                 hours: Math.round((totalSeconds / 3600) * 100) / 100,
                 amount: Math.round(billable * 100) / 100,
                 unratedClients: clients.filter((c) => c.rate == null).length,
+                expenses: expenseTotal,
+                profit: Math.round((billable - expenseTotal) * 100) / 100,
+                mrr,
             },
         };
     });
