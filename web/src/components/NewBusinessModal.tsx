@@ -53,7 +53,7 @@ export function NewBusinessModal({ onClose, onCreate, isPending }: {
 
         <button type="submit" disabled={!name.trim() || isPending}
           className="w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
-          {isPending ? 'Creating…' : 'Create business'}
+          {isPending ? 'Creating...' : 'Create business'}
         </button>
       </form>
     </div>

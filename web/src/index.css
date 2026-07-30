@@ -12,7 +12,7 @@
  */
 
 /*
- * MIDNIGHT SIGNAL — warm charcoal, one signal accent, mono numerals.
+ * MIDNIGHT SIGNAL: warm charcoal, one signal accent, mono numerals.
  * The whole app is re-skinned by remapping Tailwind's slate + violet ramps to
  * CSS variables. slate = the neutral surface/text ramp; violet = the accent.
  * `--accent` / `--accent-ink` are the semantic accent tokens (ink = text that

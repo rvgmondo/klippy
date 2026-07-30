@@ -127,9 +127,9 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                   <td className="px-3 py-2 text-right num text-slate-100">
                     {money(o.price)}{o.unit ? <span className="text-slate-500"> /{o.unit}</span> : null}
                   </td>
-                  <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">{o.cost ? money(o.cost) : '—'}</td>
+                  <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">{o.cost ? money(o.cost) : '-'}</td>
                   <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">
-                    {o.stockQty == null ? '—' : (
+                    {o.stockQty == null ? '-' : (
                       <span className={o.reorderPoint != null && o.stockQty <= o.reorderPoint ? 'text-amber-400' : ''}>{o.stockQty}</span>
                     )}
                   </td>
@@ -188,7 +188,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                           {s.status}
                         </span>
                       </td>
-                      <td className="px-3 py-2 num text-slate-400">{s.status === 'active' ? s.nextBillDate : '—'}</td>
+                      <td className="px-3 py-2 num text-slate-400">{s.status === 'active' ? s.nextBillDate : '-'}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           {s.status === 'active' && (
@@ -280,7 +280,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
         {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
         <button type="submit" disabled={!offeringId || !folderId || start.isPending}
           className="w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
-          {start.isPending ? 'Starting…' : 'Start subscription'}
+          {start.isPending ? 'Starting...' : 'Start subscription'}
         </button>
       </form>
     </div>
@@ -388,7 +388,7 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
         {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
         <button type="submit" disabled={!name.trim() || save.isPending}
           className="w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
-          {save.isPending ? 'Saving…' : isNew ? 'Add offering' : 'Save changes'}
+          {save.isPending ? 'Saving...' : isNew ? 'Add offering' : 'Save changes'}
         </button>
       </form>
     </div>

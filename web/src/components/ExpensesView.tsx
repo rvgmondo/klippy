@@ -72,7 +72,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
                 <tr key={e.id} className="group border-t border-slate-800">
                   <td className="px-3 py-2 text-slate-400">{e.incurredOn}</td>
                   <td className="px-3 py-2 font-medium text-slate-200">{e.description}</td>
-                  <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{e.category ?? '—'}</td>
+                  <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{e.category ?? '-'}</td>
                   <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{clientName(e.folderId) ?? <span className="text-slate-600">overhead</span>}</td>
                   <td className="px-3 py-2 text-right num text-slate-100">{money(e.amount)}</td>
                   <td className="px-3 py-2">
@@ -163,14 +163,14 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
         <label className="mb-1 block text-xs text-slate-400">Client (optional - leave blank for general overhead)</label>
         <select value={folderId} onChange={(e) => setFolderId(e.target.value)}
           className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500">
-          <option value="">— General overhead —</option>
+          <option value="">General overhead</option>
           {clientFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
 
         {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
         <button type="submit" disabled={!description.trim() || save.isPending}
           className="w-full rounded-lg bg-violet-600 py-2 text-sm font-medium text-white hover:bg-violet-500 disabled:opacity-50">
-          {save.isPending ? 'Saving…' : isNew ? 'Add expense' : 'Save changes'}
+          {save.isPending ? 'Saving...' : isNew ? 'Add expense' : 'Save changes'}
         </button>
       </form>
     </div>
