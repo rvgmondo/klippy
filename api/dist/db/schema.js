@@ -178,6 +178,12 @@ export const tasks = mysqlTable('tasks', {
     description: text('description'),
     priority: mysqlEnum('priority', ['none', 'low', 'medium', 'high', 'urgent']).default('none').notNull(),
     dueDate: date('due_date', { mode: 'string' }),
+    // TIME BLOCKING. A due date is when it must be finished; these are when you have
+    // actually decided to DO it, and how long you think it will take. Together they
+    // let the day planner lay work out on a timeline and warn when a day is
+    // over-committed, and let Reports compare the estimate against tracked time.
+    estimateMinutes: int('estimate_minutes', { unsigned: true }),
+    scheduledStart: datetime('scheduled_start'),
     // When a recurring card is completed, the next occurrence is created
     // automatically with the due date advanced by this interval.
     recurrence: mysqlEnum('recurrence', ['none', 'daily', 'weekly', 'biweekly', 'monthly']).default('none').notNull(),
@@ -193,6 +199,8 @@ export const tasks = mysqlTable('tasks', {
     index('idx_tasks_account_column').on(t.accountId, t.columnId, t.position),
     index('idx_tasks_account_board').on(t.accountId, t.boardId),
     index('idx_tasks_account_due').on(t.accountId, t.dueDate),
+    // Day planner: "what is scheduled for this person on this day".
+    index('idx_tasks_account_scheduled').on(t.accountId, t.scheduledStart),
 ]);
 // ---- Time entries ----------------------------------------------------------
 export const timeEntries = mysqlTable('time_entries', {

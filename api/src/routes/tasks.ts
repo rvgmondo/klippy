@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, desc, eq, gte, lte, ne, isNotNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte, ne, or, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, boards, boardColumns, users, taskSubtasks, taskComments, taskLabels, labels } from '../db/schema.js';
+import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments, taskLabels, labels } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -42,6 +42,8 @@ const createSchema = z.object({
   priority: priority.optional(),
   dueDate: dateStr.nullable().optional(),
   assignedTo: z.number().int().positive().nullable().optional(),
+  estimateMinutes: z.number().int().min(0).max(60 * 24).nullable().optional(),
+  scheduledStart: z.string().datetime({ offset: true }).nullable().optional(),
 });
 const updateSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
@@ -52,6 +54,9 @@ const updateSchema = z.object({
   assignedTo: z.number().int().positive().nullable().optional(),
   isCompleted: z.boolean().optional(),
   isArchived: z.boolean().optional(),
+  // Time blocking: how long you think it takes, and when you plan to do it.
+  estimateMinutes: z.number().int().min(0).max(60 * 24).nullable().optional(),
+  scheduledStart: z.string().datetime({ offset: true }).nullable().optional(),
 });
 const moveSchema = z.object({
   columnId: z.number().int().positive(),
@@ -82,6 +87,81 @@ export async function taskRoutes(app: FastifyInstance) {
     return { tasks: rows };
   });
 
+  /**
+   * Day planner. Everything needed to plan one day in a single round trip:
+   *  - `scheduled`: cards blocked onto this day, in time order
+   *  - `backlog`: unscheduled open cards worth pulling in (due on/before this day,
+   *     or with no date at all), so there is something to drag onto the timeline
+   *  - `capacity`: planned minutes vs the working day, which is what makes
+   *     over-committing visible instead of a surprise at 6pm
+   * Optional ?businessId scopes it like the rest of the app; ?mine=1 limits to
+   * cards assigned to you (or unassigned).
+   */
+  app.get('/api/v1/tasks/day', async (req, reply) => {
+    const { accountId, userId } = authOf(req);
+    const q = z.object({
+      date: dateStr,
+      businessId: z.coerce.number().int().positive().optional(),
+      mine: z.coerce.boolean().optional(),
+      workingMinutes: z.coerce.number().int().min(60).max(60 * 24).optional(),
+    }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'date (YYYY-MM-DD) required.' });
+    const { date, businessId, mine, workingMinutes = 480 } = q.data;
+
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(`${date}T23:59:59.999Z`);
+
+    // Cards live under boards -> folders, and the business lives on the folder, so
+    // scoping by business means joining out to the folder.
+    const base = () => db.select({
+      id: tasks.id, title: tasks.title, priority: tasks.priority, dueDate: tasks.dueDate,
+      boardId: tasks.boardId, columnId: tasks.columnId, isCompleted: tasks.isCompleted,
+      estimateMinutes: tasks.estimateMinutes, scheduledStart: tasks.scheduledStart,
+      assignedTo: tasks.assignedTo, boardName: boards.name, folderName: folders.name,
+    }).from(tasks)
+      .leftJoin(boards, eq(boards.id, tasks.boardId))
+      .leftJoin(folders, eq(folders.id, boards.folderId));
+
+    const scopes = [eq(tasks.isArchived, false)];
+    if (businessId) scopes.push(eq(folders.businessId, businessId));
+    if (mine) scopes.push(or(eq(tasks.assignedTo, userId), isNull(tasks.assignedTo))!);
+
+    const scheduled = await base()
+      .where(tenantWhere(tasks, accountId, and(
+        ...scopes,
+        gte(tasks.scheduledStart, dayStart), lte(tasks.scheduledStart, dayEnd),
+      )))
+      .orderBy(asc(tasks.scheduledStart));
+
+    const backlog = await base()
+      .where(tenantWhere(tasks, accountId, and(
+        ...scopes,
+        eq(tasks.isCompleted, false),
+        isNull(tasks.scheduledStart),
+        or(isNull(tasks.dueDate), lte(tasks.dueDate, date)),
+      )))
+      .orderBy(asc(tasks.dueDate)).limit(50);
+
+    const plannedMinutes = scheduled
+      .filter((t) => !t.isCompleted)
+      .reduce((sum, t) => sum + (t.estimateMinutes ?? 0), 0);
+
+    return {
+      date,
+      scheduled,
+      backlog,
+      capacity: {
+        workingMinutes,
+        plannedMinutes,
+        remainingMinutes: workingMinutes - plannedMinutes,
+        overcommitted: plannedMinutes > workingMinutes,
+        // Cards on the day with no estimate: the planned total is a lie until these
+        // are filled in, so the UI can say so rather than quietly under-reporting.
+        unestimated: scheduled.filter((t) => !t.isCompleted && t.estimateMinutes == null).length,
+      },
+    };
+  });
+
   // Full card detail: the card + its subtasks + comments (with author name).
   app.get('/api/v1/tasks/:id/detail', async (req, reply) => {
     const { accountId } = authOf(req);
@@ -110,7 +190,8 @@ export async function taskRoutes(app: FastifyInstance) {
     const { accountId, userId } = authOf(req);
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-    const { boardId, columnId, title, description, priority: pr, dueDate, assignedTo } = parsed.data;
+    const { boardId, columnId, title, description, priority: pr, dueDate, assignedTo,
+      estimateMinutes, scheduledStart } = parsed.data;
 
     const [board] = await db.select({ id: boards.id }).from(boards)
       .where(tenantWhere(boards, accountId, eq(boards.id, boardId))).limit(1);
@@ -125,6 +206,8 @@ export async function taskRoutes(app: FastifyInstance) {
     const ins = await db.insert(tasks).values(withTenant(accountId, {
       boardId, columnId, title, description: description ?? null,
       priority: pr ?? 'none', dueDate: dueDate ?? null, assignedTo: assignedTo ?? null,
+      estimateMinutes: estimateMinutes ?? null,
+      scheduledStart: scheduledStart ? new Date(scheduledStart) : null,
       position, createdBy: userId,
     }));
     const [created] = await db.select().from(tasks)
@@ -150,6 +233,10 @@ export async function taskRoutes(app: FastifyInstance) {
     // Maintain completedAt alongside isCompleted.
     if (parsed.data.isCompleted !== undefined) {
       patch.completedAt = parsed.data.isCompleted ? new Date() : null;
+    }
+    // scheduledStart arrives as an ISO string; the column is a datetime.
+    if (parsed.data.scheduledStart !== undefined) {
+      patch.scheduledStart = parsed.data.scheduledStart ? new Date(parsed.data.scheduledStart) : null;
     }
     await db.update(tasks).set(patch).where(tenantWhere(tasks, accountId, eq(tasks.id, id)));
 

@@ -8,7 +8,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal, GripVertical,
-  Home, Target, CalendarDays, HardDrive, BarChart3, Receipt, Package, Wallet, type LucideIcon,
+  Home, Target, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, type LucideIcon,
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -27,6 +27,7 @@ interface Props {
 
 const NAV: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'home', label: 'Home', icon: Home },
+  { key: 'today', label: 'Today', icon: CalendarCheck },
   { key: 'pipeline', label: 'Pipeline', icon: Target },
   { key: 'calendar', label: 'Calendar', icon: CalendarDays },
   { key: 'files', label: 'Files', icon: HardDrive },

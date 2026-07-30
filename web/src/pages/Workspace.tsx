@@ -7,6 +7,7 @@ import { CalendarView } from '../components/CalendarView';
 import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
+import { TodayView } from '../components/TodayView';
 import { OfferingsView } from '../components/OfferingsView';
 import { ExpensesView } from '../components/ExpensesView';
 import { PipelineView } from '../components/PipelineView';
@@ -17,11 +18,11 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing';
+type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing';
 
 const VIEW_LABELS: Record<View, string> = {
   home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
-  files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
+  today: 'Today', files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
 };
 const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
@@ -103,6 +104,7 @@ export function Workspace() {
 
         <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
+          {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView />}

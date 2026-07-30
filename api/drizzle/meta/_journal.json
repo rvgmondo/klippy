@@ -120,6 +120,13 @@
       "when": 1785389957056,
       "tag": "0016_add_business_secondary_types",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1785434342853,
+      "tag": "0017_wide_starbolt",
+      "breakpoints": true
     }
   ]
 }
