@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, eq, gte, isNotNull, lte } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { timeEntries, tasks, boards, folders, users, accounts, expenses, offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -133,6 +133,74 @@ export async function reportRoutes(app) {
                 expenses: expenseTotal,
                 profit: Math.round((billable - expenseTotal) * 100) / 100,
                 mrr,
+            },
+        };
+    });
+    /**
+     * Estimate vs actual. The payoff of time blocking: every card carries what you
+     * thought it would take, and the timers already recorded what it really took, so
+     * we can show the gap and let future estimates get less wrong.
+     *
+     * Only cards with BOTH an estimate and tracked time are compared, since a card
+     * with one and not the other says nothing about accuracy.
+     */
+    app.get('/api/v1/reports/estimates', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({
+            from: dateStr, to: dateStr,
+            businessId: z.coerce.number().int().positive().optional(),
+        }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
+        const onlyBusiness = q.data.businessId;
+        const start = new Date(`${q.data.from}T00:00:00.000Z`);
+        const end = new Date(`${q.data.to}T23:59:59.999Z`);
+        // Actual tracked seconds per task in the range.
+        const actuals = await db.select({
+            taskId: timeEntries.taskId,
+            seconds: sql `SUM(${timeEntries.durationSeconds})`,
+        }).from(timeEntries)
+            .where(tenantWhere(timeEntries, accountId, and(isNotNull(timeEntries.durationSeconds), gte(timeEntries.startTime, start), lte(timeEntries.startTime, end))))
+            .groupBy(timeEntries.taskId);
+        if (actuals.length === 0) {
+            return { from: q.data.from, to: q.data.to, tasks: [], totals: { compared: 0, estimateMinutes: 0, actualMinutes: 0, accuracyPct: null } };
+        }
+        const ids = actuals.map((a) => a.taskId);
+        const rows = await db.select({
+            id: tasks.id, title: tasks.title, estimateMinutes: tasks.estimateMinutes,
+            isCompleted: tasks.isCompleted, folderName: folders.name, businessId: folders.businessId,
+        }).from(tasks)
+            .leftJoin(boards, eq(boards.id, tasks.boardId))
+            .leftJoin(folders, eq(folders.id, boards.folderId))
+            .where(tenantWhere(tasks, accountId, and(inArray(tasks.id, ids), isNotNull(tasks.estimateMinutes))));
+        const actualBy = new Map(actuals.map((a) => [a.taskId, Number(a.seconds ?? 0)]));
+        const compared = rows
+            .filter((t) => onlyBusiness === undefined || t.businessId === onlyBusiness)
+            .map((t) => {
+            const estimate = Number(t.estimateMinutes ?? 0);
+            const actual = Math.round((actualBy.get(t.id) ?? 0) / 60);
+            return {
+                id: t.id, title: t.title, folderName: t.folderName, isCompleted: t.isCompleted,
+                estimateMinutes: estimate, actualMinutes: actual,
+                diffMinutes: actual - estimate,
+                // Positive means it took longer than planned.
+                overPct: estimate > 0 ? Math.round(((actual - estimate) / estimate) * 100) : null,
+            };
+        })
+            .sort((a, b) => Math.abs(b.diffMinutes) - Math.abs(a.diffMinutes));
+        const estimateTotal = compared.reduce((s, t) => s + t.estimateMinutes, 0);
+        const actualTotal = compared.reduce((s, t) => s + t.actualMinutes, 0);
+        return {
+            from: q.data.from,
+            to: q.data.to,
+            tasks: compared.slice(0, 25),
+            totals: {
+                compared: compared.length,
+                estimateMinutes: estimateTotal,
+                actualMinutes: actualTotal,
+                // How far off the estimates were overall. 0 = spot on, +25 = a quarter over.
+                accuracyPct: estimateTotal > 0
+                    ? Math.round(((actualTotal - estimateTotal) / estimateTotal) * 100) : null,
             },
         };
     });

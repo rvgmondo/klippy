@@ -125,10 +125,94 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
                 </div>
               ))}
             </div>
+
+            <EstimateAccuracy from={from} to={to} businessId={businessId} />
           </>
         )}
       </div>
     </div>
+  );
+}
+
+interface EstimateRow {
+  id: number; title: string; folderName: string | null; isCompleted: boolean;
+  estimateMinutes: number; actualMinutes: number; diffMinutes: number; overPct: number | null;
+}
+interface EstimateReport {
+  tasks: EstimateRow[];
+  totals: { compared: number; estimateMinutes: number; actualMinutes: number; accuracyPct: number | null };
+}
+
+const dur = (m: number) => {
+  const sign = m < 0 ? '-' : '';
+  const a = Math.abs(m), h = Math.floor(a / 60), mm = a % 60;
+  return h > 0 ? `${sign}${h}h${mm ? ` ${mm}m` : ''}` : `${sign}${mm}m`;
+};
+
+/**
+ * Estimate vs actual. Only means anything once cards carry an estimate AND have had
+ * the timer run on them, so it stays quiet until there is something real to compare.
+ */
+function EstimateAccuracy({ from, to, businessId }: { from: string; to: string; businessId: BusinessSelection }) {
+  const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
+  const { data } = useQuery({
+    queryKey: ['estimates', from, to, businessId],
+    queryFn: () => apiGet<EstimateReport>(`/reports/estimates?from=${from}&to=${to}${bizQ}`),
+  });
+  if (!data || data.totals.compared === 0) {
+    return (
+      <div className="mt-6 rounded-xl border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+        <span className="text-slate-200">Estimate vs actual</span> shows up here once cards have both an
+        estimate and tracked time. Set estimates in <span className="text-slate-200">Today</span>, then run the
+        timer while you work.
+      </div>
+    );
+  }
+  const { totals } = data;
+  const over = (totals.accuracyPct ?? 0) > 0;
+  return (
+    <>
+      <h3 className="mb-2 mt-6 text-sm font-semibold text-slate-300">Estimate vs actual</h3>
+      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Tile label="Estimated" value={dur(totals.estimateMinutes)} />
+        <Tile label="Actually took" value={dur(totals.actualMinutes)} />
+        <Tile label={over ? 'Over by' : 'Under by'}
+          value={`${Math.abs(totals.accuracyPct ?? 0)}%`} warn={over} accent={!over} />
+      </div>
+      <p className="mb-2 text-[11px] text-slate-500">
+        Across {totals.compared} card{totals.compared === 1 ? '' : 's'} that had both an estimate and tracked time.
+        {over
+          ? ' Work is taking longer than planned, so pad future estimates and quotes.'
+          : ' Work is coming in under estimate, so there is room to commit to more.'}
+      </p>
+      <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
+            <tr>
+              <th className="px-3 py-2 font-medium">Card</th>
+              <th className="px-3 py-2 text-right font-medium">Estimate</th>
+              <th className="px-3 py-2 text-right font-medium">Actual</th>
+              <th className="px-3 py-2 text-right font-medium">Diff</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.tasks.map((t) => (
+              <tr key={t.id} className="border-t border-slate-800">
+                <td className="px-3 py-2">
+                  <div className="truncate text-slate-200">{t.title}</div>
+                  {t.folderName && <div className="truncate text-[11px] text-slate-500">{t.folderName}</div>}
+                </td>
+                <td className="px-3 py-2 text-right num text-slate-400">{dur(t.estimateMinutes)}</td>
+                <td className="px-3 py-2 text-right num text-slate-300">{dur(t.actualMinutes)}</td>
+                <td className={`px-3 py-2 text-right num ${t.diffMinutes > 0 ? 'text-red-400' : 'text-violet-300'}`}>
+                  {t.diffMinutes > 0 ? '+' : ''}{dur(t.diffMinutes)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
