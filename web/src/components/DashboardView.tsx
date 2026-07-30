@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import type { Priority, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
+import { ErrorNote } from './ErrorNote';
 
 interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
 interface BizRoll { id: number; name: string; open: number; weekSeconds: number }
@@ -52,7 +53,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
     catch { return `${cur} ${v.toFixed(0)}`; }
   };
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
-  const { data } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`) });
+  const { data, error, refetch } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`), retry: false });
   const deals = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ summary: DealSummary }>(`/deals${bizQ}`) });
   const money_ = useQuery({
     queryKey: ['dashboard-money', businessId],
@@ -90,6 +91,10 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             )}
           </div>
         </div>
+
+        {/* A failed load used to render as a wall of zeros, which is worse than an
+            error when the numbers are money. */}
+        {error && <ErrorNote error={error} onRetry={() => refetch()} />}
 
         {/* Pillar bento */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

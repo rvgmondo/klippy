@@ -12,6 +12,7 @@ import { Plus, Flag, MoreHorizontal, GripVertical } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
 import { CardDetail } from './CardDetail';
+import { ErrorNote } from './ErrorNote';
 import { Menu } from './Menu';
 import { BoardFilters, EMPTY_FILTERS, applyFilters, type FilterState } from './BoardFilters';
 
@@ -40,10 +41,11 @@ export function BoardView({ boardId }: { boardId: number | null }) {
   // Local container state so cards move smoothly during a drag.
   const [containers, setContainers] = useState<Record<string, number[]>>({});
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['board', boardId],
     queryFn: () => apiGet<BoardFull>(`/boards/${boardId}/full`),
     enabled: boardId !== null,
+    retry: false,
   });
   const { data: usersData } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<{ users: TeamUser[] }>('/users') });
   const userMap = useMemo(() => new Map((usersData?.users ?? []).map((u) => [u.id, u])), [usersData]);
@@ -95,6 +97,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
       </div>
     );
   }
+  if (error) return <div className="p-6"><ErrorNote error={error} onRetry={() => refetch()} /></div>;
   if (isLoading || !data) return <div className="p-6 text-sm text-slate-500">Loading board...</div>;
 
   const findContainer = (key: string): string | undefined => {

@@ -6,6 +6,7 @@ import type { Label, Priority, TaskDetail, TeamUser } from '../lib/types';
 import { TimeSection } from './TimeSection';
 import { FilesSection } from './FilesSection';
 import { LabelsSection } from './LabelsSection';
+import { ErrorNote } from './ErrorNote';
 
 /** A UTC timestamp as the local value a datetime-local input expects. */
 function toLocalInput(iso: string): string {
@@ -25,7 +26,7 @@ const PRIORITIES: { value: Priority; label: string; color: string }[] = [
 export function CardDetail({ taskId, boardId, onClose }: { taskId: number; boardId: number; onClose: () => void }) {
   const qc = useQueryClient();
   const key = ['task', taskId, 'detail'];
-  const { data } = useQuery({ queryKey: key, queryFn: () => apiGet<TaskDetail>(`/tasks/${taskId}/detail`) });
+  const { data, error, refetch } = useQuery({ queryKey: key, queryFn: () => apiGet<TaskDetail>(`/tasks/${taskId}/detail`), retry: false });
   const { data: usersData } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<{ users: TeamUser[] }>('/users') });
 
   const [title, setTitle] = useState('');
@@ -76,7 +77,7 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
           </div>
         </div>
 
-        {!data ? <div className="p-6 text-sm text-slate-500">Loading...</div> : (
+        {error ? <div className="p-6"><ErrorNote error={error} onRetry={() => refetch()} /></div> : !data ? <div className="p-6 text-sm text-slate-500">Loading...</div> : (
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
             <input className={field + ' text-base font-medium'} value={title}
               onChange={(e) => setTitle(e.target.value)}

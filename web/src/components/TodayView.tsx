@@ -9,6 +9,7 @@ import { apiGet, apiPatch, apiPost } from '../lib/api';
 import type { Priority } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
+import { ErrorNote } from './ErrorNote';
 
 interface DayTask {
   id: number; title: string; priority: Priority; dueDate: string | null;
@@ -109,9 +110,10 @@ export function TodayView({ businessId, onNavigate }: {
 
   const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
   const key = ['day', date, businessId] as const;
-  const { data } = useQuery({
+  const { data, error, refetch } = useQuery({
     queryKey: key,
     queryFn: () => apiGet<DayData>(`/tasks/day?date=${date}${bizQ}`),
+    retry: false,
   });
 
   const invalidate = () => {
@@ -226,6 +228,12 @@ export function TodayView({ businessId, onNavigate }: {
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="px-4 pt-4 sm:px-6">
+          <ErrorNote error={error} onRetry={() => refetch()} compact />
+        </div>
+      )}
 
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={onDragEnd}>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:flex-row lg:overflow-hidden lg:p-6">

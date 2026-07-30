@@ -97,6 +97,19 @@
 /* Accent text is legible on dark surfaces (above). In LIGHT mode, re-point the
  * pale accent shades used as text to the darker end so they read on white. */
 [data-theme="light"] { --color-violet-400: #7a911f; --color-violet-300: #6b8018; --color-violet-200: #6b8018; }
+
+/* Status colours have the same problem as the accent: the pale shades are picked to
+ * read on charcoal, so amber/red/green text washes out to near-invisible on white
+ * (measured 1.38:1 for amber). Darken the shades that get used as TEXT in light
+ * mode. The 500/600 shades used as fills are left alone. */
+[data-theme="light"] {
+  /* amber is often rendered at 80% opacity, which eats contrast, so it goes darker
+   * than the others to still clear AA once faded. */
+  --color-amber-400: #78350f; --color-amber-300: #6b3410; --color-amber-200: #5c2c0d;
+  --color-red-400:   #dc2626; --color-red-300:   #b91c1c; --color-red-200:   #991b1b;
+  --color-green-400: #15803d; --color-green-300: #166534; --color-green-200: #14532d;
+  --color-blue-400:  #2563eb; --color-blue-300:  #1d4ed8; --color-blue-200:  #1e40af;
+}
 [data-theme="light"][data-accent="amber"]  { --color-violet-400: #b45309; --color-violet-300: #92400e; --color-violet-200: #92400e; }
 [data-theme="light"][data-accent="cyan"]   { --color-violet-400: #0e7490; --color-violet-300: #155e75; --color-violet-200: #155e75; }
 [data-theme="light"][data-accent="violet"] { --color-violet-400: #7c3aed; --color-violet-300: #6d28d9; --color-violet-200: #6d28d9; }
