@@ -33,18 +33,28 @@ export async function businessRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const position = await nextPosition(businesses, sql `account_id = ${accountId}`);
-        const created = await db.transaction(async (tx) => {
-            const ins = await tx.insert(businesses).values(withTenant(accountId, {
-                name: parsed.data.name, type: parsed.data.type, color: parsed.data.color ?? '#6366f1',
-                position, createdBy: userId,
-            }));
-            const businessId = Number(ins[0].insertId);
-            await seedNewBusiness(tx, accountId, userId, businessId, parsed.data.type);
-            const [row] = await tx.select().from(businesses)
-                .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1);
-            return row;
-        });
-        return reply.code(201).send({ business: created });
+        // Create the business on its own. `secondaryTypes` is written explicitly rather
+        // than leaning on the column's DEFAULT, because a JSON default needs MySQL
+        // 8.0.13+ and a strict-mode server rejects the insert outright without it.
+        const ins = await db.insert(businesses).values(withTenant(accountId, {
+            name: parsed.data.name, type: parsed.data.type, color: parsed.data.color ?? '#6366f1',
+            secondaryTypes: [], position, createdBy: userId,
+        }));
+        const businessId = Number(ins[0].insertId);
+        // Seeding example content is a convenience, not part of creating the business.
+        // It touches five more tables, so if any of them trips, the business must still
+        // exist rather than the whole thing rolling back into a 500.
+        try {
+            await db.transaction(async (tx) => {
+                await seedNewBusiness(tx, accountId, userId, businessId, parsed.data.type);
+            });
+        }
+        catch (err) {
+            req.log.error({ err, businessId }, 'business created but seeding its example content failed');
+        }
+        const [row] = await db.select().from(businesses)
+            .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1);
+        return reply.code(201).send({ business: row });
     });
     app.patch('/api/v1/businesses/:id', async (req, reply) => {
         const { accountId } = authOf(req);

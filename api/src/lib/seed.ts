@@ -180,8 +180,11 @@ export async function seedNewBusiness(
 export async function seedNewAccount(
   tx: Tx, accountId: number, userId: number, businessName = 'My Business', type: BusinessType = 'services',
 ) {
+  // secondaryTypes written explicitly: a JSON column DEFAULT needs MySQL 8.0.13+,
+  // and a strict-mode server rejects an insert that omits a NOT NULL column whose
+  // default it will not honour. Signup must not depend on that.
   const bizIns = await tx.insert(businesses).values({
-    accountId, name: businessName, type, position: 0, createdBy: userId,
+    accountId, name: businessName, type, secondaryTypes: [], position: 0, createdBy: userId,
   });
   const businessId = Number(bizIns[0].insertId);
   await seedNewBusiness(tx, accountId, userId, businessId, type);
