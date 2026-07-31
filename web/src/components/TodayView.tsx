@@ -108,11 +108,23 @@ export function TodayView({ businessId, onNavigate }: {
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
+  // How long your working day is. A capacity bar measured against someone else's
+  // 8 hours is worse than none, so this is yours and it sticks.
+  const [workingHours, setWorkingHours] = useState(() => {
+    const saved = Number(localStorage.getItem('klippy.workingHours'));
+    return saved >= 1 && saved <= 24 ? saved : 8;
+  });
+  const setHours = (h: number) => {
+    const clamped = Math.min(24, Math.max(1, h));
+    setWorkingHours(clamped);
+    localStorage.setItem('klippy.workingHours', String(clamped));
+  };
+
   const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
-  const key = ['day', date, businessId] as const;
+  const key = ['day', date, businessId, workingHours] as const;
   const { data, error, refetch } = useQuery({
     queryKey: key,
-    queryFn: () => apiGet<DayData>(`/tasks/day?date=${date}${bizQ}`),
+    queryFn: () => apiGet<DayData>(`/tasks/day?date=${date}${bizQ}&workingMinutes=${workingHours * 60}`),
     retry: false,
   });
 
@@ -206,7 +218,15 @@ export function TodayView({ businessId, onNavigate }: {
             <div className="mb-1 flex items-baseline justify-between text-xs">
               <span className="text-slate-500">Planned</span>
               <span className={`num font-semibold ${cap?.overcommitted ? 'text-red-400' : 'text-violet-300'}`}>
-                {fmtDuration(cap?.plannedMinutes ?? 0)} / {fmtDuration(cap?.workingMinutes ?? 480)}
+                {fmtDuration(cap?.plannedMinutes ?? 0)} /{' '}
+                <button onClick={() => {
+                  const v = window.prompt('How many hours is your working day?', String(workingHours));
+                  if (v && Number(v) > 0) setHours(Number(v));
+                }}
+                  title="Change the length of your working day"
+                  className="underline decoration-dotted underline-offset-2 hover:opacity-80">
+                  {fmtDuration(cap?.workingMinutes ?? workingHours * 60)}
+                </button>
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-slate-800">
