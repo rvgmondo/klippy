@@ -1,10 +1,10 @@
 import { db } from '../db/client.js';
 import { businesses, folders, boards, boardColumns, tasks, deals, offerings } from '../db/schema.js';
+import { TEMPLATES, type BusinessType, type SeedCard } from './templates.js';
 
 // The drizzle transaction handle, typed straight off db.transaction so inserts stay type-safe.
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export type BusinessType = 'services' | 'products' | 'code' | 'content';
 
 const COLUMNS = [
   { name: 'To do', color: '#94a3b8', isDoneColumn: false },
@@ -12,7 +12,6 @@ const COLUMNS = [
   { name: 'Done', color: '#22c55e', isDoneColumn: true },
 ];
 
-interface SeedCard { title: string; description?: string; column?: number }
 
 // Create a board (with the default 3 columns) under a folder, plus optional starter cards.
 async function seedBoard(
@@ -47,133 +46,57 @@ async function seedBoard(
   return boardId;
 }
 
-/**
- * What "Delivery", "Operations" and the first pipeline deal look like depends on what kind
- * of business this is - a services client isn't the same shape as a product order, a
- * software customer, or a piece of content. This is the only thing that changes per type;
- * Acquisition (deals) and Delivery/Operations (folders + boards) stay the same tables and
- * the same three-pillar structure for every type.
- */
-const TYPE_CONTENT: Record<BusinessType, {
-  delivery: { folder: string; notes: string; board: string; boardDesc: string; cards: SeedCard[] };
-  operations: { cards: SeedCard[] };
-  deal: { title: string; notes: string };
-  offering: { name: string; price: number; cost?: number; unit?: string; recurring?: boolean; stockQty?: number; reorderPoint?: number };
-}> = {
-  services: {
-    delivery: {
-      folder: 'Sample Client',
-      notes: 'An example client to show how Delivery works. Rename it or delete it.',
-      board: 'Project Board',
-      boardDesc: 'Example board. Rename or delete freely.',
-      cards: [
-        { title: 'Kick off with your client' },
-        { title: 'Do the work' },
-        { title: 'Deliver it and capture proof (screenshot, a testimonial)' },
-      ],
-    },
-    operations: { cards: [{ title: 'Set up invoicing and payments' }] },
-    deal: { title: 'Your first lead', notes: 'Add real leads here and drag them across the stages as they progress.' },
-    offering: { name: 'Website Audit', price: 750, unit: 'project' },
-  },
-  products: {
-    delivery: {
-      folder: 'Sample Order',
-      notes: 'An example order to show how Delivery works here: fulfillment, not projects. Rename it or delete it.',
-      board: 'Fulfillment',
-      boardDesc: 'Example order board. Rename or delete freely.',
-      cards: [
-        { title: 'Order placed and paid' },
-        { title: 'Pick, pack and label' },
-        { title: 'Ship it and send tracking' },
-      ],
-    },
-    operations: { cards: [{ title: 'Reorder low stock from suppliers' }] },
-    deal: { title: 'Your first wholesale lead', notes: 'Add real buyers here and drag them across the stages as they progress.' },
-    offering: { name: 'Sample Product', price: 25, cost: 8, unit: 'unit', stockQty: 20, reorderPoint: 5 },
-  },
-  code: {
-    delivery: {
-      folder: 'Sample Customer',
-      notes: 'An example customer to show how Delivery works here: onboarding, not projects. Rename it or delete it.',
-      board: 'Customer Onboarding',
-      boardDesc: 'Example board. Rename or delete freely.',
-      cards: [
-        { title: 'Signed up for a trial' },
-        { title: 'Account configured' },
-        { title: 'Live and paying' },
-      ],
-    },
-    operations: { cards: [{ title: 'Ship the next feature' }] },
-    deal: { title: 'Your first trial signup', notes: 'Add real signups here and drag them across the stages as they convert to paying.' },
-    offering: { name: 'Pro Plan', price: 49, unit: 'month', recurring: true },
-  },
-  content: {
-    delivery: {
-      folder: 'Sample Piece',
-      notes: 'An example piece of content to show how Delivery works here: production, not projects. Rename it or delete it.',
-      board: 'Production',
-      boardDesc: 'Example board. Rename or delete freely.',
-      cards: [
-        { title: 'Idea and outline' },
-        { title: 'Draft and edit' },
-        { title: 'Publish and promote' },
-      ],
-    },
-    operations: { cards: [{ title: 'Maintain equipment and tools' }] },
-    deal: { title: 'Your first sponsor', notes: 'Add real sponsors or advertisers here and drag them across the stages as they close.' },
-    offering: { name: 'Sponsored Post Slot', price: 500, unit: 'post' },
-  },
-};
+
 
 /**
- * Seed a brand-new business with a minimal, fully-deletable starter so it lands on a
- * working three-pillar operating system instead of a blank app. Everything here is
- * ordinary data the owner can rename or delete. Shape of the example content depends on
- * `type`; the underlying folders/boards/deals tables are the same for every type.
+ * Seed a brand-new business with a working starter setup rather than an empty app.
+ *
+ * A blank three-pillar structure still leaves you staring at nothing, wondering what
+ * belongs where. So each type gets the areas a business of that shape actually runs
+ * on, already filled with the recurring work: an example of the thing you deliver,
+ * the engine that brings customers in, the money admin, and a pipeline with a deal in
+ * each early stage. All of it is ordinary data, so anything that does not fit gets
+ * renamed or deleted.
  */
 export async function seedNewBusiness(
   tx: Tx, accountId: number, userId: number, businessId: number, type: BusinessType,
 ) {
-  const content = TYPE_CONTENT[type];
+  const t = TEMPLATES[type];
 
-  // DELIVERY: one example unit of client-facing work, shaped for this business type.
-  const deliveryIns = await tx.insert(folders).values({
-    accountId, businessId, parentId: null, name: content.delivery.folder, pillar: 'delivery', position: 0,
-    color: '#6366f1', createdBy: userId, notes: content.delivery.notes,
-  });
-  const deliveryFolderId = Number(deliveryIns[0].insertId);
-  await seedBoard(tx, accountId, userId, deliveryFolderId, content.delivery.board, content.delivery.boardDesc,
-    content.delivery.cards);
+  // DELIVERY then OPERATIONS. Position counts per pillar, since the sidebar groups them.
+  for (const [pillar, group] of [['delivery', t.delivery], ['operations', t.operations]] as const) {
+    for (let i = 0; i < group.length; i++) {
+      const area = group[i]!;
+      const ins = await tx.insert(folders).values({
+        accountId, businessId, parentId: null, name: area.name, pillar, position: i,
+        color: pillar === 'delivery' ? '#6366f1' : '#0ea5e9', createdBy: userId, notes: area.notes,
+      });
+      const folderId = Number(ins[0].insertId);
+      for (const b of area.boards) {
+        await seedBoard(tx, accountId, userId, folderId, b.name, b.description, b.cards);
+      }
+    }
+  }
 
-  // OPERATIONS: the internal machine that keeps the business running. The first card is
-  // type-specific; the weekly review and expense tracking are universal to every business.
-  const opsIns = await tx.insert(folders).values({
-    accountId, businessId, parentId: null, name: 'Operations', pillar: 'operations', position: 0,
-    color: '#0ea5e9', createdBy: userId,
-    notes: 'Internal work that runs the business, separate from client delivery.',
-  });
-  const opsFolderId = Number(opsIns[0].insertId);
-  await seedBoard(tx, accountId, userId, opsFolderId, 'Internal',
-    'Admin, finance and the recurring things that keep the business running.', [
-      ...content.operations.cards,
-      { title: 'Weekly business review', description: 'Check the numbers across all three pillars once a week.' },
-      { title: 'Track expenses and admin' },
-    ]);
+  // ACQUISITION: a couple of deals spread across the early stages, so the pipeline
+  // reads as a pipeline straight away instead of one lonely card.
+  for (let i = 0; i < t.deals.length; i++) {
+    const d = t.deals[i]!;
+    await tx.insert(deals).values({
+      accountId, businessId, title: d.title, company: d.company ?? null,
+      stage: d.stage, value: String(d.value), position: i, notes: d.notes, createdBy: userId,
+    });
+  }
 
-  // ACQUISITION: one example deal so the pipeline is not empty, shaped for this business type.
-  await tx.insert(deals).values({
-    accountId, businessId, title: content.deal.title, stage: 'lead', value: '0', position: 0,
-    notes: content.deal.notes, createdBy: userId,
-  });
-
-  // OFFERING: one example of what this business actually sells, shaped for this business type.
-  const o = content.offering;
-  await tx.insert(offerings).values({
-    accountId, businessId, name: o.name, price: String(o.price), position: 0, createdBy: userId,
-    cost: o.cost != null ? String(o.cost) : null, unit: o.unit ?? null, recurring: o.recurring ?? false,
-    stockQty: o.stockQty ?? null, reorderPoint: o.reorderPoint ?? null,
-  });
+  // What this business sells, which is what makes Reports and invoicing meaningful.
+  for (let i = 0; i < t.offerings.length; i++) {
+    const o = t.offerings[i]!;
+    await tx.insert(offerings).values({
+      accountId, businessId, name: o.name, price: String(o.price), position: i, createdBy: userId,
+      cost: o.cost != null ? String(o.cost) : null, unit: o.unit ?? null, recurring: o.recurring ?? false,
+      stockQty: o.stockQty ?? null, reorderPoint: o.reorderPoint ?? null,
+    });
+  }
 }
 
 /** Signup: create the account's first business (defaults to services) and seed it. */
