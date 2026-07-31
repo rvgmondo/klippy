@@ -606,4 +606,23 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
     files: many(taskFiles),
     timeEntries: many(timeEntries),
 }));
+// ---- Scheduled job runs ----------------------------------------------------
+// Bookkeeping for the app's own scheduler. Shared hosting makes external cron a
+// chore to set up (and a non-starter if this is ever sold), so the app runs its
+// own daily jobs and records here what ran and when. Not tenant-scoped: these
+// jobs sweep every account at once, the same way an external cron did.
+export const jobRuns = mysqlTable('job_runs', {
+    id: pk(),
+    name: varchar('name', { length: 60 }).notNull(),
+    // Date (not timestamp) because these are once-a-day jobs; it is the thing we
+    // compare against "today" to decide whether this one still owes a run.
+    lastRunOn: date('last_run_on', { mode: 'string' }),
+    lastStatus: mysqlEnum('last_status', ['ok', 'failed']),
+    lastMessage: varchar('last_message', { length: 500 }),
+    lastRunAt: datetime('last_run_at'),
+    enabled: boolean('enabled').default(true).notNull(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_job_runs_name').on(t.name),
+]);
 //# sourceMappingURL=schema.js.map

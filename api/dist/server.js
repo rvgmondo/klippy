@@ -142,6 +142,9 @@ async function start() {
         console.error('klippy-api migration failed:', err);
         process.exit(1);
     }
+    // Run the daily jobs in-process, so none of this needs an external cron.
+    const { startScheduler } = await import('./lib/jobs.js');
+    startScheduler();
     const addr = await buildServer().listen({ port, host });
     // eslint-disable-next-line no-console
     console.log(`klippy-api listening on ${addr}`);
