@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
+import { sendMail } from './mailer.js';
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
@@ -39,13 +40,17 @@ function addDays(dateStr: string, days: number): string {
 }
 
 /**
- * Turn one subscription billing cycle into a draft invoice - same shape as a normal
- * invoice created by hand, just generated automatically. Left as a draft rather than
- * auto-sent, so whoever runs the business reviews it before it goes to the client.
- * Used both when a subscription starts (bill immediately) and by the recurring cron job.
+ * Turn one subscription billing cycle into an invoice, same shape as one created by
+ * hand. Used when a subscription starts and by the recurring cron job.
+ *
+ * If the subscription is set to send itself and the client has a billing email, the
+ * invoice goes out and is marked sent. Otherwise it stays a draft for review. A
+ * recurring charge that still needs a human to press send every month is not really
+ * recurring, which is the whole reason `autoSend` exists.
  */
 export async function generateSubscriptionInvoice(accountId: number, sub: {
   businessId: number; offeringId: number; folderId: number; createdBy: number | null;
+  autoSend?: boolean;
 }): Promise<number> {
   const [offering] = await db.select().from(offerings)
     .where(tenantWhere(offerings, accountId, eq(offerings.id, sub.offeringId))).limit(1);
@@ -67,7 +72,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   const docId = await db.transaction(async (tx) => {
     const ins = await tx.insert(documents).values(withTenant(accountId, {
       type: 'invoice' as const, seq, number, businessId: sub.businessId, folderId: sub.folderId,
-      clientName: folder.name, clientEmail: null, clientAddress: null,
+      clientName: folder.name, clientEmail: folder.billingEmail ?? null, clientAddress: null,
       issueDate, dueDate, currency,
       taxRate: '0', subtotal: money(price), taxAmount: '0', total: money(price),
       notes: `Auto-generated for the ${offering.name} subscription.`, createdBy: sub.createdBy,
@@ -79,5 +84,29 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
     }));
     return newId;
   });
+
+  // Send it, if asked to and there is somewhere to send it. A failure here must not
+  // lose the invoice: it stays a draft and can be sent by hand.
+  if (sub.autoSend && folder.billingEmail) {
+    try {
+      await sendMail(
+        folder.billingEmail,
+        `${account?.brandName ?? 'Invoice'} ${number}`,
+        [
+          `Hi ${folder.name},`,
+          '',
+          `Invoice ${number} for ${offering.name} is attached below.`,
+          `Amount: ${currency} ${money(price)}`,
+          `Due: ${dueDate}`,
+          '',
+          'Thank you.',
+        ].join('\n'),
+      );
+      await db.update(documents).set({ status: 'sent' })
+        .where(tenantWhere(documents, accountId, eq(documents.id, docId)));
+    } catch {
+      // Left as a draft on purpose, so it is visible as unsent rather than lost.
+    }
+  }
   return docId;
 }

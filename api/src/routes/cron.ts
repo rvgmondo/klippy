@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { and, eq, isNotNull, lt, lte, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents } from '../db/schema.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 import { addOneMonth, anchorDayOf, generateSubscriptionInvoice } from '../lib/billing.js';
 
@@ -102,7 +102,7 @@ export async function cronRoutes(app: FastifyInstance) {
       try {
         await generateSubscriptionInvoice(sub.accountId, {
           businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
-          createdBy: sub.createdBy,
+          createdBy: sub.createdBy, autoSend: sub.autoSend,
         });
         await db.update(subscriptions).set({
           // Anchor on the day the subscription started so month-end bills spring
@@ -117,5 +117,72 @@ export async function cronRoutes(app: FastifyInstance) {
       }
     }
     return { ok: true, due: due.length, billed, failed };
+  });
+
+  /**
+   * Chase unpaid invoices, which is the part nobody keeps up with by hand.
+   *
+   * Sends a reminder three days before an invoice is due, on the due date, and then
+   * weekly once it is overdue. `last_reminder_on` stops the same invoice being chased
+   * twice in a day, which is the fastest way to annoy a client into ignoring you.
+   * Only invoices that were actually sent and have somewhere to send to are chased.
+   *   curl -s -X POST -H "X-Cron-Key: SECRET" https://your-site/api/v1/cron/invoice-reminders
+   */
+  app.post('/api/v1/cron/invoice-reminders', async (req, reply) => {
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
+    const given = (req.headers['x-cron-key'] as string | undefined) ?? '';
+    if (given !== secret) return reply.code(401).send({ error: 'Bad cron key.' });
+
+    const today = todayStr();
+    const rows = await db.select().from(documents).where(and(
+      eq(documents.type, 'invoice'),
+      eq(documents.status, 'sent'),          // draft = not sent yet, paid/void = done
+      isNotNull(documents.dueDate),
+      isNotNull(documents.clientEmail),
+    ));
+
+    const daysBetween = (a: string, b: string) =>
+      Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+
+    let sent = 0;
+    for (const doc of rows) {
+      const untilDue = daysBetween(doc.dueDate!, today);
+      const overdueBy = -untilDue;
+
+      // Due soon, due today, or overdue and not chased in the last week.
+      const alreadyToday = doc.lastReminderOn === today;
+      const chasedDaysAgo = doc.lastReminderOn ? daysBetween(today, doc.lastReminderOn) : 999;
+      const shouldSend = !alreadyToday && (
+        untilDue === 3 || untilDue === 0 || (overdueBy > 0 && chasedDaysAgo >= 7)
+      );
+      if (!shouldSend) continue;
+
+      const subject = overdueBy > 0
+        ? `Overdue: invoice ${doc.number}`
+        : untilDue === 0 ? `Invoice ${doc.number} is due today`
+          : `Invoice ${doc.number} is due in 3 days`;
+      const body = [
+        `Hi ${doc.clientName},`,
+        '',
+        overdueBy > 0
+          ? `Invoice ${doc.number} for ${doc.currency} ${doc.total} was due on ${doc.dueDate}, ${overdueBy} day${overdueBy === 1 ? '' : 's'} ago.`
+          : `This is a reminder that invoice ${doc.number} for ${doc.currency} ${doc.total} is due on ${doc.dueDate}.`,
+        '',
+        'If it is already paid, please ignore this.',
+        '',
+        'Thank you.',
+      ].join('\n');
+
+      try {
+        await sendMail(doc.clientEmail!, subject, body);
+        await db.update(documents).set({ lastReminderOn: today })
+          .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
+        sent++;
+      } catch (err) {
+        req.log.error({ err, invoice: doc.number }, 'invoice reminder failed');
+      }
+    }
+    return { ok: true, considered: rows.length, sent };
   });
 }

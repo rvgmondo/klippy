@@ -22,6 +22,7 @@ const updateSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   isArchived: z.boolean().optional(),
   hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
+  billingEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
   pillar: z.enum(['delivery','operations']).optional(),
 });
 

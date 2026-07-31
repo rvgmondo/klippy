@@ -78,6 +78,8 @@ export interface Folder {
   notes: string | null;
   imagePath?: string | null;
   hourlyRate?: string | null;
+  /** Where this client's invoices and payment reminders are sent. */
+  billingEmail?: string | null;
   pillar?: 'delivery' | 'operations';
   isArchived: boolean;
   position: number;

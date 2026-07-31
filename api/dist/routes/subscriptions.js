@@ -39,6 +39,7 @@ export async function subscriptionRoutes(app) {
             offeringId: z.number().int().positive(),
             folderId: z.number().int().positive(),
             startedOn: dateStr.optional(),
+            autoSend: z.boolean().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -57,11 +58,11 @@ export async function subscriptionRoutes(app) {
         const startedOn = d.startedOn ?? todayStr();
         const ins = await db.insert(subscriptions).values(withTenant(accountId, {
             businessId, offeringId: d.offeringId, folderId: d.folderId, status: 'active',
-            startedOn, nextBillDate: addOneMonth(startedOn), createdBy: userId,
+            startedOn, nextBillDate: addOneMonth(startedOn), autoSend: d.autoSend ?? false, createdBy: userId,
         }));
         const id = Number(ins[0].insertId);
         try {
-            await generateSubscriptionInvoice(accountId, { businessId, offeringId: d.offeringId, folderId: d.folderId, createdBy: userId });
+            await generateSubscriptionInvoice(accountId, { businessId, offeringId: d.offeringId, folderId: d.folderId, createdBy: userId, autoSend: d.autoSend ?? false });
             await db.update(subscriptions).set({ lastBilledAt: new Date() })
                 .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
         }
@@ -77,10 +78,10 @@ export async function subscriptionRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        const parsed = z.object({ status }).safeParse(req.body);
+        const parsed = z.object({ status: status.optional(), autoSend: z.boolean().optional() }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-        const res = await db.update(subscriptions).set({ status: parsed.data.status })
+        const res = await db.update(subscriptions).set(parsed.data)
             .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Subscription not found.' });

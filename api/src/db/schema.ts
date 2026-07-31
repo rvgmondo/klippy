@@ -130,6 +130,9 @@ export const folders = mysqlTable('folders', {
   notes: text('notes'),
   // Optional logo/image for this business or client, shown in the sidebar.
   imagePath: varchar('image_path', { length: 255 }),
+  // Where this client's invoices and payment reminders are sent. Without it a
+  // recurring invoice can only ever be a draft someone has to email by hand.
+  billingEmail: varchar('billing_email', { length: 150 }),
   // Billing rate for work logged under this client, in the workspace currency.
   hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }),
   // Which business pillar this top-level folder belongs to.
@@ -456,6 +459,8 @@ export const documents = mysqlTable('documents', {
   issueDate: date('issue_date', { mode: 'string' }).notNull(),
   dueDate: date('due_date', { mode: 'string' }),          // invoice due / quote valid-until
   status: mysqlEnum('status', ['draft', 'sent', 'accepted', 'paid', 'void']).default('draft').notNull(),
+  // Last date a payment reminder went out, so chasing does not repeat daily.
+  lastReminderOn: date('last_reminder_on', { mode: 'string' }),
   currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0').notNull(),
   subtotal: decimal('subtotal', { precision: 12, scale: 2 }).default('0').notNull(),
@@ -564,6 +569,9 @@ export const subscriptions = mysqlTable('subscriptions', {
   folderId: int('folder_id', { unsigned: true }).notNull()
     .references(() => folders.id, { onDelete: 'cascade' }),
   status: mysqlEnum('status', ['active', 'paused', 'canceled']).default('active').notNull(),
+  // Email the generated invoice to the client instead of leaving a draft for
+  // someone to send by hand. The whole point of a recurring charge.
+  autoSend: boolean('auto_send').default(false).notNull(),
   startedOn: date('started_on', { mode: 'string' }).notNull(),
   nextBillDate: date('next_bill_date', { mode: 'string' }).notNull(),
   lastBilledAt: datetime('last_billed_at'),

@@ -250,6 +250,10 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
     mutationFn: () => apiDelete(`/folders/${folder.id}/image`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
+  const setBillingEmail = useMutation({
+    mutationFn: (email: string) => apiPatch(`/folders/${folder.id}`, { billingEmail: email }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
   const setRate = useMutation({
     mutationFn: (rate: number | null) => apiPatch(`/folders/${folder.id}`, { hourlyRate: rate }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
@@ -314,6 +318,13 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
               if (v === null) return;
               const t = v.trim();
               setRate.mutate(t === '' ? null : Number(t));
+            } }] : []),
+            // Without a billing email a recurring invoice can only ever be a draft
+            // someone has to send by hand, and nothing can be chased automatically.
+            ...(depth === 0 ? [{ label: folder.billingEmail ? `Billing email: ${folder.billingEmail}` : 'Set billing email', onClick: () => {
+              const v = window.prompt('Where should invoices and payment reminders go? (blank to clear)', folder.billingEmail ?? '');
+              if (v === null) return;
+              setBillingEmail.mutate(v.trim());
             } }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
             { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`)) deleteFolder.mutate(); } },
