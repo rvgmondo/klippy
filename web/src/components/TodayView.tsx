@@ -4,9 +4,9 @@ import {
   DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
   rectIntersection, type DragEndEvent, type CollisionDetection,
 } from '@dnd-kit/core';
-import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus, Play, Square } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus, Play, Square, Plus } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
-import type { Priority } from '../lib/types';
+import type { Priority, Folder as TFolder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
@@ -259,7 +259,7 @@ export function TodayView({ businessId, onNavigate }: {
           </div>
 
           {/* Backlog */}
-          <BacklogPanel tasks={data?.backlog ?? []}
+          <BacklogPanel tasks={data?.backlog ?? []} businessId={businessId}
             onOpen={(t) => setOpenTask({ id: t.id, boardId: t.boardId })}
             onEstimate={(id, m) => patch.mutate({ id, body: { estimateMinutes: m } })}
             onSchedule={(id, hour) => {
@@ -311,12 +311,40 @@ function Block({ task, running, onToggleTimer, onOpen, onUnschedule, onEstimate 
   onOpen: () => void; onUnschedule: () => void; onEstimate: (m: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `t-${task.id}` });
-  const mins = task.estimateMinutes ?? DEFAULT_ESTIMATE;
+  // While the bottom edge is being dragged, show the length the pointer implies
+  // rather than the saved one, so the block grows under the cursor.
+  const [draftMins, setDraftMins] = useState<number | null>(null);
+  const mins = draftMins ?? task.estimateMinutes ?? DEFAULT_ESTIMATE;
   const top = Math.max(0, (offsetMinutes(task.scheduledStart!) / 60) * PX_PER_HOUR);
   const height = Math.max(26, (mins / 60) * PX_PER_HOUR - 4);
   const style: React.CSSProperties = {
     top, height, transform: transform ? `translate(${transform.x}px, ${transform.y}px)` : undefined,
   };
+
+  /** Drag the bottom edge to change how long the task is expected to take. */
+  function startResize(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    const startMins = task.estimateMinutes ?? DEFAULT_ESTIMATE;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    const onMove = (ev: PointerEvent) => {
+      const deltaMins = ((ev.clientY - startY) / PX_PER_HOUR) * 60;
+      // Snap to a quarter hour: fine enough to be useful, coarse enough to land on.
+      const next = Math.max(15, Math.round((startMins + deltaMins) / 15) * 15);
+      setDraftMins(Math.min(next, 60 * 12));
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      setDraftMins((v) => {
+        if (v != null && v !== startMins) onEstimate(v);
+        return null;
+      });
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
   return (
     <div ref={setNodeRef} style={style}
       className={`group absolute left-14 right-1 z-20 overflow-hidden rounded-lg border px-2.5 py-1.5 shadow-sm ${isDragging ? 'opacity-50' : ''} ${task.isCompleted ? 'opacity-60' : ''} ${
@@ -347,6 +375,12 @@ function Block({ task, running, onToggleTimer, onOpen, onUnschedule, onEstimate 
           <button onClick={onUnschedule} title="Unschedule"
             className="rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-400"><X size={12} /></button>
         </div>
+      </div>
+
+      {/* Grab the bottom edge to make the block longer or shorter. */}
+      <div onPointerDown={startResize} title="Drag to change how long this takes"
+        className="absolute inset-x-0 bottom-0 flex h-2.5 cursor-ns-resize items-end justify-center">
+        <span className={`mb-0.5 h-1 w-8 rounded-full bg-slate-500 transition-opacity ${draftMins != null ? 'opacity-100' : 'opacity-0 group-hover:opacity-70'}`} />
       </div>
     </div>
   );
@@ -410,8 +444,92 @@ function ScheduleMenu({ onPick }: { onPick: (hour: number) => void }) {
   );
 }
 
-function BacklogPanel({ tasks, onOpen, onEstimate, onSchedule, onNavigate }: {
-  tasks: DayTask[]; onOpen: (t: DayTask) => void;
+interface BoardOption { id: number; name: string; folderName: string }
+
+/**
+ * Add a task straight from the planner. Picks a sensible board on its own (the last
+ * one used, otherwise the first available) so the common case is type a title and
+ * press Enter; the board picker only appears once you want to change it.
+ */
+function QuickAdd({ businessId }: { businessId: BusinessSelection }) {
+  const qc = useQueryClient();
+  const [title, setTitle] = useState('');
+  const [boardId, setBoardId] = useState<number | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+
+  const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
+  const scoped = (folders.data?.folders ?? []).filter((f) => businessId === 'all' || f.businessId === businessId);
+  const boardsQ = useQuery({
+    queryKey: ['quickadd-boards', scoped.map((f) => f.id).join(',')],
+    enabled: scoped.length > 0,
+    queryFn: async () => {
+      const lists = await Promise.all(scoped.map(async (f) => {
+        const res = await apiGet<{ boards: { id: number; name: string }[] }>(`/boards?folderId=${f.id}`);
+        return res.boards.map((b) => ({ id: b.id, name: b.name, folderName: f.name }));
+      }));
+      return lists.flat() as BoardOption[];
+    },
+  });
+  const boards = boardsQ.data ?? [];
+
+  const remembered = Number(localStorage.getItem('klippy.quickAddBoard') || 0) || null;
+  const target = boardId ?? (boards.some((b) => b.id === remembered) ? remembered : boards[0]?.id ?? null);
+
+  const add = useMutation({
+    mutationFn: async (t: string) => {
+      if (!target) throw new Error('No board to add to yet.');
+      // A card needs a column, so use the board's first one.
+      const full = await apiGet<{ columns: { id: number }[] }>(`/boards/${target}/full`);
+      const columnId = full.columns[0]?.id;
+      if (!columnId) throw new Error('That board has no columns.');
+      return apiPost('/tasks', { boardId: target, columnId, title: t });
+    },
+    onSuccess: () => {
+      setTitle('');
+      if (target) localStorage.setItem('klippy.quickAddBoard', String(target));
+      qc.invalidateQueries({ queryKey: ['day'] });
+      qc.invalidateQueries({ queryKey: ['board'] });
+    },
+  });
+
+  const chosen = boards.find((b) => b.id === target);
+
+  return (
+    <div className="border-b border-slate-800 px-2 py-2">
+      <div className="flex items-center gap-1.5">
+        <input value={title} onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && title.trim() && target) add.mutate(title.trim()); }}
+          placeholder="Add a task..."
+          className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900/70 px-2.5 py-1.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]" />
+        <button onClick={() => title.trim() && target && add.mutate(title.trim())}
+          disabled={!title.trim() || !target || add.isPending}
+          className="shrink-0 rounded-lg bg-violet-600 px-2 py-1.5 text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-50">
+          <Plus size={14} />
+        </button>
+      </div>
+      <div className="mt-1 flex items-center gap-1 px-0.5">
+        {chosen ? (
+          <button onClick={() => setShowPicker((s) => !s)}
+            className="truncate text-[11px] text-slate-500 hover:text-slate-300">
+            into {chosen.folderName} / {chosen.name}
+          </button>
+        ) : (
+          <span className="text-[11px] text-slate-500">No boards yet</span>
+        )}
+        {add.error && <span className="text-[11px] text-red-400">{(add.error as Error).message}</span>}
+      </div>
+      {showPicker && boards.length > 0 && (
+        <select value={target ?? ''} onChange={(e) => { setBoardId(Number(e.target.value)); setShowPicker(false); }}
+          className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200 outline-none">
+          {boards.map((b) => <option key={b.id} value={b.id}>{b.folderName} / {b.name}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
+function BacklogPanel({ tasks, businessId, onOpen, onEstimate, onSchedule, onNavigate }: {
+  tasks: DayTask[]; businessId: BusinessSelection; onOpen: (t: DayTask) => void;
   onEstimate: (id: number, m: number) => void; onSchedule: (id: number, hour: number) => void;
   onNavigate?: (v: string) => void;
 }) {
@@ -423,6 +541,11 @@ function BacklogPanel({ tasks, onOpen, onEstimate, onSchedule, onNavigate }: {
         <span className="font-display text-sm font-semibold text-slate-100">Unscheduled</span>
         <span className="num text-[11px] text-slate-500">{tasks.length}</span>
       </div>
+
+      {/* Capture work without leaving the planner. Having to go to a board first is
+          the quickest way to stop planning altogether. */}
+      <QuickAdd businessId={businessId} />
+
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {tasks.length === 0 && (
           <p className="px-2 py-8 text-center text-xs text-slate-500">
