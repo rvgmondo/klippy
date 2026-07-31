@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { jobRuns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
-import { JOBS, runJob, type JobName } from '../lib/jobs.js';
+import { JOBS, runJob, runDueJobs, type JobName } from '../lib/jobs.js';
 
 /**
  * The daily jobs are run by the app itself (see lib/jobs.ts), so none of this needs
@@ -50,6 +50,19 @@ export async function cronRoutes(app: FastifyInstance) {
         };
       }),
     };
+  });
+
+  /**
+   * "Anything owing a run, run it now." Called by the app itself on load, which
+   * makes opening Klippy (including the installed app on a phone) enough to keep
+   * the daily jobs moving without any cron at all.
+   *
+   * Cheap to call repeatedly: it reads a handful of rows and does nothing once
+   * today's runs are recorded.
+   */
+  app.post('/api/v1/automation/tick', { preHandler: app.requireAuth }, async () => {
+    await runDueJobs();
+    return { ok: true };
   });
 
   app.post('/api/v1/automation/:name/run', { preHandler: app.requireAuth }, async (req, reply) => {

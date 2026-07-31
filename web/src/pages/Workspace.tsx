@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Timer, LogOut, Settings, Menu as MenuIcon, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
+import { apiPost } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
 import { CalendarView } from '../components/CalendarView';
@@ -42,6 +43,14 @@ export function Workspace() {
   const [navOpen, setNavOpen] = useState(false);
   const [businessId, setBusinessId] = useState<BusinessSelection>(loadBusiness);
   const selectBusiness = (v: BusinessSelection) => { setBusinessId(v); localStorage.setItem('klippy.business', String(v)); };
+
+  // Nudge the daily jobs whenever the app is opened. Shared hosting stops an idle
+  // server, so simply using Klippy (including the installed app on a phone) is what
+  // keeps invoicing and reminders moving, with no cron to set up. Cheap and
+  // idempotent: it does nothing once the day's runs are already recorded.
+  useEffect(() => {
+    apiPost('/automation/tick').catch(() => { /* never block the app on this */ });
+  }, []);
 
   return (
     <div className="flex h-full">
