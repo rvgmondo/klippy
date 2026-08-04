@@ -9,6 +9,7 @@ import { accounts, folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { assertBusinessAccess, canSeeBusiness } from '../lib/access.js';
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB is plenty for a logo
 const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
 const uploadDir = () => process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), '../data/uploads');
@@ -94,12 +95,12 @@ export async function brandingRoutes(app) {
     });
     // ---- Business logo (the brand a client sees on that business's invoices) ----
     app.post('/api/v1/businesses/:id/logo', async (req, reply) => {
-        const { accountId, role } = authOf(req);
-        if (role === 'member')
-            return reply.code(403).send({ error: 'Only admins can change branding.' });
+        const { accountId } = authOf(req);
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
         const [biz] = await db.select().from(businesses)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
         if (!biz)
@@ -114,12 +115,12 @@ export async function brandingRoutes(app) {
         return reply.code(201).send({ ok: true });
     });
     app.delete('/api/v1/businesses/:id/logo', async (req, reply) => {
-        const { accountId, role } = authOf(req);
-        if (role === 'member')
-            return reply.code(403).send({ error: 'Only admins can change branding.' });
+        const { accountId } = authOf(req);
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
         const [biz] = await db.select().from(businesses)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
         if (!biz)
@@ -137,6 +138,8 @@ export async function brandingRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await canSeeBusiness(req, id)))
+            return reply.code(404).send({ error: 'Not found.' });
         const [biz] = await db.select({ logoPath: businesses.logoPath }).from(businesses)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
         return sendImage(reply, biz?.logoPath ?? null);

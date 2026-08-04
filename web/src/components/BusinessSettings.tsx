@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Upload, Trash2 } from 'lucide-react';
-import { apiPatch } from '../lib/api';
+import { apiGet, apiPatch, apiPut, apiDelete } from '../lib/api';
 import type { Business } from '../lib/types';
 
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
@@ -131,6 +131,9 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
             </div>
           </section>
 
+          {/* Access */}
+          <AccessSection businessId={business.id} businessName={business.name} />
+
           {/* Invoicing */}
           <section className="space-y-4 border-t border-slate-800 pt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoicing details</h3>
@@ -184,5 +187,62 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
         </div>
       </div>
     </div>
+  );
+}
+
+interface AccessMember {
+  userId: number; name: string; email: string; accountAdmin: boolean;
+  role: 'admin' | 'member' | 'viewer' | null;
+}
+
+/**
+ * Who can work in this business, and at what level. Account admins are shown as
+ * full-access and cannot be scoped (they run the whole account). Everyone else is
+ * granted per business: no access, viewer, member, or admin.
+ */
+function AccessSection({ businessId, businessName }: { businessId: number; businessName: string }) {
+  const qc = useQueryClient();
+  const { data, error } = useQuery({
+    queryKey: ['business-members', businessId],
+    queryFn: () => apiGet<{ members: AccessMember[] }>(`/businesses/${businessId}/members`),
+    retry: false,
+  });
+  const setRole = useMutation({
+    mutationFn: (v: { userId: number; role: string }) =>
+      v.role === 'none'
+        ? apiDelete(`/businesses/${businessId}/members/${v.userId}`)
+        : apiPut(`/businesses/${businessId}/members/${v.userId}`, { role: v.role }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['business-members', businessId] }),
+  });
+
+  // Only shown when the current user can manage this business; the API 403s otherwise.
+  if (error) return null;
+  const others = (data?.members ?? []).filter((m) => !m.accountAdmin);
+
+  return (
+    <section className="space-y-3 border-t border-slate-800 pt-5">
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Who can access {businessName}</h3>
+        <p className="mt-1 text-[11px] text-slate-500">Account admins can see every business. Set access for everyone else here.</p>
+      </div>
+      {others.length === 0 && <p className="text-xs text-slate-500">No other people in this account yet. Add them under Settings &gt; People.</p>}
+      <div className="space-y-1.5">
+        {others.map((m) => (
+          <div key={m.userId} className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-slate-200">{m.name}</div>
+              <div className="truncate text-[11px] text-slate-500">{m.email}</div>
+            </div>
+            <select value={m.role ?? 'none'} onChange={(e) => setRole.mutate({ userId: m.userId, role: e.target.value })}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200 outline-none">
+              <option value="none">No access</option>
+              <option value="viewer">Viewer</option>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

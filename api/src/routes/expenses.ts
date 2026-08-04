@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { expenses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { businessScope } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 
@@ -37,6 +38,7 @@ export async function expenseRoutes(app: FastifyInstance) {
       q.success && q.data.businessId ? eq(expenses.businessId, q.data.businessId) : undefined,
       q.success && q.data.from ? gte(expenses.incurredOn, q.data.from) : undefined,
       q.success && q.data.to ? lte(expenses.incurredOn, q.data.to) : undefined,
+      await businessScope(req, expenses.businessId),
     ].filter((f): f is NonNullable<typeof f> => !!f);
     const rows = await db.select().from(expenses)
       .where(tenantWhere(expenses, accountId, filters.length ? and(...filters) : undefined))

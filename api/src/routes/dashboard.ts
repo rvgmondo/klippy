@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { tasks, timeEntries, boards, folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
+import { accessibleBusinessIds } from '../lib/access.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -22,8 +23,11 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
     const onlyBusiness = q.success ? q.data.businessId : undefined;
 
-    const bizRows = await db.select({ id: businesses.id, name: businesses.name }).from(businesses)
+    // A member only rolls up businesses they can access; owners/admins see all.
+    const allowed = await accessibleBusinessIds(req);
+    const bizRowsAll = await db.select({ id: businesses.id, name: businesses.name }).from(businesses)
       .where(tenantWhere(businesses, accountId));
+    const bizRows = allowed ? bizRowsAll.filter((b) => allowed.has(b.id)) : bizRowsAll;
 
     // Root pillar of any folder (a subtree inherits its top-level folder's pillar).
     const allFolders = await db.select({
@@ -43,7 +47,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
       businessId: fById.get(b.folderId)?.businessId ?? null,
     }]));
 
-    const inScope = (businessId: number | null) => onlyBusiness === undefined || businessId === onlyBusiness;
+    // A member's totals never include a business they cannot access. Items with no
+    // business (legacy/uncategorised) stay visible to everyone in the account.
+    const accessible = (businessId: number | null) =>
+      allowed === null || businessId == null || allowed.has(businessId);
+    const inScope = (businessId: number | null) =>
+      accessible(businessId) && (onlyBusiness === undefined || businessId === onlyBusiness);
 
     const buckets: Record<Pillar, Bucket> = { delivery: emptyBucket(), operations: emptyBucket() };
     // Per-business roll-up for the combined Home view (always full account).

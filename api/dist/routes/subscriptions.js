@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { subscriptions, offerings, folders } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { businessScope } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
@@ -17,6 +18,7 @@ export async function subscriptionRoutes(app) {
         const { accountId } = authOf(req);
         const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
         const bizFilter = q.success && q.data.businessId ? eq(subscriptions.businessId, q.data.businessId) : undefined;
+        const scope = await businessScope(req, subscriptions.businessId);
         const rows = await db.select({
             id: subscriptions.id, businessId: subscriptions.businessId, status: subscriptions.status,
             startedOn: subscriptions.startedOn, nextBillDate: subscriptions.nextBillDate,
@@ -26,7 +28,7 @@ export async function subscriptionRoutes(app) {
         }).from(subscriptions)
             .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
             .innerJoin(folders, eq(folders.id, subscriptions.folderId))
-            .where(tenantWhere(subscriptions, accountId, bizFilter))
+            .where(tenantWhere(subscriptions, accountId, bizFilter, scope))
             .orderBy(desc(subscriptions.createdAt));
         return { subscriptions: rows };
     });

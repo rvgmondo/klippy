@@ -143,6 +143,28 @@ export const businesses = mysqlTable('businesses', {
   index('idx_businesses_account').on(t.accountId, t.position),
 ]);
 
+// ---- Business access (which businesses a MEMBER may see, and their role) ----
+// Account owners and admins implicitly see and manage every business. A plain
+// member sees ONLY the businesses listed here for them, with a per-business role:
+//   admin  = manage that business (its settings, invoicing, everything in it)
+//   member = work in it, but not change its settings
+//   viewer = read only
+// No row for a (member, business) pair means no access to that business at all.
+export const businessMembers = mysqlTable('business_members', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  userId: int('user_id', { unsigned: true }).notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  role: mysqlEnum('role', ['admin', 'member', 'viewer']).default('member').notNull(),
+  createdAt: createdAt(),
+}, (t) => [
+  uniqueIndex('uniq_business_member').on(t.businessId, t.userId),
+  index('idx_business_members_user').on(t.accountId, t.userId),
+]);
+
 // ---- Folders (nestable tree; top level = a business's "Clients"/areas) ------
 // parentId NULL => top-level folder. Self-referencing for arbitrary depth.
 export const folders = mysqlTable('folders', {

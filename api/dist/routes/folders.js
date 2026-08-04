@@ -5,6 +5,7 @@ import { folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { accessibleBusinessIds } from '../lib/access.js';
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
     parentId: z.number().int().positive().nullable().optional(),
@@ -37,13 +38,16 @@ async function wouldCycle(accountId, folderId, candidateParent) {
 }
 export async function folderRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
-    // Flat list of all folders for the account; the client assembles the tree.
+    // Flat list of folders the user may see; the client assembles the tree. Members
+    // only see folders in businesses they have access to. Folders with no business
+    // (legacy/uncategorised) stay visible to everyone in the account.
     app.get('/api/v1/folders', async (req) => {
         const { accountId } = authOf(req);
         const rows = await db.select().from(folders)
             .where(tenantWhere(folders, accountId))
             .orderBy(asc(folders.parentId), asc(folders.position));
-        return { folders: rows };
+        const allowed = await accessibleBusinessIds(req);
+        return { folders: allowed ? rows.filter((f) => f.businessId == null || allowed.has(f.businessId)) : rows };
     });
     app.post('/api/v1/folders', async (req, reply) => {
         const { accountId, userId } = authOf(req);

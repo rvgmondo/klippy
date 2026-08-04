@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, accounts } from '../db/schema.js';
+import { businesses, accounts, businessMembers, memberships, users } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { seedNewBusiness } from '../lib/seed.js';
+import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -31,13 +32,16 @@ const updateSchema = z.object({
 });
 export async function businessRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
-    // Every business in the account (the owner's companies).
+    // The businesses this user may see: all of them for an account owner/admin, only
+    // the assigned ones for a member. This drives the switcher, sidebar and dashboard,
+    // so scoping it here scopes what a member sees across the app.
     app.get('/api/v1/businesses', async (req) => {
         const { accountId } = authOf(req);
         const rows = await db.select().from(businesses)
             .where(tenantWhere(businesses, accountId))
             .orderBy(asc(businesses.position));
-        return { businesses: rows };
+        const allowed = await accessibleBusinessIds(req);
+        return { businesses: allowed ? rows.filter((b) => allowed.has(b.id)) : rows };
     });
     app.post('/api/v1/businesses', async (req, reply) => {
         const { accountId, userId } = authOf(req);
@@ -81,6 +85,9 @@ export async function businessRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        // Changing a business's settings (brand, invoicing) needs admin on it.
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
         const parsed = updateSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -111,6 +118,8 @@ export async function businessRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
         // Refuse to delete the last business, so an account always has at least one.
         const [countRow] = await db.select({ n: sql `count(*)` }).from(businesses)
             .where(tenantWhere(businesses, accountId));
@@ -119,6 +128,76 @@ export async function businessRoutes(app) {
         const res = await db.delete(businesses).where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Business not found.' });
+        return { ok: true };
+    });
+    // ---- Access: who can see/work in this business, and at what role -----------
+    // Managing access needs admin on the business (account owners/admins qualify).
+    app.get('/api/v1/businesses/:id/members', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
+        // Everyone in the account, annotated with their access to THIS business. Account
+        // owners/admins are shown as full-access and not editable per business.
+        const people = await db.select({
+            userId: memberships.userId, name: users.name, email: users.email, accountRole: memberships.role,
+        }).from(memberships)
+            .innerJoin(users, eq(users.id, memberships.userId))
+            .where(and(eq(memberships.accountId, accountId), eq(memberships.isActive, true)));
+        const assigned = await db.select({ userId: businessMembers.userId, role: businessMembers.role })
+            .from(businessMembers)
+            .where(and(eq(businessMembers.accountId, accountId), eq(businessMembers.businessId, id)));
+        const roleByUser = new Map(assigned.map((a) => [a.userId, a.role]));
+        return {
+            members: people.map((p) => ({
+                userId: p.userId, name: p.name, email: p.email,
+                // Owners/admins implicitly have full access to every business.
+                accountAdmin: p.accountRole === 'owner' || p.accountRole === 'admin',
+                role: roleByUser.get(p.userId) ?? null, // null = no access (for plain members)
+            })),
+        };
+    });
+    app.put('/api/v1/businesses/:id/members/:userId', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        const userId = Number(req.params.userId);
+        if (!id || !userId)
+            return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
+        const parsed = z.object({ role: z.enum(['admin', 'member', 'viewer']) }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'role must be admin, member or viewer.' });
+        // Only a real account member can be given per-business access.
+        const [m] = await db.select({ role: memberships.role }).from(memberships)
+            .where(and(eq(memberships.accountId, accountId), eq(memberships.userId, userId), eq(memberships.isActive, true))).limit(1);
+        if (!m)
+            return reply.code(404).send({ error: 'That person is not in this account.' });
+        if (m.role === 'owner' || m.role === 'admin') {
+            return reply.code(400).send({ error: 'Account admins already have access to every business.' });
+        }
+        const [existing] = await db.select({ id: businessMembers.id }).from(businessMembers)
+            .where(and(eq(businessMembers.businessId, id), eq(businessMembers.userId, userId))).limit(1);
+        if (existing) {
+            await db.update(businessMembers).set({ role: parsed.data.role }).where(eq(businessMembers.id, existing.id));
+        }
+        else {
+            await db.insert(businessMembers).values({ accountId, businessId: id, userId, role: parsed.data.role });
+        }
+        return { ok: true };
+    });
+    app.delete('/api/v1/businesses/:id/members/:userId', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        const userId = Number(req.params.userId);
+        if (!id || !userId)
+            return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
+        await db.delete(businessMembers)
+            .where(and(eq(businessMembers.accountId, accountId), eq(businessMembers.businessId, id), eq(businessMembers.userId, userId)));
         return { ok: true };
     });
     // Persist order after drag/drop.

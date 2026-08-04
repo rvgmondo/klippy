@@ -9,6 +9,7 @@ import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
+import { businessScope, canSeeBusiness } from '../lib/access.js';
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(500),
@@ -54,6 +55,8 @@ export async function documentRoutes(app: FastifyInstance) {
     const conds = [
       q.success && q.data.type ? eq(documents.type, q.data.type) : undefined,
       q.success && q.data.businessId ? eq(documents.businessId, q.data.businessId) : undefined,
+      // A member only sees documents in businesses they can access.
+      await businessScope(req, documents.businessId),
     ];
     const rows = await db.select({
       id: documents.id, type: documents.type, number: documents.number,
@@ -72,7 +75,9 @@ export async function documentRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     const [doc] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
-    if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    if (!doc || (doc.businessId && !(await canSeeBusiness(req, doc.businessId)))) {
+      return reply.code(404).send({ error: 'Not found.' });
+    }
     const lines = await db.select().from(documentLines)
       .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id)))
       .orderBy(documentLines.position);
@@ -123,6 +128,10 @@ export async function documentRoutes(app: FastifyInstance) {
     const number = `${PREFIX[d.type]}${String(seq).padStart(4, '0')}`;
 
     const businessId = await resolveBusinessId(accountId, d.businessId);
+    // A member can only raise a document in a business they can work in.
+    if (businessId && !(await canSeeBusiness(req, businessId))) {
+      return reply.code(403).send({ error: 'You do not have access to that business.' });
+    }
     const docId = await db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
         type: d.type, seq, number, businessId, folderId: d.folderId ?? null,

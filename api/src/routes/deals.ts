@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { deals, folders, boards, boardColumns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { businessScope } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 
@@ -26,8 +27,9 @@ export async function dealRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
     const bizFilter = q.success && q.data.businessId ? eq(deals.businessId, q.data.businessId) : undefined;
+    const scope = await businessScope(req, deals.businessId);
     const rows = await db.select().from(deals)
-      .where(tenantWhere(deals, accountId, bizFilter))
+      .where(tenantWhere(deals, accountId, bizFilter, scope))
       .orderBy(asc(deals.stage), asc(deals.position));
 
     const openStages = ['lead', 'contacted', 'proposal'];

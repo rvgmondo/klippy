@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { businessScope } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -28,8 +29,9 @@ export async function offeringRoutes(app) {
         const { accountId } = authOf(req);
         const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
         const bizFilter = q.success && q.data.businessId ? eq(offerings.businessId, q.data.businessId) : undefined;
+        const scope = await businessScope(req, offerings.businessId);
         const rows = await db.select().from(offerings)
-            .where(tenantWhere(offerings, accountId, bizFilter))
+            .where(tenantWhere(offerings, accountId, bizFilter, scope))
             .orderBy(asc(offerings.position));
         const mrr = rows.filter((o) => o.recurring && o.active).reduce((s, o) => s + Number(o.price), 0);
         return { offerings: rows, mrr: Math.round(mrr * 100) / 100 };

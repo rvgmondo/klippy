@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { timeEntries, tasks, boards, folders, users, accounts, expenses, offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
+import { accessibleBusinessIds, businessScope } from '../lib/access.js';
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 export async function reportRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
@@ -21,6 +22,9 @@ export async function reportRoutes(app) {
         if (!q.success)
             return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
         const onlyBusiness = q.data.businessId;
+        // A member's report never sums a business they cannot access.
+        const allowed = await accessibleBusinessIds(req);
+        const canBiz = (bid) => allowed === null || bid == null || allowed.has(bid);
         const start = new Date(`${q.data.from}T00:00:00.000Z`);
         const end = new Date(`${q.data.to}T23:59:59.999Z`);
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
@@ -66,6 +70,8 @@ export async function reportRoutes(app) {
             if (!secs)
                 continue;
             const root = rootOf(e.folderId);
+            if (!canBiz(root?.businessId ?? null))
+                continue;
             // When scoped to one business, only count work under that business.
             if (onlyBusiness !== undefined && root?.businessId !== onlyBusiness)
                 continue;
@@ -84,7 +90,7 @@ export async function reportRoutes(app) {
         // rollup rule as time, so per-client profit is possible - not just business totals.
         const expenseFilter = onlyBusiness !== undefined ? eq(expenses.businessId, onlyBusiness) : undefined;
         const expenseRows = await db.select({ amount: expenses.amount, folderId: expenses.folderId }).from(expenses)
-            .where(tenantWhere(expenses, accountId, and(expenseFilter, gte(expenses.incurredOn, q.data.from), lte(expenses.incurredOn, q.data.to))));
+            .where(tenantWhere(expenses, accountId, and(expenseFilter, await businessScope(req, expenses.businessId), gte(expenses.incurredOn, q.data.from), lte(expenses.incurredOn, q.data.to))));
         const expenseTotal = Math.round(expenseRows.reduce((s, e) => s + Number(e.amount), 0) * 100) / 100;
         for (const e of expenseRows) {
             if (e.folderId == null)
@@ -116,7 +122,7 @@ export async function reportRoutes(app) {
         // MRR is a snapshot, not date-ranged: sum of active recurring offerings right now.
         const offeringFilter = onlyBusiness !== undefined ? eq(offerings.businessId, onlyBusiness) : undefined;
         const offeringRows = await db.select({ price: offerings.price, recurring: offerings.recurring, active: offerings.active })
-            .from(offerings).where(tenantWhere(offerings, accountId, offeringFilter));
+            .from(offerings).where(tenantWhere(offerings, accountId, offeringFilter, await businessScope(req, offerings.businessId)));
         const mrr = Math.round(offeringRows.filter((o) => o.recurring && o.active)
             .reduce((s, o) => s + Number(o.price), 0) * 100) / 100;
         return {
@@ -153,6 +159,9 @@ export async function reportRoutes(app) {
         if (!q.success)
             return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
         const onlyBusiness = q.data.businessId;
+        // A member's report never sums a business they cannot access.
+        const allowed = await accessibleBusinessIds(req);
+        const canBiz = (bid) => allowed === null || bid == null || allowed.has(bid);
         const start = new Date(`${q.data.from}T00:00:00.000Z`);
         const end = new Date(`${q.data.to}T23:59:59.999Z`);
         // Actual tracked seconds per task in the range.
@@ -175,7 +184,7 @@ export async function reportRoutes(app) {
             .where(tenantWhere(tasks, accountId, and(inArray(tasks.id, ids), isNotNull(tasks.estimateMinutes))));
         const actualBy = new Map(actuals.map((a) => [a.taskId, Number(a.seconds ?? 0)]));
         const compared = rows
-            .filter((t) => onlyBusiness === undefined || t.businessId === onlyBusiness)
+            .filter((t) => canBiz(t.businessId) && (onlyBusiness === undefined || t.businessId === onlyBusiness))
             .map((t) => {
             const estimate = Number(t.estimateMinutes ?? 0);
             const actual = Math.round((actualBy.get(t.id) ?? 0) / 60);
