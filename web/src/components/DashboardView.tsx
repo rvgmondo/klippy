@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { Target, Truck, Settings2, ArrowRight, ArrowUpRight } from 'lucide-react';
+import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import type { Priority, Folder } from '../lib/types';
+import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
+import { BusinessNotes } from './BusinessNotes';
 import { ErrorNote } from './ErrorNote';
 
 interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
@@ -60,7 +61,11 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
     queryFn: () => apiGet<{ totals: MoneyTotals }>(`/reports/time?from=${monthStart()}&to=${todayStr()}${bizQ ? '&' + bizQ.slice(1) : ''}`),
   });
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
+  const businessesQ = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
+  const [showNotes, setShowNotes] = useState(false);
+  // The focused business, when one is selected (needed for its notes).
+  const focused = businessId === 'all' ? null : (businessesQ.data?.businesses ?? []).find((b) => b.id === businessId) ?? null;
 
   const d = data;
   const ds = deals.data?.summary;
@@ -84,11 +89,22 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             <h1 className="font-display text-2xl font-bold text-slate-100">{heading}</h1>
             <p className="mt-0.5 text-sm text-slate-500">{sub}</p>
           </div>
-          <div className="hidden text-right text-xs text-slate-500 sm:block">
-            <span className="num text-slate-300">{todayLabel()}</span>
-            {businessId === 'all' && bizList.length > 0 && (
-              <><span className="mx-2 inline-block h-1 w-1 rounded-full bg-slate-600 align-middle"></span>{bizList.length} {bizList.length === 1 ? 'business' : 'businesses'}</>
+          <div className="flex items-center gap-3">
+            {focused && (
+              <button onClick={() => setShowNotes(true)}
+                title="Notes for this business"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                <StickyNote size={14} />
+                <span className="hidden sm:inline">Notes</span>
+                {focused.notes?.trim() && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
+              </button>
             )}
+            <div className="hidden text-right text-xs text-slate-500 sm:block">
+              <span className="num text-slate-300">{todayLabel()}</span>
+              {businessId === 'all' && bizList.length > 0 && (
+                <><span className="mx-2 inline-block h-1 w-1 rounded-full bg-slate-600 align-middle"></span>{bizList.length} {bizList.length === 1 ? 'business' : 'businesses'}</>
+              )}
+            </div>
           </div>
         </div>
 
@@ -179,6 +195,10 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
+      {showNotes && focused && (
+        <BusinessNotes businessId={focused.id} businessName={focused.name}
+          initial={focused.notes ?? ''} onClose={() => setShowNotes(false)} />
+      )}
     </div>
   );
 }

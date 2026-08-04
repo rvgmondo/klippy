@@ -66,6 +66,7 @@ export interface Business {
   type: BusinessType;
   secondaryTypes: BusinessType[];
   color: string;
+  notes?: string | null;
   position: number;
 }
 export interface Folder {

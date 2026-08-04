@@ -152,8 +152,14 @@ body {
   body * { visibility: hidden !important; }
   .print-area, .print-area * { visibility: visible !important; }
   .print-area {
-    position: absolute; inset: 0; width: 100%; margin: 0; padding: 24px;
+    position: absolute; inset: 0; width: 100%; margin: 0;
     background: #fff !important; color: #111 !important;
+    box-shadow: none !important; border-radius: 0 !important;
   }
+  /* The invoice header band and totals use the account's accent as a background.
+     Browsers drop backgrounds when printing unless this is set, which would leave
+     white-on-white text; force them to render so the document keeps its colour. */
+  .print-area, .print-area * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .no-print { display: none !important; }
+  @page { margin: 14mm; }
 }

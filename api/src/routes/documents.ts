@@ -76,7 +76,20 @@ export async function documentRoutes(app: FastifyInstance) {
       .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id)))
       .orderBy(documentLines.position);
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
-    return { document: doc, lines, brand: { name: account?.brandName ?? 'Klippy', hasLogo: !!account?.logoPath } };
+    return {
+      document: doc, lines,
+      brand: { name: account?.brandName ?? 'Klippy', hasLogo: !!account?.logoPath },
+      // The "from" side of the document, so the template can render a real letterhead.
+      issuer: {
+        name: account?.brandName ?? 'Klippy',
+        address: account?.bizAddress ?? null,
+        taxNumber: account?.bizTaxNumber ?? null,
+        regNumber: account?.bizRegNumber ?? null,
+        bankDetails: account?.bankDetails ?? null,
+        footer: account?.invoiceFooter ?? null,
+        accent: account?.invoiceAccent ?? '#6366f1',
+      },
+    };
   });
 
   app.post('/api/v1/documents', async (req, reply) => {

@@ -22,6 +22,10 @@ interface FullDoc {
   };
   lines: (Line & { amount: string })[];
   brand: { name: string; hasLogo: boolean };
+  issuer: {
+    name: string; address: string | null; taxNumber: string | null; regNumber: string | null;
+    bankDetails: string | null; footer: string | null; accent: string;
+  };
 }
 
 const STATUS_COLOR: Record<Status, string> = {
@@ -184,6 +188,23 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not pull time.'),
   });
+
+  // A new document starts from the account's invoicing defaults (tax rate + terms),
+  // so the common case needs no adjusting.
+  const defaults = useQuery({
+    queryKey: ['invoicing'], enabled: isNew,
+    queryFn: () => apiGet<{ invoicing: { defaultTaxRate: number | null; defaultDueDays: number } }>('/account/invoicing'),
+  });
+  if (isNew && defaults.data && !ready) {
+    const inv = defaults.data.invoicing;
+    if (inv.defaultTaxRate != null) setTaxRate(inv.defaultTaxRate);
+    if (type === 'invoice' && inv.defaultDueDays > 0) {
+      const due = new Date(`${issueDate}T00:00:00`);
+      due.setDate(due.getDate() + inv.defaultDueDays);
+      setDueDate(due.toISOString().slice(0, 10));
+    }
+    setReady(true);
+  }
 
   // Hydrate from the existing document once.
   if (!isNew && existing.data && !ready) {
@@ -379,78 +400,124 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
   const d = data.document;
   const cur = d.currency;
 
+  const issuer = data.issuer;
+  const accent = issuer.accent || '#6366f1';
+  const isQuote = d.type === 'quote';
+  const label = isQuote ? 'Quotation' : 'Invoice';
+  const paid = d.status === 'paid';
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
       <div className="mx-auto my-4 max-w-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="no-print mb-3 flex justify-end gap-2">
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">
             <Printer size={15} /> Print / Save as PDF
           </button>
           <button onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Close</button>
         </div>
 
-        <div className="print-area rounded-xl bg-white p-8 text-slate-900">
-          <div className="mb-8 flex items-start justify-between">
-            <div className="flex items-center gap-3">
-              {account?.hasLogo && <img src="/api/v1/account/logo" alt="" className="h-12 w-12 rounded object-contain" />}
-              <div>
-                <div className="text-xl font-bold">{data.brand.name}</div>
+        {/* The document. Everything below reads on white so it prints cleanly, with a
+            single accent colour the owner picks in Settings > Invoicing. */}
+        <div className="print-area overflow-hidden rounded-xl bg-white text-slate-900 shadow-xl">
+          {/* Accent header band */}
+          <div className="px-10 pb-7 pt-9" style={{ borderTop: `5px solid ${accent}` }}>
+            <div className="flex items-start justify-between gap-6">
+              <div className="flex items-center gap-3">
+                {account?.hasLogo && <img src="/api/v1/account/logo" alt="" className="h-14 w-14 rounded-lg object-contain" />}
+                <div>
+                  <div className="text-xl font-bold leading-tight">{issuer.name}</div>
+                  {issuer.address && <div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{issuer.address}</div>}
+                  <div className="mt-1 space-x-3 text-[11px] text-slate-400">
+                    {issuer.regNumber && <span>Reg {issuer.regNumber}</span>}
+                    {issuer.taxNumber && <span>VAT {issuer.taxNumber}</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-3xl font-bold uppercase tracking-tight" style={{ color: accent }}>{label}</div>
+                <div className="mt-1 num text-sm font-medium text-slate-500">{d.number}</div>
+                {paid && (
+                  <div className="mt-2 inline-block rounded-md border-2 px-2 py-0.5 text-xs font-bold uppercase tracking-wide"
+                    style={{ color: accent, borderColor: accent }}>Paid</div>
+                )}
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-2xl font-bold uppercase tracking-wide">{d.type}</div>
-              <div className="text-sm text-slate-500">{d.number}</div>
-            </div>
           </div>
 
-          <div className="mb-6 flex justify-between text-sm">
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Bill to</div>
-              <div className="font-medium">{d.clientName}</div>
-              {d.clientEmail && <div className="text-slate-500">{d.clientEmail}</div>}
-              {d.clientAddress && <div className="whitespace-pre-wrap text-slate-500">{d.clientAddress}</div>}
+          <div className="px-10 pb-10">
+            {/* Bill-to + dates */}
+            <div className="mb-8 flex justify-between gap-6 text-sm">
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: accent }}>Bill to</div>
+                <div className="font-semibold text-slate-800">{d.clientName}</div>
+                {d.clientEmail && <div className="text-slate-500">{d.clientEmail}</div>}
+                {d.clientAddress && <div className="whitespace-pre-wrap text-slate-500">{d.clientAddress}</div>}
+              </div>
+              <div className="space-y-1 text-right">
+                <div className="flex justify-between gap-6"><span className="text-slate-400">Issued</span><span className="num text-slate-700">{d.issueDate}</span></div>
+                {d.dueDate && (
+                  <div className="flex justify-between gap-6">
+                    <span className="text-slate-400">{isQuote ? 'Valid until' : 'Due'}</span>
+                    <span className="num text-slate-700">{d.dueDate}</span>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="text-right">
-              <div><span className="text-slate-500">Issued: </span>{d.issueDate}</div>
-              {d.dueDate && <div><span className="text-slate-500">{d.type === 'quote' ? 'Valid until: ' : 'Due: '}</span>{d.dueDate}</div>}
-            </div>
-          </div>
 
-          <table className="mb-6 w-full text-sm">
-            <thead>
-              <tr className="border-b-2 border-slate-300 text-left">
-                <th className="py-2">Description</th>
-                <th className="py-2 text-right">Qty</th>
-                <th className="py-2 text-right">Unit</th>
-                <th className="py-2 text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.lines.map((l, i) => (
-                <tr key={i} className="border-b border-slate-200">
-                  <td className="py-2">{l.description}</td>
-                  <td className="py-2 text-right num">{Number(l.quantity)}</td>
-                  <td className="py-2 text-right num">{money(l.unitPrice, cur)}</td>
-                  <td className="py-2 text-right num">{money(l.amount, cur)}</td>
+            {/* Line items */}
+            <table className="mb-6 w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-white">
+                  <th className="rounded-l-md py-2 pl-3" style={{ background: accent }}>Description</th>
+                  <th className="py-2 text-right" style={{ background: accent }}>Qty</th>
+                  <th className="py-2 text-right" style={{ background: accent }}>Unit</th>
+                  <th className="rounded-r-md py-2 pr-3 text-right" style={{ background: accent }}>Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.lines.map((l, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="py-2.5 pl-3 text-slate-700">{l.description}</td>
+                    <td className="py-2.5 text-right num text-slate-600">{Number(l.quantity)}</td>
+                    <td className="py-2.5 text-right num text-slate-600">{money(l.unitPrice, cur)}</td>
+                    <td className="py-2.5 pr-3 text-right num font-medium text-slate-800">{money(l.amount, cur)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
 
-          <div className="mb-6 flex justify-end">
-            <div className="w-64 space-y-1 text-sm">
-              <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="num">{money(d.subtotal, cur)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-500">Tax ({Number(d.taxRate)}%)</span><span className="num">{money(d.taxAmount, cur)}</span></div>
-              <div className="flex justify-between border-t-2 border-slate-300 pt-1 text-base font-bold"><span>Total</span><span className="num">{money(d.total, cur)}</span></div>
+            {/* Totals */}
+            <div className="mb-8 flex justify-end">
+              <div className="w-72 space-y-1.5 text-sm">
+                <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="num text-slate-700">{money(d.subtotal, cur)}</span></div>
+                {Number(d.taxRate) > 0 && (
+                  <div className="flex justify-between"><span className="text-slate-500">Tax ({Number(d.taxRate)}%)</span><span className="num text-slate-700">{money(d.taxAmount, cur)}</span></div>
+                )}
+                <div className="mt-1 flex justify-between rounded-md px-3 py-2 text-base font-bold text-white" style={{ background: accent }}>
+                  <span>Total</span><span className="num">{money(d.total, cur)}</span>
+                </div>
+              </div>
             </div>
+
+            {/* Payment details + notes footer */}
+            {(issuer.bankDetails || d.notes || issuer.footer) && (
+              <div className="grid gap-6 border-t border-slate-200 pt-5 text-sm sm:grid-cols-2">
+                {issuer.bankDetails && !isQuote && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: accent }}>How to pay</div>
+                    <div className="whitespace-pre-wrap text-slate-600">{issuer.bankDetails}</div>
+                  </div>
+                )}
+                {(d.notes || issuer.footer) && (
+                  <div>
+                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide" style={{ color: accent }}>Notes</div>
+                    {d.notes && <div className="whitespace-pre-wrap text-slate-600">{d.notes}</div>}
+                    {issuer.footer && <div className="mt-1 whitespace-pre-wrap text-slate-400">{issuer.footer}</div>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-
-          {d.notes && (
-            <div className="border-t border-slate-200 pt-4 text-sm">
-              <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Notes</div>
-              <div className="whitespace-pre-wrap text-slate-700">{d.notes}</div>
-            </div>
-          )}
         </div>
       </div>
     </div>

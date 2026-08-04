@@ -34,6 +34,18 @@ export const accounts = mysqlTable('accounts', {
   currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
   brandName: varchar('brand_name', { length: 80 }),
   logoPath: varchar('logo_path', { length: 255 }),
+  // ---- Invoicing settings ----------------------------------------------------
+  // The "from" side of every quote and invoice, plus the defaults a new one starts
+  // with. All optional: an invoice reads fine without them, they just make it look
+  // like a real business document instead of a bare table.
+  bizAddress: varchar('biz_address', { length: 500 }),      // your address block
+  bizTaxNumber: varchar('biz_tax_number', { length: 60 }),  // VAT / tax number
+  bizRegNumber: varchar('biz_reg_number', { length: 60 }),  // company registration
+  bankDetails: text('bank_details'),                        // EFT details for manual payment
+  invoiceFooter: text('invoice_footer'),                    // default notes / terms line
+  invoiceAccent: varchar('invoice_accent', { length: 20 }).default('#6366f1').notNull(),
+  defaultTaxRate: decimal('default_tax_rate', { precision: 5, scale: 2 }),
+  defaultDueDays: int('default_due_days', { unsigned: true }).default(14).notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
   deletedAt: datetime('deleted_at'),
@@ -105,6 +117,9 @@ export const businesses = mysqlTable('businesses', {
   secondaryTypes: json('secondary_types').$type<('services' | 'products' | 'code' | 'content')[]>()
     .default([]).notNull(),
   color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
+  // Free-form notes for this business: strategy, logins to remember, whatever the
+  // owner wants kept next to it. Separate from folder/client notes.
+  notes: text('notes'),
   position: int('position', { unsigned: true }).default(0).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),

@@ -18,6 +18,7 @@ const updateSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),
   color: z.string().trim().max(20).optional(),
   secondaryTypes: z.array(businessType).max(4).optional(),
+  notes: z.string().max(20000).nullable().optional(),
 });
 
 export async function businessRoutes(app: FastifyInstance) {

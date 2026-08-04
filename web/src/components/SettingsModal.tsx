@@ -10,8 +10,9 @@ import { AppearancePanel } from './AppearancePanel';
 import { BrandingPanel } from './BrandingPanel';
 import { NotesPanel } from './NotesPanel';
 import { AutomationPanel } from './AutomationPanel';
+import { InvoicingPanel } from './InvoicingPanel';
 
-type Tab = 'profile' | 'appearance' | 'workspace' | 'branding' | 'people' | 'teams' | 'labels' | 'tokens' | 'automation' | 'notes';
+type Tab = 'profile' | 'appearance' | 'workspace' | 'branding' | 'invoicing' | 'people' | 'teams' | 'labels' | 'tokens' | 'automation' | 'notes';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('profile');
@@ -31,7 +32,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
-          {(['profile', 'appearance', 'workspace', 'branding', 'people', 'teams', 'labels', 'tokens', 'automation', 'notes'] as Tab[]).map((t) => (
+          {(['profile', 'appearance', 'workspace', 'branding', 'invoicing', 'people', 'teams', 'labels', 'tokens', 'automation', 'notes'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
               {t}
@@ -44,6 +45,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           {tab === 'appearance' && <AppearancePanel />}
           {tab === 'workspace' && <WorkspaceTab />}
           {tab === 'branding' && <BrandingPanel />}
+          {tab === 'invoicing' && <InvoicingPanel />}
           {tab === 'people' && <PeoplePanel />}
           {tab === 'teams' && <TeamsPanel />}
           {tab === 'labels' && <LabelsPanel />}

@@ -148,6 +148,13 @@
       "when": 1785521245171,
       "tag": "0020_blue_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1785860146784,
+      "tag": "0021_rich_spot",
+      "breakpoints": true
     }
   ]
 }
