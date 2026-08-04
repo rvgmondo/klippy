@@ -39,15 +39,28 @@ cPanel > Setup Node.js App > Create Application:
 - Click Create, but do not start it yet.
 
 Add environment variables (same screen, Add Variable):
+
+Required:
 | Name | Value |
 |---|---|
 | `NODE_ENV` | `production` |
 | `DATABASE_URL` | `mysql://DBUSER:DBPASS@localhost:3306/DBNAME` (from step 2, with the cPanel prefixes) |
 | `JWT_SECRET` | a long random string, 50+ characters. Do not reuse anything. |
 | `UPLOAD_DIR` | `/home/YOURCPANELUSER/klippy_uploads` |
+| `APP_URL` | `https://klippy.mondobase.com` (used in email links and PayFast return/notify URLs) |
+
+For features that send email or take payments (all optional, but the feature is off without them):
+| Name | Value | Enables |
+|---|---|---|
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | a cPanel mailbox's details | the morning digest, invoice emails, payment reminders |
+| `CRON_SECRET` | a long random string | the secret-protected cron endpoints (the app also runs jobs itself, see CRON-SETUP.md) |
+| `PAYMENTS_SECRET` | a long random string | encrypting PayFast credentials so clients can pay online (see PAYFAST-SETUP.md) |
 
 If the DB password contains characters like `@ : / # ?`, percent-encode them in
 DATABASE_URL (e.g. `@` becomes `%40`), or just pick a password without those.
+
+Any of these can be added later and picked up on the next Restart. Nothing breaks
+without them; the matching feature just stays off and says so in the app.
 
 ## 4. Upload the API
 cPanel > File Manager > go to the `klippy_api` folder (created in step 3):

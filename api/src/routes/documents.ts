@@ -8,6 +8,7 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendMail } from '../lib/mailer.js';
+import { payLinkFor } from '../lib/paylink.js';
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(500),
@@ -310,6 +311,9 @@ export async function documentRoutes(app: FastifyInstance) {
 
     const lineText = lines.map((l) => `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`).join('\n');
     const label = doc.type === 'quote' ? 'Quotation' : 'Invoice';
+    // A one-click way to pay, when PayFast is on. Invoices only, never quotes.
+    const payLink = doc.type === 'invoice' && doc.status !== 'paid'
+      ? await payLinkFor(accountId, doc.id) : null;
     const body = [
       `Hi ${doc.clientName},`, '',
       parsed.data.message?.trim() || `Please find ${doc.type} ${doc.number} below.`, '',
@@ -319,6 +323,7 @@ export async function documentRoutes(app: FastifyInstance) {
       `Subtotal: ${fmt(doc.subtotal)}`,
       `Tax (${Number(doc.taxRate)}%): ${fmt(doc.taxAmount)}`,
       `Total: ${fmt(doc.total)}`, '',
+      payLink ? `Pay online: ${payLink}\n` : '',
       doc.notes?.trim() ? `${doc.notes.trim()}\n` : '',
       `Regards,`, brand,
     ].join('\n');

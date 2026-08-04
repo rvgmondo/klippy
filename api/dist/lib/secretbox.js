@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
+import { createCipheriv, createDecipheriv, randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
 /**
  * Encrypt small secrets (payment credentials) for storage in the database.
  *
@@ -42,5 +42,22 @@ export function decryptSecret(stored) {
     const decipher = createDecipheriv('aes-256-gcm', k, Buffer.from(ivHex, 'hex'));
     decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
     return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+}
+/**
+ * A stateless, unguessable token for a public pay link, so an emailed
+ * "Pay this invoice" URL cannot be forged or enumerated by trying document ids.
+ * HMAC of the id under the same server secret; null when secrets are unavailable.
+ */
+export function signPayToken(docId) {
+    const raw = process.env.PAYMENTS_SECRET;
+    if (!raw || raw.length < 16)
+        return null;
+    return createHmac('sha256', raw).update(`pay:${docId}`).digest('hex').slice(0, 32);
+}
+export function verifyPayToken(docId, token) {
+    const expected = signPayToken(docId);
+    if (!expected || !token || token.length !== expected.length)
+        return false;
+    return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
 }
 //# sourceMappingURL=secretbox.js.map

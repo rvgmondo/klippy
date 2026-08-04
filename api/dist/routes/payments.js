@@ -6,7 +6,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { appUrl } from '../lib/mailer.js';
-import { encryptSecret, decryptSecret, secretsAvailable } from '../lib/secretbox.js';
+import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
 import { buildCheckout, verifyItnSignature, validateItnWithServer, isValidItnHost, } from '../lib/payfast.js';
 /** Load and decrypt an account's PayFast credentials, or null if not usable. */
 async function loadCreds(accountId) {
@@ -139,6 +139,41 @@ export async function paymentRoutes(app) {
             buyerEmail: doc.clientEmail,
         });
         return checkout;
+    });
+    // ---- Public pay page (PUBLIC: a client opens this from an emailed link) --
+    // A signed link, so an invoice id alone cannot be used to reach it. Renders a
+    // tiny page that immediately posts the signed fields to PayFast's checkout. Any
+    // failure shows a plain message rather than an error, since a client sees this.
+    app.get('/api/v1/pay/:id', async (req, reply) => {
+        const page = (title, msg) => reply.type('text/html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+            + `<title>${title}</title>`
+            + `<div style="font-family:system-ui,sans-serif;max-width:420px;margin:15vh auto;padding:0 24px;text-align:center;color:#0f172a">`
+            + `<h1 style="font-size:20px;margin-bottom:8px">${title}</h1><p style="color:#64748b">${msg}</p></div>`);
+        const id = Number(req.params.id);
+        const token = req.query.t ?? '';
+        if (!id || !verifyPayToken(id, token))
+            return page('Link not valid', 'This payment link is invalid or has expired.');
+        const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
+        if (!doc || doc.type !== 'invoice')
+            return page('Not found', 'We could not find that invoice.');
+        if (doc.status === 'paid')
+            return page('Already paid', `Invoice ${doc.number} is already paid. Thank you.`);
+        const creds = await loadCreds(doc.accountId);
+        if (!creds)
+            return page('Online payment unavailable', 'This invoice cannot be paid online right now.');
+        const base = appUrl();
+        const { url, fields } = buildCheckout(creds, {
+            amount: Number(doc.total), itemName: `Invoice ${doc.number}`, mPaymentId: `doc-${doc.id}`,
+            returnUrl: `${base}/?paid=${doc.number}`, cancelUrl: `${base}/?cancelled=${doc.number}`,
+            notifyUrl: `${base}/api/v1/payfast/notify`, buyerEmail: doc.clientEmail,
+        });
+        // Auto-submitting form: the client lands here and is taken straight to PayFast.
+        const inputs = Object.entries(fields)
+            .map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v).replace(/"/g, '&quot;')}">`).join('');
+        return reply.type('text/html').send(`<!doctype html><meta charset="utf-8"><title>Redirecting to PayFast</title>`
+            + `<div style="font-family:system-ui,sans-serif;text-align:center;margin-top:20vh;color:#334155">Taking you to PayFast to pay invoice ${doc.number}...</div>`
+            + `<form id="pf" action="${url}" method="post">${inputs}</form>`
+            + `<script>document.getElementById('pf').submit()</script>`);
     });
     // ---- ITN webhook (PUBLIC: PayFast calls this, no user session) -----------
     // Always answers 200 so PayFast stops retrying, but only records a payment once

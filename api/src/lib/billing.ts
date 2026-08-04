@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { documents, documentLines, accounts, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { sendMail } from './mailer.js';
+import { payLinkFor } from './paylink.js';
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
@@ -89,6 +90,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   // lose the invoice: it stays a draft and can be sent by hand.
   if (sub.autoSend && folder.billingEmail) {
     try {
+      const payLink = await payLinkFor(accountId, docId);
       await sendMail(
         folder.billingEmail,
         `${account?.brandName ?? 'Invoice'} ${number}`,
@@ -99,6 +101,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
           `Amount: ${currency} ${money(price)}`,
           `Due: ${dueDate}`,
           '',
+          ...(payLink ? [`Pay online: ${payLink}`, ''] : []),
           'Thank you.',
         ].join('\n'),
       );
