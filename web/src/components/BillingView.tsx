@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
-import { useAuth } from '../lib/auth';
 import type { BusinessSelection } from './BusinessSwitcher';
 
 interface TreeFolder { id: number; parentId: number | null; name: string }
@@ -21,9 +20,9 @@ interface FullDoc {
     subtotal: string; taxAmount: string; notes: string | null;
   };
   lines: (Line & { amount: string })[];
-  brand: { name: string; hasLogo: boolean };
+  brand: { name: string; hasLogo: boolean; logoUrl: string | null };
   issuer: {
-    name: string; address: string | null; taxNumber: string | null; regNumber: string | null;
+    name: string; logoUrl: string | null; address: string | null; taxNumber: string | null; regNumber: string | null;
     bankDetails: string | null; footer: string | null; accent: string;
   };
 }
@@ -212,19 +211,21 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not pull time.'),
   });
 
-  // A new document starts from the account's invoicing defaults (tax rate + terms),
-  // so the common case needs no adjusting.
-  const defaults = useQuery({
-    queryKey: ['invoicing'], enabled: isNew,
-    queryFn: () => apiGet<{ invoicing: { defaultTaxRate: number | null; defaultDueDays: number } }>('/account/invoicing'),
+  // A new document starts from ITS business's invoicing defaults (tax rate + terms),
+  // so the common case needs no adjusting. Falls back to nothing when no business.
+  const bizDefaults = useQuery({
+    queryKey: ['businesses'], enabled: isNew,
+    queryFn: () => apiGet<{ businesses: { id: number; defaultTaxRate: string | null; defaultDueDays: number }[] }>('/businesses'),
   });
-  if (isNew && defaults.data && !ready) {
-    const inv = defaults.data.invoicing;
-    if (inv.defaultTaxRate != null) setTaxRate(inv.defaultTaxRate);
-    if (type === 'invoice' && inv.defaultDueDays > 0) {
-      const due = new Date(`${issueDate}T00:00:00`);
-      due.setDate(due.getDate() + inv.defaultDueDays);
-      setDueDate(due.toISOString().slice(0, 10));
+  if (isNew && (bizDefaults.data || !businessId) && !ready) {
+    const biz = bizDefaults.data?.businesses.find((b) => b.id === businessId);
+    if (biz) {
+      if (biz.defaultTaxRate != null) setTaxRate(Number(biz.defaultTaxRate));
+      if (type === 'invoice' && biz.defaultDueDays > 0) {
+        const due = new Date(`${issueDate}T00:00:00`);
+        due.setDate(due.getDate() + biz.defaultDueDays);
+        setDueDate(due.toISOString().slice(0, 10));
+      }
     }
     setReady(true);
   }
@@ -417,7 +418,6 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
 }
 
 function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
-  const { account } = useAuth();
   const { data } = useQuery({ queryKey: ['document', id], queryFn: () => apiGet<FullDoc>(`/documents/${id}`) });
   if (!data) return null;
   const d = data.document;
@@ -446,7 +446,7 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
           <div className="px-10 pb-7 pt-9" style={{ borderTop: `5px solid ${accent}` }}>
             <div className="flex items-start justify-between gap-6">
               <div className="flex items-center gap-3">
-                {account?.hasLogo && <img src="/api/v1/account/logo" alt="" className="h-14 w-14 rounded-lg object-contain" />}
+                {issuer.logoUrl && <img src={issuer.logoUrl} alt="" className="h-14 w-14 rounded-lg object-contain" />}
                 <div>
                   <div className="text-xl font-bold leading-tight">{issuer.name}</div>
                   {issuer.address && <div className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-slate-500">{issuer.address}</div>}

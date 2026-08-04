@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, offerings, folders } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { sendMail } from './mailer.js';
 import { payLinkFor } from './paylink.js';
@@ -53,6 +53,10 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     if (!offering || !folder)
         throw new Error('Offering or client no longer exists.');
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+    // Brand the invoice email from the business it belongs to, not the account.
+    const [business] = await db.select({ brandName: businesses.brandName, name: businesses.name }).from(businesses)
+        .where(tenantWhere(businesses, accountId, eq(businesses.id, sub.businessId))).limit(1);
+    const brand = business?.brandName || business?.name || account?.brandName || 'Invoice';
     const currency = account?.currency ?? 'ZAR';
     const price = Number(offering.price);
     const issueDate = new Date().toISOString().slice(0, 10);
@@ -81,7 +85,7 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     if (sub.autoSend && folder.billingEmail) {
         try {
             const payLink = await payLinkFor(accountId, docId);
-            await sendMail(folder.billingEmail, `${account?.brandName ?? 'Invoice'} ${number}`, [
+            await sendMail(folder.billingEmail, `${brand} ${number}`, [
                 `Hi ${folder.name},`,
                 '',
                 `Invoice ${number} for ${offering.name} is attached below.`,

@@ -67,6 +67,17 @@ export interface Business {
   secondaryTypes: BusinessType[];
   color: string;
   notes?: string | null;
+  // Brand + invoicing identity (what a client sees on this business's documents).
+  brandName?: string | null;
+  logoPath?: string | null;
+  bizAddress?: string | null;
+  bizTaxNumber?: string | null;
+  bizRegNumber?: string | null;
+  bankDetails?: string | null;
+  invoiceFooter?: string | null;
+  invoiceAccent?: string;
+  defaultTaxRate?: string | null;
+  defaultDueDays?: number;
   position: number;
 }
 export interface Folder {

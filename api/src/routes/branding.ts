@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { accounts, folders } from '../db/schema.js';
+import { accounts, folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -85,6 +85,48 @@ export async function brandingRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const [acc] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
     return sendImage(reply, acc?.logoPath ?? null);
+  });
+
+  // ---- Business logo (the brand a client sees on that business's invoices) ----
+  app.post('/api/v1/businesses/:id/logo', async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only admins can change branding.' });
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [biz] = await db.select().from(businesses)
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
+    if (!biz) return reply.code(404).send({ error: 'Business not found.' });
+    const stored = await saveImage(req, reply, `biz${id}`);
+    if (!stored) return;
+    await db.update(businesses).set({ logoPath: stored })
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
+    if (biz.logoPath) await unlink(path.join(uploadDir(), biz.logoPath)).catch(() => {});
+    return reply.code(201).send({ ok: true });
+  });
+
+  app.delete('/api/v1/businesses/:id/logo', async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only admins can change branding.' });
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [biz] = await db.select().from(businesses)
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
+    if (!biz) return reply.code(404).send({ error: 'Business not found.' });
+    await db.update(businesses).set({ logoPath: null })
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
+    if (biz.logoPath) await unlink(path.join(uploadDir(), biz.logoPath)).catch(() => {});
+    return { ok: true };
+  });
+
+  // Logo serving is not secret (it appears on invoices sent to clients), but keep it
+  // behind auth like the account logo; the invoice PDF is rendered by a logged-in user.
+  app.get('/api/v1/businesses/:id/logo', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [biz] = await db.select({ logoPath: businesses.logoPath }).from(businesses)
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
+    return sendImage(reply, biz?.logoPath ?? null);
   });
 
   // ---- Per-business (folder) image ----

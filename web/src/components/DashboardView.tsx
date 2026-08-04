@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote } from 'lucide-react';
+import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -7,6 +7,7 @@ import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 import { BusinessNotes } from './BusinessNotes';
+import { BusinessSettings } from './BusinessSettings';
 import { ErrorNote } from './ErrorNote';
 
 interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
@@ -64,6 +65,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   const businessesQ = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
+  const [showBizSettings, setShowBizSettings] = useState(false);
   // The focused business, when one is selected (needed for its notes).
   const focused = businessId === 'all' ? null : (businessesQ.data?.businesses ?? []).find((b) => b.id === businessId) ?? null;
 
@@ -90,6 +92,14 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             <p className="mt-0.5 text-sm text-slate-500">{sub}</p>
           </div>
           <div className="flex items-center gap-3">
+            {focused && (
+              <button onClick={() => setShowBizSettings(true)}
+                title="Brand and invoicing for this business"
+                className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                <Palette size={14} />
+                <span className="hidden sm:inline">Business</span>
+              </button>
+            )}
             {focused && (
               <button onClick={() => setShowNotes(true)}
                 title="Notes for this business"
@@ -198,6 +208,9 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
       {showNotes && focused && (
         <BusinessNotes businessId={focused.id} businessName={focused.name}
           initial={focused.notes ?? ''} onClose={() => setShowNotes(false)} />
+      )}
+      {showBizSettings && focused && (
+        <BusinessSettings business={focused} onClose={() => setShowBizSettings(false)} />
       )}
     </div>
   );

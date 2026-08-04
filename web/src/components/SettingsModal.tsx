@@ -10,10 +10,12 @@ import { AppearancePanel } from './AppearancePanel';
 import { BrandingPanel } from './BrandingPanel';
 import { NotesPanel } from './NotesPanel';
 import { AutomationPanel } from './AutomationPanel';
-import { InvoicingPanel } from './InvoicingPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 
-type Tab = 'profile' | 'appearance' | 'workspace' | 'branding' | 'invoicing' | 'payments' | 'people' | 'teams' | 'labels' | 'tokens' | 'automation' | 'notes';
+// Account-level settings. Anything a CLIENT sees (brand, invoicing) lives per
+// business in Business Settings, not here. This is your login, your team, and how
+// the app looks to them.
+type Tab = 'profile' | 'appearance' | 'account' | 'branding' | 'payments' | 'people' | 'teams' | 'labels' | 'tokens' | 'automation' | 'notes';
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('profile');
@@ -33,7 +35,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
-          {(['profile', 'appearance', 'workspace', 'branding', 'invoicing', 'payments', 'people', 'teams', 'labels', 'tokens', 'automation', 'notes'] as Tab[]).map((t) => (
+          {(['profile', 'appearance', 'account', 'branding', 'payments', 'people', 'teams', 'labels', 'tokens', 'automation', 'notes'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
               {t}
@@ -44,9 +46,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {tab === 'profile' && <ProfilePanel />}
           {tab === 'appearance' && <AppearancePanel />}
-          {tab === 'workspace' && <WorkspaceTab />}
+          {tab === 'account' && <WorkspaceTab />}
           {tab === 'branding' && <BrandingPanel />}
-          {tab === 'invoicing' && <InvoicingPanel />}
           {tab === 'payments' && <PaymentsPanel />}
           {tab === 'people' && <PeoplePanel />}
           {tab === 'teams' && <TeamsPanel />}
@@ -88,9 +89,9 @@ function WorkspaceTab() {
   return (
     <div className="space-y-8">
       <form onSubmit={save} className="space-y-4">
-        {!isAdmin && <p className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">Only workspace admins can change these settings.</p>}
+        {!isAdmin && <p className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">Only account admins can change these settings.</p>}
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-400">Workspace name</label>
+          <label className="mb-1 block text-xs font-medium text-slate-400">Account name</label>
           <input className={field} value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} placeholder="Mondobase" />
         </div>
         <div>
@@ -133,7 +134,7 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
 
   const handleDelete = async () => {
     const confirmed = window.confirm(
-      "Are you absolutely sure? This will permanently delete this workspace, including all businesses, boards, tasks, and files. This action CANNOT be undone."
+      "Are you absolutely sure? This will permanently delete this account, including all businesses, boards, tasks, and files. This action CANNOT be undone."
     );
 
     if (!confirmed) return;
@@ -163,14 +164,14 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
     <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-4">
       <h3 className="mb-1 text-sm font-semibold text-red-400">Danger Zone</h3>
       <p className="mb-4 text-xs text-red-300/70">
-        Permanently delete this workspace and all of its data. This cannot be undone.
+        Permanently delete this account and all of its data. This cannot be undone.
       </p>
       <button 
         onClick={handleDelete} 
         disabled={isDeleting}
         className="rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-400 border border-red-500/20 hover:bg-red-500/20 disabled:opacity-50 transition-colors"
       >
-        {isDeleting ? 'Deleting...' : 'Delete Workspace'}
+        {isDeleting ? 'Deleting...' : 'Delete Account'}
       </button>
     </div>
   );

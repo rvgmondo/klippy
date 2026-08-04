@@ -112,6 +112,21 @@ export const businesses = mysqlTable('businesses', {
     // Free-form notes for this business: strategy, logins to remember, whatever the
     // owner wants kept next to it. Separate from folder/client notes.
     notes: text('notes'),
+    // ---- Brand + invoicing identity (this is what a client actually sees) -------
+    // A business is the identity, not the account. Its quotes, invoices and emails
+    // are branded from here, so one account can run several companies that each look
+    // like their own business. brandName falls back to `name` when blank; the rest
+    // are the "from" details on a document. Backfilled from the account on migrate.
+    brandName: varchar('brand_name', { length: 80 }),
+    logoPath: varchar('logo_path', { length: 255 }),
+    bizAddress: varchar('biz_address', { length: 500 }),
+    bizTaxNumber: varchar('biz_tax_number', { length: 60 }),
+    bizRegNumber: varchar('biz_reg_number', { length: 60 }),
+    bankDetails: text('bank_details'),
+    invoiceFooter: text('invoice_footer'),
+    invoiceAccent: varchar('invoice_accent', { length: 20 }).default('#6366f1').notNull(),
+    defaultTaxRate: decimal('default_tax_rate', { precision: 5, scale: 2 }),
+    defaultDueDays: int('default_due_days', { unsigned: true }).default(14).notNull(),
     position: int('position', { unsigned: true }).default(0).notNull(),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),

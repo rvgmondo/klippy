@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, desc, eq, gte, lte, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -71,18 +71,29 @@ export async function documentRoutes(app) {
             .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id)))
             .orderBy(documentLines.position);
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+        // The document is branded from ITS business, not the whole account. Each of the
+        // business's fields falls back to the account only when the business has not set
+        // it, so nothing looks emptier than it did before per-business identity existed.
+        const [business] = doc.businessId
+            ? await db.select().from(businesses).where(tenantWhere(businesses, accountId, eq(businesses.id, doc.businessId))).limit(1)
+            : [undefined];
+        const pick = (k) => (business?.[k] ?? account?.[k] ?? null);
+        const name = business?.brandName || business?.name || account?.brandName || 'Klippy';
+        const logoUrl = business?.logoPath ? `/api/v1/businesses/${business.id}/logo`
+            : account?.logoPath ? '/api/v1/account/logo' : null;
         return {
             document: doc, lines,
-            brand: { name: account?.brandName ?? 'Klippy', hasLogo: !!account?.logoPath },
+            brand: { name, hasLogo: !!logoUrl, logoUrl },
             // The "from" side of the document, so the template can render a real letterhead.
             issuer: {
-                name: account?.brandName ?? 'Klippy',
-                address: account?.bizAddress ?? null,
-                taxNumber: account?.bizTaxNumber ?? null,
-                regNumber: account?.bizRegNumber ?? null,
-                bankDetails: account?.bankDetails ?? null,
-                footer: account?.invoiceFooter ?? null,
-                accent: account?.invoiceAccent ?? '#6366f1',
+                name,
+                logoUrl,
+                address: pick('bizAddress'),
+                taxNumber: pick('bizTaxNumber'),
+                regNumber: pick('bizRegNumber'),
+                bankDetails: pick('bankDetails'),
+                footer: pick('invoiceFooter'),
+                accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
             },
         };
     });
@@ -301,7 +312,12 @@ export async function documentRoutes(app) {
         const lines = await db.select().from(documentLines)
             .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
-        const brand = account?.brandName ?? 'Klippy';
+        // Sign the email as the document's business, not the account.
+        const [business] = doc.businessId
+            ? await db.select({ brandName: businesses.brandName, name: businesses.name }).from(businesses)
+                .where(tenantWhere(businesses, accountId, eq(businesses.id, doc.businessId))).limit(1)
+            : [undefined];
+        const brand = business?.brandName || business?.name || account?.brandName || 'Klippy';
         const cur = doc.currency;
         const fmt = (v) => `${cur} ${Number(v).toFixed(2)}`;
         const lineText = lines.map((l) => `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`).join('\n');

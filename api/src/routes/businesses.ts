@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses } from '../db/schema.js';
+import { businesses, accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -14,11 +14,22 @@ const createSchema = z.object({
   type: businessType.default('services'),
   color: z.string().trim().max(20).optional(),
 });
+const nullableStr = (max: number) => z.string().trim().max(max).nullable().optional().or(z.literal(''));
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),
   color: z.string().trim().max(20).optional(),
   secondaryTypes: z.array(businessType).max(4).optional(),
   notes: z.string().max(20000).nullable().optional(),
+  // Brand + invoicing identity.
+  brandName: nullableStr(80),
+  bizAddress: nullableStr(500),
+  bizTaxNumber: nullableStr(60),
+  bizRegNumber: nullableStr(60),
+  bankDetails: nullableStr(2000),
+  invoiceFooter: nullableStr(2000),
+  invoiceAccent: z.string().trim().max(20).optional(),
+  defaultTaxRate: z.number().min(0).max(100).nullable().optional(),
+  defaultDueDays: z.number().int().min(0).max(365).optional(),
 });
 
 export async function businessRoutes(app: FastifyInstance) {
@@ -39,12 +50,21 @@ export async function businessRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const position = await nextPosition(businesses, sql`account_id = ${accountId}`);
 
+    // A new business starts from the account's invoicing defaults (address, bank
+    // details, tax rate, etc.), so it is self-contained and editable in its own
+    // Business Settings rather than depending on an account-level fallback.
+    const [acc] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+
     // Create the business on its own. `secondaryTypes` is written explicitly rather
     // than leaning on the column's DEFAULT, because a JSON default needs MySQL
     // 8.0.13+ and a strict-mode server rejects the insert outright without it.
     const ins = await db.insert(businesses).values(withTenant(accountId, {
       name: parsed.data.name, type: parsed.data.type, color: parsed.data.color ?? '#6366f1',
       secondaryTypes: [], position, createdBy: userId,
+      bizAddress: acc?.bizAddress ?? null, bizTaxNumber: acc?.bizTaxNumber ?? null,
+      bizRegNumber: acc?.bizRegNumber ?? null, bankDetails: acc?.bankDetails ?? null,
+      invoiceFooter: acc?.invoiceFooter ?? null, invoiceAccent: acc?.invoiceAccent ?? '#6366f1',
+      defaultTaxRate: acc?.defaultTaxRate ?? null, defaultDueDays: acc?.defaultDueDays ?? 14,
     }));
     const businessId = Number(ins[0].insertId);
 
@@ -75,6 +95,13 @@ export async function businessRoutes(app: FastifyInstance) {
       const [existing] = await db.select({ type: businesses.type }).from(businesses)
         .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
       patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
+    }
+    // Empty strings from the form mean "clear it"; decimals are stored as strings.
+    for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter'] as const) {
+      if (patch[k] === '') patch[k] = null;
+    }
+    if (parsed.data.defaultTaxRate !== undefined) {
+      patch.defaultTaxRate = parsed.data.defaultTaxRate === null ? null : String(parsed.data.defaultTaxRate);
     }
     const res = await db.update(businesses).set(patch)
       .where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
