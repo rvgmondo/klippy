@@ -555,6 +555,10 @@ export const subscriptions = mysqlTable('subscriptions', {
     // Email the generated invoice to the client instead of leaving a draft for
     // someone to send by hand. The whole point of a recurring charge.
     autoSend: boolean('auto_send').default(false).notNull(),
+    // PayFast tokenization token, captured the first time a client pays this
+    // subscription online. With it, later cycles can be charged automatically
+    // (auto-debit) instead of only emailing an invoice. Null until they pay once.
+    payfastToken: varchar('payfast_token', { length: 100 }),
     startedOn: date('started_on', { mode: 'string' }).notNull(),
     nextBillDate: date('next_bill_date', { mode: 'string' }).notNull(),
     lastBilledAt: datetime('last_billed_at'),
@@ -563,6 +567,32 @@ export const subscriptions = mysqlTable('subscriptions', {
     updatedAt: updatedAt(),
 }, (t) => [
     index('idx_subscriptions_account_status').on(t.accountId, t.status, t.nextBillDate),
+]);
+// ---- Payment provider settings (per account) -------------------------------
+// One row per account, holding its PayFast credentials so clients can pay
+// invoices online. The merchant key and passphrase are SECRETS: stored
+// encrypted (AES-256-GCM, key from the PAYMENTS_SECRET env var), never returned
+// to the browser in the clear, never logged. `enabled` gates everything, and it
+// defaults off, so nothing charges until the owner has entered and tested their
+// own credentials. Separate table (not columns on accounts) so these secrets are
+// never pulled in by an ordinary account lookup.
+export const paymentSettings = mysqlTable('payment_settings', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 20 }).default('payfast').notNull(),
+    merchantId: varchar('merchant_id', { length: 40 }),
+    // Encrypted blobs (iv:tag:ciphertext hex). Never plaintext at rest.
+    merchantKeyEnc: text('merchant_key_enc'),
+    passphraseEnc: text('passphrase_enc'),
+    // Sandbox uses PayFast's test endpoints and credentials; safe to leave on
+    // until a real end-to-end payment has been seen to work.
+    sandbox: boolean('sandbox').default(true).notNull(),
+    enabled: boolean('enabled').default(false).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_payment_settings_account').on(t.accountId),
 ]);
 // ---- Deals (the Acquisition pillar: a sales pipeline) ---------------------
 export const deals = mysqlTable('deals', {

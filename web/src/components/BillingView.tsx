@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail } from 'lucide-react';
+import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -56,6 +56,26 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   });
   const docs = data?.documents ?? [];
   const invalidate = () => qc.invalidateQueries({ queryKey: ['documents'] });
+
+  // Only offer "Pay online" when PayFast is actually switched on.
+  const payfast = useQuery({ queryKey: ['payfast'], queryFn: () => apiGet<{ configured: { enabled: boolean } }>('/account/payfast') });
+  const payfastOn = payfast.data?.configured.enabled ?? false;
+
+  // Open PayFast's checkout for an invoice by posting the signed fields there.
+  async function payOnline(id: number) {
+    try {
+      const { url, fields } = await apiGet<{ url: string; fields: Record<string, string> }>(`/documents/${id}/pay-link`);
+      const form = document.createElement('form');
+      form.method = 'POST'; form.action = url; form.target = '_blank';
+      for (const [k, v] of Object.entries(fields)) {
+        const input = document.createElement('input');
+        input.type = 'hidden'; input.name = k; input.value = v; form.appendChild(input);
+      }
+      document.body.appendChild(form); form.submit(); form.remove();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not start the payment.');
+    }
+  }
 
   const setStatus = useMutation({
     mutationFn: (v: { id: number; status: Status }) => apiPatch(`/documents/${v.id}/status`, { status: v.status }),
@@ -125,6 +145,9 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                       <button onClick={() => setEditing(d.id)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
                       {d.type === 'invoice' && (
                         <button onClick={() => setPaying(d)} title="Payments" className="text-slate-500 hover:text-green-300"><DollarSign size={14} /></button>
+                      )}
+                      {d.type === 'invoice' && d.status !== 'paid' && payfastOn && (
+                        <button onClick={() => payOnline(d.id)} title="Open PayFast checkout" className="text-slate-500 hover:text-[var(--accent)]"><CreditCard size={14} /></button>
                       )}
                       {d.type === 'quote' && (
                         <button onClick={() => convert.mutate(d.id)} title="Convert to invoice" className="text-slate-500 hover:text-violet-300"><ArrowRightLeft size={14} /></button>

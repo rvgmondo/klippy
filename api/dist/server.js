@@ -34,6 +34,7 @@ import { MAX_STORAGE_BYTES } from './lib/storage.js';
 import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
 import { labelRoutes } from './routes/labels.js';
+import { paymentRoutes } from './routes/payments.js';
 const isProd = process.env.NODE_ENV === 'production';
 export function buildServer() {
     const app = Fastify({
@@ -124,6 +125,7 @@ export function buildServer() {
     app.register(teamRoutes);
     app.register(cronRoutes);
     app.register(labelRoutes);
+    app.register(paymentRoutes);
     return app;
 }
 // Passenger sets PORT; default for local dev.
