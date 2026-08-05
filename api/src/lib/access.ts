@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { type AnyMySqlColumn } from 'drizzle-orm/mysql-core';
 import { db } from '../db/client.js';
-import { businessMembers, businesses } from '../db/schema.js';
+import { businessMembers, businesses, boards, folders, tasks } from '../db/schema.js';
 import { authOf } from './context.js';
 
 /**
@@ -110,4 +110,44 @@ export async function businessScope(req: FastifyRequest, column: AnyMySqlColumn)
 export async function allBusinessIds(accountId: number): Promise<number[]> {
   const rows = await db.select({ id: businesses.id }).from(businesses).where(eq(businesses.accountId, accountId));
   return rows.map((r) => r.id);
+}
+
+/**
+ * Like assertBusinessAccess, but a null business (legacy/uncategorised work) is
+ * allowed through, matching how the folder list treats business-less folders.
+ */
+export async function assertMaybeBusiness(
+  req: FastifyRequest, reply: FastifyReply, businessId: number | null, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (businessId == null) return true;
+  return assertBusinessAccess(req, reply, businessId, min);
+}
+
+// The next two resolve a board/task to its business (board -> folder, task -> board
+// -> folder) and enforce access. They short-circuit for account owners/admins, so
+// the common single-user case does no extra query; only scoped members pay the join.
+
+export async function assertBoardAccess(
+  req: FastifyRequest, reply: FastifyReply, boardId: number, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (await seesAllBusinesses(req)) return true;
+  const { accountId } = authOf(req);
+  const [row] = await db.select({ businessId: folders.businessId }).from(boards)
+    .innerJoin(folders, eq(folders.id, boards.folderId))
+    .where(and(eq(boards.id, boardId), eq(boards.accountId, accountId))).limit(1);
+  if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
+  return assertMaybeBusiness(req, reply, row.businessId, min);
+}
+
+export async function assertTaskAccess(
+  req: FastifyRequest, reply: FastifyReply, taskId: number, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (await seesAllBusinesses(req)) return true;
+  const { accountId } = authOf(req);
+  const [row] = await db.select({ businessId: folders.businessId }).from(tasks)
+    .innerJoin(boards, eq(boards.id, tasks.boardId))
+    .innerJoin(folders, eq(folders.id, boards.folderId))
+    .where(and(eq(tasks.id, taskId), eq(tasks.accountId, accountId))).limit(1);
+  if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
+  return assertMaybeBusiness(req, reply, row.businessId, min);
 }

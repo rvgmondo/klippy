@@ -5,6 +5,7 @@ import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { assertTaskAccess, assertBoardAccess, businessScope } from '../lib/access.js';
 import { isActiveMember } from '../lib/membership.js';
 import { notify } from '../lib/push.js';
 import { appUrl } from '../lib/mailer.js';
@@ -73,10 +74,15 @@ export async function taskRoutes(app) {
         const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
         if (!q.success)
             return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
+        // Scope to the businesses the user can see (tasks reach a business via board
+        // -> folder), so a member's calendar never shows another business's work.
         const rows = await db.select({
             id: tasks.id, title: tasks.title, priority: tasks.priority, dueDate: tasks.dueDate,
             boardId: tasks.boardId, columnId: tasks.columnId, isCompleted: tasks.isCompleted,
-        }).from(tasks).where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNotNull(tasks.dueDate), gte(tasks.dueDate, q.data.from), lte(tasks.dueDate, q.data.to)))).orderBy(asc(tasks.dueDate));
+        }).from(tasks)
+            .leftJoin(boards, eq(boards.id, tasks.boardId))
+            .leftJoin(folders, eq(folders.id, boards.folderId))
+            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNotNull(tasks.dueDate), gte(tasks.dueDate, q.data.from), lte(tasks.dueDate, q.data.to), await businessScope(req, folders.businessId)))).orderBy(asc(tasks.dueDate));
         return { tasks: rows };
     });
     /**
@@ -117,6 +123,10 @@ export async function taskRoutes(app) {
             scopes.push(eq(folders.businessId, businessId));
         if (mine)
             scopes.push(or(eq(tasks.assignedTo, userId), isNull(tasks.assignedTo)));
+        // Restrict to the member's accessible businesses (no-op for owners/admins).
+        const scope = await businessScope(req, folders.businessId);
+        if (scope)
+            scopes.push(scope);
         const scheduled = await base()
             .where(tenantWhere(tasks, accountId, and(...scopes, gte(tasks.scheduledStart, dayStart), lte(tasks.scheduledStart, dayEnd))))
             .orderBy(asc(tasks.scheduledStart));
@@ -147,6 +157,8 @@ export async function taskRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertTaskAccess(req, reply, id, 'viewer')))
+            return;
         const [task] = await db.select().from(tasks)
             .where(tenantWhere(tasks, accountId, eq(tasks.id, id))).limit(1);
         if (!task)
@@ -176,6 +188,8 @@ export async function taskRoutes(app) {
             .where(tenantWhere(boards, accountId, eq(boards.id, boardId))).limit(1);
         if (!board)
             return reply.code(400).send({ error: 'Board not found.' });
+        if (!(await assertBoardAccess(req, reply, boardId, 'member')))
+            return;
         if (!(await assertColumnInAccount(accountId, boardId, columnId))) {
             return reply.code(400).send({ error: 'Column not found on this board.' });
         }
@@ -199,6 +213,8 @@ export async function taskRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertTaskAccess(req, reply, id, 'member')))
+            return;
         const parsed = updateSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -254,6 +270,8 @@ export async function taskRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertTaskAccess(req, reply, id, 'member')))
+            return;
         const parsed = moveSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -287,6 +305,8 @@ export async function taskRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertTaskAccess(req, reply, id, 'member')))
+            return;
         const res = await db.delete(tasks).where(tenantWhere(tasks, accountId, eq(tasks.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Task not found.' });

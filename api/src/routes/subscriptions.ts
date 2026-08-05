@@ -5,7 +5,7 @@ import { db } from '../db/client.js';
 import { subscriptions, offerings, folders } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { businessScope } from '../lib/access.js';
+import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
@@ -87,6 +87,10 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     const parsed = z.object({ status: status.optional(), autoSend: z.boolean().optional() }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const [own] = await db.select({ businessId: subscriptions.businessId }).from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Subscription not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.update(subscriptions).set(parsed.data)
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subscription not found.' });
@@ -99,6 +103,10 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select({ businessId: subscriptions.businessId }).from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Subscription not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.delete(subscriptions).where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subscription not found.' });
     return { ok: true };

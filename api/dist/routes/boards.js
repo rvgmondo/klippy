@@ -5,6 +5,7 @@ import { boards, boardColumns, tasks, folders, taskLabels, labels } from '../db/
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
+import { assertBoardAccess, assertMaybeBusiness } from '../lib/access.js';
 const createSchema = z.object({
     folderId: z.number().int().positive(),
     name: z.string().trim().min(1).max(150),
@@ -29,6 +30,11 @@ export async function boardRoutes(app) {
         const q = z.object({ folderId: z.coerce.number().int().positive() }).safeParse(req.query);
         if (!q.success)
             return reply.code(400).send({ error: 'folderId required.' });
+        // Only list boards in a folder whose business the user can access.
+        const [fld] = await db.select({ businessId: folders.businessId }).from(folders)
+            .where(tenantWhere(folders, accountId, eq(folders.id, q.data.folderId))).limit(1);
+        if (fld && !(await assertMaybeBusiness(req, reply, fld.businessId, 'viewer')))
+            return;
         const rows = await db.select().from(boards)
             .where(tenantWhere(boards, accountId, and(eq(boards.folderId, q.data.folderId), eq(boards.isArchived, false))))
             .orderBy(asc(boards.position));
@@ -40,6 +46,8 @@ export async function boardRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBoardAccess(req, reply, id, 'viewer')))
+            return;
         const [board] = await db.select().from(boards)
             .where(tenantWhere(boards, accountId, eq(boards.id, id))).limit(1);
         if (!board)
@@ -65,10 +73,12 @@ export async function boardRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const { folderId, name, description } = parsed.data;
-        const [folder] = await db.select({ id: folders.id }).from(folders)
+        const [folder] = await db.select({ id: folders.id, businessId: folders.businessId }).from(folders)
             .where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
         if (!folder)
             return reply.code(400).send({ error: 'Folder not found.' });
+        if (!(await assertMaybeBusiness(req, reply, folder.businessId, 'member')))
+            return;
         const position = await nextPosition(boards, sql `account_id = ${accountId} AND folder_id = ${folderId}`);
         const boardId = await db.transaction(async (tx) => {
             const ins = await tx.insert(boards).values(withTenant(accountId, {
@@ -87,6 +97,8 @@ export async function boardRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBoardAccess(req, reply, id, 'member')))
+            return;
         const parsed = updateSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -109,6 +121,8 @@ export async function boardRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBoardAccess(req, reply, id, 'member')))
+            return;
         const res = await db.delete(boards).where(tenantWhere(boards, accountId, eq(boards.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Board not found.' });

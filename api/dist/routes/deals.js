@@ -4,7 +4,7 @@ import { db } from '../db/client.js';
 import { deals, folders, boards, boardColumns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { businessScope } from '../lib/access.js';
+import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'];
@@ -86,6 +86,12 @@ export async function dealRoutes(app) {
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+        const [own] = await db.select({ businessId: deals.businessId }).from(deals)
+            .where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+        if (!own)
+            return reply.code(404).send({ error: 'Deal not found.' });
+        if (!(await assertMaybeBusiness(req, reply, own.businessId)))
+            return;
         const patch = { ...parsed.data };
         if (parsed.data.value !== undefined)
             patch.value = money(parsed.data.value);
@@ -107,6 +113,8 @@ export async function dealRoutes(app) {
         const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
         if (!deal)
             return reply.code(404).send({ error: 'Deal not found.' });
+        if (!(await assertMaybeBusiness(req, reply, deal.businessId)))
+            return;
         await db.transaction(async (tx) => {
             const wonPatch = parsed.data.stage === 'won' && deal.stage !== 'won' ? { wonAt: new Date() } : {};
             await tx.update(deals).set({ stage: parsed.data.stage, ...wonPatch })
@@ -128,6 +136,12 @@ export async function dealRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        const [own] = await db.select({ businessId: deals.businessId }).from(deals)
+            .where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+        if (!own)
+            return reply.code(404).send({ error: 'Deal not found.' });
+        if (!(await assertMaybeBusiness(req, reply, own.businessId)))
+            return;
         const res = await db.delete(deals).where(tenantWhere(deals, accountId, eq(deals.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Deal not found.' });
@@ -143,6 +157,8 @@ export async function dealRoutes(app) {
         const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
         if (!deal)
             return reply.code(404).send({ error: 'Deal not found.' });
+        if (!(await assertMaybeBusiness(req, reply, deal.businessId)))
+            return;
         if (deal.clientFolderId)
             return reply.code(409).send({ error: 'This deal is already a client.' });
         const name = deal.company || deal.title;

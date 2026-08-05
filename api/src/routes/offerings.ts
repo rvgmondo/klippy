@@ -5,7 +5,7 @@ import { db } from '../db/client.js';
 import { offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { businessScope } from '../lib/access.js';
+import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 
@@ -66,6 +66,10 @@ export async function offeringRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const [own] = await db.select({ businessId: offerings.businessId }).from(offerings)
+      .where(tenantWhere(offerings, accountId, eq(offerings.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Offering not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const d = parsed.data;
     const patch: Record<string, unknown> = { ...d };
     delete patch.businessId;
@@ -81,6 +85,10 @@ export async function offeringRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select({ businessId: offerings.businessId }).from(offerings)
+      .where(tenantWhere(offerings, accountId, eq(offerings.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Offering not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.delete(offerings).where(tenantWhere(offerings, accountId, eq(offerings.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Offering not found.' });
     return { ok: true };

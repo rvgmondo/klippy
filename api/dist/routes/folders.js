@@ -5,7 +5,7 @@ import { folders, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
-import { accessibleBusinessIds } from '../lib/access.js';
+import { accessibleBusinessIds, assertMaybeBusiness } from '../lib/access.js';
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
     parentId: z.number().int().positive().nullable().optional(),
@@ -77,6 +77,9 @@ export async function folderRoutes(app) {
                 .where(tenantWhere(businesses, accountId)).orderBy(asc(businesses.position)).limit(1);
             businessId = biz?.id ?? null;
         }
+        // A member can only add folders inside a business they can work in.
+        if (!(await assertMaybeBusiness(req, reply, businessId)))
+            return;
         const position = await nextPosition(folders, parentId === null
             ? sql `account_id = ${accountId} AND parent_id IS NULL`
             : sql `account_id = ${accountId} AND parent_id = ${parentId}`);
@@ -99,6 +102,8 @@ export async function folderRoutes(app) {
             .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
         if (!existing)
             return reply.code(404).send({ error: 'Folder not found.' });
+        if (!(await assertMaybeBusiness(req, reply, existing.businessId)))
+            return;
         // MySQL DECIMAL columns are string-typed in Drizzle.
         const patch = { ...parsed.data };
         if (parsed.data.hourlyRate !== undefined) {
@@ -127,6 +132,12 @@ export async function folderRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        const [own] = await db.select({ businessId: folders.businessId }).from(folders)
+            .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
+        if (!own)
+            return reply.code(404).send({ error: 'Folder not found.' });
+        if (!(await assertMaybeBusiness(req, reply, own.businessId)))
+            return;
         const res = await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Folder not found.' });

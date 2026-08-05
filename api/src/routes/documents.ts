@@ -9,7 +9,7 @@ import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
-import { businessScope, canSeeBusiness } from '../lib/access.js';
+import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(500),
@@ -204,6 +204,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const [existing] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!existing) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, existing.businessId))) return;
 
     const taxRate = d.taxRate ?? 0;
     const totals = computeTotals(d.lines, taxRate);
@@ -234,6 +235,10 @@ export async function documentRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     const parsed = z.object({ status: z.enum(['draft', 'sent', 'accepted', 'paid', 'void']) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Bad status.' });
+    const [own] = await db.select({ businessId: documents.businessId }).from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.update(documents).set({ status: parsed.data.status })
       .where(tenantWhere(documents, accountId, eq(documents.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
@@ -244,6 +249,10 @@ export async function documentRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select({ businessId: documents.businessId }).from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.delete(documents).where(tenantWhere(documents, accountId, eq(documents.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
     return { ok: true };
@@ -257,6 +266,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const [quote] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, and(eq(documents.id, id), eq(documents.type, 'quote')))).limit(1);
     if (!quote) return reply.code(404).send({ error: 'Quote not found.' });
+    if (!(await assertMaybeBusiness(req, reply, quote.businessId))) return;
     const lines = await db.select().from(documentLines)
       .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
 
@@ -296,9 +306,10 @@ export async function documentRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
-    const [doc] = await db.select({ total: documents.total }).from(documents)
+    const [doc] = await db.select({ total: documents.total, businessId: documents.businessId }).from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, doc.businessId, 'viewer'))) return;
     const rows = await db.select().from(payments)
       .where(tenantWhere(payments, accountId, eq(payments.documentId, id))).orderBy(payments.paidOn);
     const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
@@ -321,6 +332,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const [doc] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, doc.businessId))) return;
 
     await db.insert(payments).values(withTenant(accountId, {
       documentId: id, amount: money(parsed.data.amount), paidOn: parsed.data.paidOn,
@@ -357,6 +369,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const [doc] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, doc.businessId))) return;
     const to = parsed.data.to || doc.clientEmail;
     if (!to) return reply.code(400).send({ error: 'No client email on this document. Add one or pass "to".' });
 

@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { boardColumns, boards } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { assertBoardAccess } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 const createSchema = z.object({
     boardId: z.number().int().positive(),
@@ -28,6 +29,8 @@ export async function columnRoutes(app) {
             .where(tenantWhere(boards, accountId, eq(boards.id, boardId))).limit(1);
         if (!board)
             return reply.code(400).send({ error: 'Board not found.' });
+        if (!(await assertBoardAccess(req, reply, boardId, 'member')))
+            return;
         const position = await nextPosition(boardColumns, sql `account_id = ${accountId} AND board_id = ${boardId}`);
         const ins = await db.insert(boardColumns).values(withTenant(accountId, {
             boardId, name, color: color ?? '#94a3b8', isDoneColumn: isDoneColumn ?? false, position,

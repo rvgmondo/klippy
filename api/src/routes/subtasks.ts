@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { taskSubtasks, tasks } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { assertTaskAccess } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 
 async function taskInAccount(accountId: number, taskId: number): Promise<boolean> {
@@ -24,6 +25,7 @@ export async function subtaskRoutes(app: FastifyInstance) {
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     if (!(await taskInAccount(accountId, parsed.data.taskId))) return reply.code(400).send({ error: 'Task not found.' });
+    if (!(await assertTaskAccess(req, reply, parsed.data.taskId, 'member'))) return;
     const position = await nextPosition(taskSubtasks, sql`account_id = ${accountId} AND task_id = ${parsed.data.taskId}`);
     const ins = await db.insert(taskSubtasks).values(withTenant(accountId, {
       taskId: parsed.data.taskId, title: parsed.data.title, position,

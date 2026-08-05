@@ -5,7 +5,7 @@ import { db } from '../db/client.js';
 import { deals, folders, boards, boardColumns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { businessScope } from '../lib/access.js';
+import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 
@@ -90,6 +90,10 @@ export async function dealRoutes(app: FastifyInstance) {
       notes: z.string().max(5000).nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const [own] = await db.select({ businessId: deals.businessId }).from(deals)
+      .where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Deal not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const patch: Record<string, unknown> = { ...parsed.data };
     if (parsed.data.value !== undefined) patch.value = money(parsed.data.value);
     const res = await db.update(deals).set(patch).where(tenantWhere(deals, accountId, eq(deals.id, id)));
@@ -108,6 +112,7 @@ export async function dealRoutes(app: FastifyInstance) {
 
     const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
     if (!deal) return reply.code(404).send({ error: 'Deal not found.' });
+    if (!(await assertMaybeBusiness(req, reply, deal.businessId))) return;
 
     await db.transaction(async (tx) => {
       const wonPatch = parsed.data.stage === 'won' && deal.stage !== 'won' ? { wonAt: new Date() } : {};
@@ -130,6 +135,10 @@ export async function dealRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select({ businessId: deals.businessId }).from(deals)
+      .where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Deal not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const res = await db.delete(deals).where(tenantWhere(deals, accountId, eq(deals.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Deal not found.' });
     return { ok: true };
@@ -143,6 +152,7 @@ export async function dealRoutes(app: FastifyInstance) {
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
     if (!deal) return reply.code(404).send({ error: 'Deal not found.' });
+    if (!(await assertMaybeBusiness(req, reply, deal.businessId))) return;
     if (deal.clientFolderId) return reply.code(409).send({ error: 'This deal is already a client.' });
 
     const name = deal.company || deal.title;
