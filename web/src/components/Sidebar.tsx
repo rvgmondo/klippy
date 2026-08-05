@@ -8,7 +8,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, Folder, FolderPlus, Plus, SquareKanban, MoreHorizontal, GripVertical,
-  Home, Target, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, type LucideIcon,
+  Home, Target, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, AlertTriangle, type LucideIcon,
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -35,6 +35,7 @@ const NAV: { key: string; label: string; icon: LucideIcon }[] = [
   { key: 'expenses', label: 'Expenses', icon: Wallet },
   { key: 'reports', label: 'Reports', icon: BarChart3 },
   { key: 'billing', label: 'Billing', icon: Receipt },
+  { key: 'collections', label: 'Collections', icon: AlertTriangle },
 ];
 
 function ask(prompt: string, current: string): string | null {

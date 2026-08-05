@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, desc, eq, gte, lte, isNotNull, sql, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, lte, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -59,6 +59,36 @@ export async function documentRoutes(app) {
             .where(tenantWhere(documents, accountId, ...conds))
             .orderBy(desc(documents.createdAt));
         return { documents: rows };
+    });
+    // Collections: unpaid invoices that are past due, worst first. Scoped to the
+    // businesses the user can see. `suspended` marks the ones the schedule has already
+    // sent a final notice for. This is the "who owes and needs chasing" screen.
+    app.get('/api/v1/collections', async (req) => {
+        const { accountId } = authOf(req);
+        const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = await db.select({
+            id: documents.id, number: documents.number, clientName: documents.clientName,
+            clientEmail: documents.clientEmail, businessId: documents.businessId,
+            currency: documents.currency, total: documents.total, dueDate: documents.dueDate,
+            lastReminderOn: documents.lastReminderOn, suspendedAt: documents.suspendedAt,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), eq(documents.status, 'sent'), // unpaid; paid/void are settled
+        isNotNull(documents.dueDate), lt(documents.dueDate, today), // overdue only
+        q.success && q.data.businessId ? eq(documents.businessId, q.data.businessId) : undefined, await businessScope(req, documents.businessId)))
+            .orderBy(asc(documents.dueDate));
+        const days = (d) => Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
+        const items = rows.map((r) => ({
+            id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
+            businessId: r.businessId, currency: r.currency, total: Number(r.total),
+            dueDate: r.dueDate, daysOverdue: r.dueDate ? days(r.dueDate) : 0,
+            lastReminderOn: r.lastReminderOn, suspended: !!r.suspendedAt,
+        }));
+        const outstanding = Math.round(items.reduce((s, i) => s + i.total, 0) * 100) / 100;
+        return {
+            items,
+            summary: { count: items.length, outstanding, suspended: items.filter((i) => i.suspended).length },
+        };
     });
     // One document with its line items.
     app.get('/api/v1/documents/:id', async (req, reply) => {

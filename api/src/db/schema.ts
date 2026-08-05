@@ -135,6 +135,16 @@ export const businesses = mysqlTable('businesses', {
   invoiceAccent: varchar('invoice_accent', { length: 20 }).default('#6366f1').notNull(),
   defaultTaxRate: decimal('default_tax_rate', { precision: 5, scale: 2 }),
   defaultDueDays: int('default_due_days', { unsigned: true }).default(14).notNull(),
+  // ---- Payment reminder schedule (per business) ------------------------------
+  // Days relative to an invoice's due date to send a reminder on: negative is
+  // before due, 0 is on the due date, positive is overdue. Null means the sensible
+  // default ([-3, 0, 7]) - stored nullable so we never depend on a JSON column
+  // DEFAULT, which is unreliable on the shared-hosting MySQL. Chasing can be turned
+  // off per business, and after `suspendAfterDays` overdue (null = never) the invoice
+  // is flagged and a "service at risk" notice is sent instead of another reminder.
+  remindersEnabled: boolean('reminders_enabled').default(true).notNull(),
+  reminderOffsets: json('reminder_offsets').$type<number[]>(),
+  suspendAfterDays: int('suspend_after_days', { unsigned: true }),
   position: int('position', { unsigned: true }).default(0).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
@@ -545,6 +555,9 @@ export const documents = mysqlTable('documents', {
   status: mysqlEnum('status', ['draft', 'sent', 'accepted', 'paid', 'void']).default('draft').notNull(),
   // Last date a payment reminder went out, so chasing does not repeat daily.
   lastReminderOn: date('last_reminder_on', { mode: 'string' }),
+  // Set when the final "service at risk / suspended" notice went out, after the
+  // business's suspend threshold. Drives the Collections list's flagged state.
+  suspendedAt: datetime('suspended_at'),
   currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
   taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0').notNull(),
   subtotal: decimal('subtotal', { precision: 12, scale: 2 }).default('0').notNull(),

@@ -24,6 +24,9 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
     invoiceAccent: business.invoiceAccent ?? '#6366f1',
     defaultTaxRate: business.defaultTaxRate != null ? String(Number(business.defaultTaxRate)) : '',
     defaultDueDays: business.defaultDueDays ?? 14,
+    remindersEnabled: business.remindersEnabled ?? true,
+    reminderOffsets: (business.reminderOffsets && business.reminderOffsets.length ? business.reminderOffsets : [-3, 0, 7]).join(', '),
+    suspendAfterDays: business.suspendAfterDays != null ? String(business.suspendAfterDays) : '',
   });
   const [saved, setSaved] = useState(false);
   const [logoBust, setLogoBust] = useState(0); // force <img> reload after upload
@@ -45,6 +48,10 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
       invoiceAccent: form.invoiceAccent,
       defaultTaxRate: form.defaultTaxRate === '' ? null : Number(form.defaultTaxRate),
       defaultDueDays: Number(form.defaultDueDays),
+      remindersEnabled: form.remindersEnabled,
+      // "-3, 0, 7" -> [-3, 0, 7]; empty means the default schedule.
+      reminderOffsets: form.reminderOffsets.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n)),
+      suspendAfterDays: form.suspendAfterDays === '' ? null : Number(form.suspendAfterDays),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['businesses'] });
@@ -176,6 +183,32 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
                 <input type="number" min={0} max={365} className={field} value={form.defaultDueDays}
                   onChange={(e) => set('defaultDueDays', Number(e.target.value))} />
               </div>
+            </div>
+          </section>
+
+          {/* Payment reminders */}
+          <section className="space-y-4 border-t border-slate-800 pt-5">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment reminders</h3>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={form.remindersEnabled}
+                onChange={(e) => set('remindersEnabled', e.target.checked)} />
+              Automatically chase unpaid invoices for this business
+            </label>
+            <div>
+              <label className={label}>Send reminders on these days (relative to the due date)</label>
+              <input className={field} value={form.reminderOffsets} onChange={(e) => set('reminderOffsets', e.target.value)}
+                placeholder="-3, 0, 7" />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Negative is before due, 0 is on the due date, positive is overdue. Default: 3 days before, on the day, and a week after.
+              </p>
+            </div>
+            <div>
+              <label className={label}>Flag as at-risk after (days overdue)</label>
+              <input type="number" min={0} max={365} className={field} value={form.suspendAfterDays}
+                onChange={(e) => set('suspendAfterDays', e.target.value)} placeholder="Leave blank to never flag" />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Once this overdue, a final "service at risk" notice is sent and the invoice shows in Collections as flagged. Klippy notifies, it does not cut off service.
+              </p>
             </div>
           </section>
         </div>

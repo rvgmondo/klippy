@@ -8,6 +8,7 @@ import { CalendarView } from '../components/CalendarView';
 import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
+import { CollectionsView } from '../components/CollectionsView';
 import { TodayView } from '../components/TodayView';
 import { OfferingsView } from '../components/OfferingsView';
 import { ExpensesView } from '../components/ExpensesView';
@@ -19,11 +20,12 @@ import { SettingsModal } from '../components/SettingsModal';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing';
+type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections';
 
 const VIEW_LABELS: Record<View, string> = {
   home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
   today: 'Today', files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
+  collections: 'Collections',
 };
 const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
@@ -122,6 +124,7 @@ export function Workspace() {
           {view === 'expenses' && <ExpensesView businessId={businessId} />}
           {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
+          {view === 'collections' && <CollectionsView businessId={businessId} />}
         </main>
       </div>
 

@@ -30,6 +30,10 @@ const updateSchema = z.object({
     invoiceAccent: z.string().trim().max(20).optional(),
     defaultTaxRate: z.number().min(0).max(100).nullable().optional(),
     defaultDueDays: z.number().int().min(0).max(365).optional(),
+    // Reminder schedule.
+    remindersEnabled: z.boolean().optional(),
+    reminderOffsets: z.array(z.number().int().min(-60).max(365)).max(10).nullable().optional(),
+    suspendAfterDays: z.number().int().min(0).max(365).nullable().optional(),
 });
 export async function businessRoutes(app) {
     app.addHook('preHandler', app.requireAuth);

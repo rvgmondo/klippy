@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses } from '../db/schema.js';
 import { sendMail, sendBusinessMail, appUrl } from './mailer.js';
 import { addOneMonth, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 
@@ -121,6 +121,12 @@ export async function runSubscriptionBilling(): Promise<string> {
   return `${billed} invoiced of ${due.length} due${failed ? `, ${failed} failed` : ''}`;
 }
 
+/** The reminder schedule to use when a business has not set its own. */
+export const DEFAULT_REMINDER_OFFSETS = [-3, 0, 7];
+
+const daysBetween = (a: string, b: string) =>
+  Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+
 export async function runInvoiceReminders(): Promise<string> {
   const today = todayStr();
   const rows = await db.select().from(documents).where(and(
@@ -130,23 +136,69 @@ export async function runInvoiceReminders(): Promise<string> {
     isNotNull(documents.clientEmail),
   ));
 
-  const daysBetween = (a: string, b: string) =>
-    Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
+  // Each invoice is chased on its own business's schedule, so cache the schedule
+  // per business rather than re-reading it for every invoice.
+  const bizCache = new Map<number, { enabled: boolean; offsets: number[]; suspendAfter: number | null; brand: string }>();
+  async function scheduleFor(businessId: number | null) {
+    if (businessId == null) return { enabled: true, offsets: DEFAULT_REMINDER_OFFSETS, suspendAfter: null, brand: 'Accounts' };
+    const cached = bizCache.get(businessId);
+    if (cached) return cached;
+    const [b] = await db.select({
+      remindersEnabled: businesses.remindersEnabled, reminderOffsets: businesses.reminderOffsets,
+      suspendAfterDays: businesses.suspendAfterDays, brandName: businesses.brandName, name: businesses.name,
+    }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+    const cfg = {
+      enabled: b?.remindersEnabled ?? true,
+      offsets: (b?.reminderOffsets && b.reminderOffsets.length ? b.reminderOffsets : DEFAULT_REMINDER_OFFSETS),
+      suspendAfter: b?.suspendAfterDays ?? null,
+      brand: b?.brandName || b?.name || 'Accounts',
+    };
+    bizCache.set(businessId, cfg);
+    return cfg;
+  }
 
   let sent = 0;
+  let suspended = 0;
   for (const doc of rows) {
-    const untilDue = daysBetween(doc.dueDate!, today);
-    const overdueBy = -untilDue;
-    const chasedDaysAgo = doc.lastReminderOn ? daysBetween(today, doc.lastReminderOn) : 999;
-    const shouldSend = doc.lastReminderOn !== today && (
-      untilDue === 3 || untilDue === 0 || (overdueBy > 0 && chasedDaysAgo >= 7)
-    );
-    if (!shouldSend) continue;
+    const cfg = await scheduleFor(doc.businessId);
+    if (!cfg.enabled) continue;
+    if (doc.lastReminderOn === today) continue; // never twice in a day
 
-    const subject = overdueBy > 0
-      ? `Overdue: invoice ${doc.number}`
-      : untilDue === 0 ? `Invoice ${doc.number} is due today`
-        : `Invoice ${doc.number} is due in 3 days`;
+    const overdueBy = -daysBetween(doc.dueDate!, today); // >0 means overdue
+
+    // Suspension supersedes a normal reminder: once far enough overdue and not yet
+    // flagged, send the final notice and mark it, so the Collections list shows it.
+    if (cfg.suspendAfter != null && overdueBy >= cfg.suspendAfter && !doc.suspendedAt) {
+      const body = [
+        `Hi ${doc.clientName},`, '',
+        `Invoice ${doc.number} for ${doc.currency} ${doc.total} is now ${overdueBy} days overdue and has not been paid.`,
+        'To avoid any interruption to your service, please settle it as soon as possible.',
+        '', 'If you have already paid, please let us know so we can update our records.',
+        '', 'Thank you.',
+      ].join('\n');
+      try {
+        await sendBusinessMail({
+          accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
+          to: doc.clientEmail!, subject: `Action needed: invoice ${doc.number} overdue`, text: body,
+        });
+        await db.update(documents).set({ lastReminderOn: today, suspendedAt: new Date() })
+          .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
+        suspended++;
+      } catch { /* retry next run */ }
+      continue;
+    }
+
+    // A normal reminder is due when today has reached one of the scheduled dates
+    // (dueDate + offset) that we have not already passed. Using "<= today and later
+    // than the last reminder" means a missed day is caught up rather than skipped.
+    const scheduledDates = cfg.offsets.map((o) => addDaysStr(doc.dueDate!, o)).sort();
+    const dueNow = scheduledDates.filter((d) => daysBetween(d, today) <= 0
+      && (!doc.lastReminderOn || daysBetween(doc.lastReminderOn, d) > 0));
+    if (dueNow.length === 0) continue;
+
+    const subject = overdueBy > 0 ? `Overdue: invoice ${doc.number}`
+      : overdueBy === 0 ? `Invoice ${doc.number} is due today`
+        : `Reminder: invoice ${doc.number} is due soon`;
     const body = [
       `Hi ${doc.clientName},`, '',
       overdueBy > 0
@@ -165,7 +217,14 @@ export async function runInvoiceReminders(): Promise<string> {
       sent++;
     } catch { /* try again on the next run */ }
   }
-  return `${sent} chased of ${rows.length} unpaid`;
+  return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid`;
+}
+
+/** dateStr + n days, as YYYY-MM-DD. */
+function addDaysStr(dateStr: string, n: number): string {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 }
 
 const RUNNERS: Record<JobName, () => Promise<string>> = {

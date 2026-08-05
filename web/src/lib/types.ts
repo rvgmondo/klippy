@@ -78,6 +78,9 @@ export interface Business {
   invoiceAccent?: string;
   defaultTaxRate?: string | null;
   defaultDueDays?: number;
+  remindersEnabled?: boolean;
+  reminderOffsets?: number[] | null;
+  suspendAfterDays?: number | null;
   position: number;
 }
 export interface Folder {
