@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns } from '../db/schema.js';
-import { sendMail, appUrl } from './mailer.js';
+import { sendMail, sendBusinessMail, appUrl } from './mailer.js';
 import { addOneMonth, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 
 /**
@@ -156,7 +156,10 @@ export async function runInvoiceReminders(): Promise<string> {
     ].join('\n');
 
     try {
-      await sendMail(doc.clientEmail!, subject, body);
+      await sendBusinessMail({
+        accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
+        to: doc.clientEmail!, subject, text: body,
+      });
       await db.update(documents).set({ lastReminderOn: today })
         .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
       sent++;

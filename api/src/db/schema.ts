@@ -165,6 +165,38 @@ export const businessMembers = mysqlTable('business_members', {
   index('idx_business_members_user').on(t.accountId, t.userId),
 ]);
 
+// ---- Per-business email identity -------------------------------------------
+// How a business's mail is addressed, so a client sees it come "from" that
+// business. All optional: without a row (or with blank fields) mail falls back to
+// the business brand name over the global sending address. A business can also plug
+// in its OWN SMTP server (advanced, for a business with its own authenticated mail
+// domain); the password is encrypted at rest with PAYMENTS_SECRET, like PayFast.
+export const businessEmail = mysqlTable('business_email', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  // General "from" for anything this business sends.
+  fromName: varchar('from_name', { length: 120 }),
+  fromEmail: varchar('from_email', { length: 150 }),
+  replyTo: varchar('reply_to', { length: 150 }),
+  // Per-purpose override for invoices, quotes and payment reminders.
+  invoiceFromName: varchar('invoice_from_name', { length: 120 }),
+  invoiceFromEmail: varchar('invoice_from_email', { length: 150 }),
+  invoiceReplyTo: varchar('invoice_reply_to', { length: 150 }),
+  // Optional own SMTP server.
+  smtpHost: varchar('smtp_host', { length: 200 }),
+  smtpPort: int('smtp_port', { unsigned: true }),
+  smtpSecure: boolean('smtp_secure'),
+  smtpUser: varchar('smtp_user', { length: 200 }),
+  smtpPassEnc: text('smtp_pass_enc'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex('uniq_business_email').on(t.businessId),
+]);
+
 // ---- Folders (nestable tree; top level = a business's "Clients"/areas) ------
 // parentId NULL => top-level folder. Self-referencing for arbitrary depth.
 export const folders = mysqlTable('folders', {

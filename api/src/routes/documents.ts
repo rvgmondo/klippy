@@ -7,7 +7,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
-import { sendMail } from '../lib/mailer.js';
+import { sendBusinessMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { businessScope, canSeeBusiness } from '../lib/access.js';
 
@@ -355,7 +355,10 @@ export async function documentRoutes(app: FastifyInstance) {
     ].join('\n');
 
     try {
-      await sendMail(to, `${label} ${doc.number} from ${brand}`, body);
+      await sendBusinessMail({
+        accountId, businessId: doc.businessId, purpose: 'invoice',
+        to, subject: `${label} ${doc.number} from ${brand}`, text: body,
+      });
     } catch (err) {
       req.log.error({ err }, 'document email failed');
       return reply.code(502).send({ error: 'Could not send the email. Check the mail settings.' });

@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
-import { sendMail } from './mailer.js';
+import { sendBusinessMail } from './mailer.js';
 import { payLinkFor } from './paylink.js';
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
@@ -95,10 +95,11 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   if (sub.autoSend && folder.billingEmail) {
     try {
       const payLink = await payLinkFor(accountId, docId);
-      await sendMail(
-        folder.billingEmail,
-        `${brand} ${number}`,
-        [
+      await sendBusinessMail({
+        accountId, businessId: sub.businessId, purpose: 'invoice',
+        to: folder.billingEmail,
+        subject: `${brand} ${number}`,
+        text: [
           `Hi ${folder.name},`,
           '',
           `Invoice ${number} for ${offering.name} is attached below.`,
@@ -108,7 +109,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
           ...(payLink ? [`Pay online: ${payLink}`, ''] : []),
           'Thank you.',
         ].join('\n'),
-      );
+      });
       await db.update(documents).set({ status: 'sent' })
         .where(tenantWhere(documents, accountId, eq(documents.id, docId)));
     } catch {

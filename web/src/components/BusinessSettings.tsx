@@ -131,6 +131,9 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
             </div>
           </section>
 
+          {/* Email */}
+          <EmailSection businessId={business.id} businessName={business.name} />
+
           {/* Access */}
           <AccessSection businessId={business.id} businessName={business.name} />
 
@@ -187,6 +190,120 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
         </div>
       </div>
     </div>
+  );
+}
+
+interface EmailCfg {
+  fromName: string; fromEmail: string; replyTo: string;
+  invoiceFromName: string; invoiceFromEmail: string; invoiceReplyTo: string;
+  smtpHost: string; smtpPort: number | null; smtpSecure: boolean; smtpUser: string; hasSmtpPass: boolean;
+}
+
+/**
+ * How this business addresses its email, and an optional own SMTP server. Blank
+ * fields fall back to the business brand over the shared sending address, which is
+ * shown so it is clear what a client will see when nothing is set.
+ */
+function EmailSection({ businessId, businessName }: { businessId: number; businessName: string }) {
+  const qc = useQueryClient();
+  const { data, error } = useQuery({
+    queryKey: ['business-email', businessId],
+    queryFn: () => apiGet<{ email: EmailCfg; globalFrom: string | null; secretsReady: boolean }>(`/businesses/${businessId}/email`),
+    retry: false,
+  });
+  const [form, setForm] = useState<Record<string, string | boolean | number | null>>({});
+  const [smtpPass, setSmtpPass] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    if (data && Object.keys(form).length === 0) {
+      const e = data.email;
+      setForm({ ...e });
+      if (e.smtpHost) setShowAdvanced(true);
+    }
+  }, [data, form]);
+
+  const save = useMutation({
+    mutationFn: () => apiPatch(`/businesses/${businessId}/email`, {
+      ...form,
+      ...(smtpPass ? { smtpPass } : {}),
+    }),
+    onSuccess: () => { setSmtpPass(''); setSaved(true); setTimeout(() => setSaved(false), 2000); qc.invalidateQueries({ queryKey: ['business-email', businessId] }); },
+  });
+
+  if (error) return null; // not an admin of this business
+  if (!data) return null;
+  const set = (k: string, v: string | boolean | number | null) => setForm((f) => ({ ...f, [k]: v }));
+  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]';
+  const label = 'mb-1 block text-[11px] font-medium text-slate-400';
+  const s = (k: string) => (form[k] as string) ?? '';
+
+  return (
+    <section className="space-y-4 border-t border-slate-800 pt-5">
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Email</h3>
+        <p className="mt-1 text-[11px] text-slate-500">
+          What clients see this business's mail come from. Blank uses
+          {' '}<span className="text-slate-400">{businessName}</span>{' '}
+          over {data.globalFrom ? <span className="text-slate-400">{data.globalFrom}</span> : 'the shared address'}.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><label className={label}>From name</label>
+          <input className={field} value={s('fromName')} onChange={(e) => set('fromName', e.target.value)} placeholder={businessName} /></div>
+        <div><label className={label}>From email</label>
+          <input className={field} value={s('fromEmail')} onChange={(e) => set('fromEmail', e.target.value)} placeholder="hello@yourdomain.com" /></div>
+      </div>
+      <div><label className={label}>Reply-to (optional)</label>
+        <input className={field} value={s('replyTo')} onChange={(e) => set('replyTo', e.target.value)} placeholder="you@yourdomain.com" /></div>
+
+      <div className="rounded-lg border border-slate-800 p-3">
+        <p className="mb-2 text-[11px] font-medium text-slate-400">Invoices, quotes and reminders (optional, overrides the above)</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className={label}>From name</label>
+            <input className={field} value={s('invoiceFromName')} onChange={(e) => set('invoiceFromName', e.target.value)} placeholder="e.g. Billing" /></div>
+          <div><label className={label}>From email</label>
+            <input className={field} value={s('invoiceFromEmail')} onChange={(e) => set('invoiceFromEmail', e.target.value)} placeholder="billing@yourdomain.com" /></div>
+        </div>
+      </div>
+
+      <button onClick={() => setShowAdvanced((v) => !v)} className="text-[11px] text-slate-500 underline decoration-dotted hover:text-slate-300">
+        {showAdvanced ? 'Hide' : 'Use'} this business's own mail server (advanced)
+      </button>
+      {showAdvanced && (
+        <div className="space-y-3 rounded-lg border border-slate-800 p-3">
+          <p className="text-[11px] text-slate-500">
+            Only if this business has its own authenticated mail domain. Otherwise leave blank and mail goes through the shared server.
+          </p>
+          {!data.secretsReady && <p className="text-[11px] text-red-400">Server needs PAYMENTS_SECRET set before a password can be stored.</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={label}>SMTP host</label>
+              <input className={field} value={s('smtpHost')} onChange={(e) => set('smtpHost', e.target.value)} placeholder="mail.yourdomain.com" /></div>
+            <div><label className={label}>Port</label>
+              <input type="number" className={field} value={(form.smtpPort as number) ?? ''} onChange={(e) => set('smtpPort', e.target.value === '' ? null : Number(e.target.value))} placeholder="587" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={label}>Username</label>
+              <input className={field} value={s('smtpUser')} onChange={(e) => set('smtpUser', e.target.value)} placeholder="billing@yourdomain.com" /></div>
+            <div><label className={label}>Password</label>
+              <input type="password" className={field} value={smtpPass} onChange={(e) => setSmtpPass(e.target.value)} placeholder={data.email.hasSmtpPass ? 'Set. Leave blank to keep.' : ''} /></div>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={!!form.smtpSecure} onChange={(e) => set('smtpSecure', e.target.checked)} />
+            Use TLS (port 465)
+          </label>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button onClick={() => save.mutate()} disabled={save.isPending}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:opacity-60">
+          {save.isPending ? 'Saving...' : 'Save email settings'}
+        </button>
+        {saved && <span className="text-[11px] text-violet-300">Saved</span>}
+        {save.error && <span className="text-[11px] text-red-400">{(save.error as Error).message}</span>}
+      </div>
+    </section>
   );
 }
 

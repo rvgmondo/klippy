@@ -2,12 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, accounts, businessMembers, memberships, users } from '../db/schema.js';
+import { businesses, accounts, businessMembers, businessEmail, memberships, users } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { seedNewBusiness } from '../lib/seed.js';
 import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
+import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
@@ -196,6 +197,72 @@ export async function businessRoutes(app: FastifyInstance) {
     if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
     await db.delete(businessMembers)
       .where(and(eq(businessMembers.accountId, accountId), eq(businessMembers.businessId, id), eq(businessMembers.userId, userId)));
+    return { ok: true };
+  });
+
+  // ---- Per-business email settings ------------------------------------------
+  // How this business's mail is addressed, and optionally its own SMTP server.
+  // Secrets (the SMTP password) are never returned; the UI shows whether one is set.
+  app.get('/api/v1/businesses/:id/email', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
+    const [row] = await db.select().from(businessEmail)
+      .where(and(eq(businessEmail.accountId, accountId), eq(businessEmail.businessId, id))).limit(1);
+    return {
+      email: {
+        fromName: row?.fromName ?? '', fromEmail: row?.fromEmail ?? '', replyTo: row?.replyTo ?? '',
+        invoiceFromName: row?.invoiceFromName ?? '', invoiceFromEmail: row?.invoiceFromEmail ?? '',
+        invoiceReplyTo: row?.invoiceReplyTo ?? '',
+        smtpHost: row?.smtpHost ?? '', smtpPort: row?.smtpPort ?? null,
+        smtpSecure: row?.smtpSecure ?? false, smtpUser: row?.smtpUser ?? '',
+        hasSmtpPass: !!row?.smtpPassEnc,
+      },
+      // The shared sending address, shown as the fallback when fields are blank.
+      globalFrom: process.env.SMTP_FROM ?? null,
+      secretsReady: secretsAvailable(),
+    };
+  });
+
+  app.patch('/api/v1/businesses/:id/email', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
+    const em = (max: number) => z.string().trim().max(max).optional().or(z.literal(''));
+    const parsed = z.object({
+      fromName: em(120), fromEmail: em(150), replyTo: em(150),
+      invoiceFromName: em(120), invoiceFromEmail: em(150), invoiceReplyTo: em(150),
+      smtpHost: em(200), smtpPort: z.number().int().min(1).max(65535).nullable().optional(),
+      smtpSecure: z.boolean().optional(), smtpUser: em(200), smtpPass: em(200),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+    const d = parsed.data;
+    if (d.smtpPass && !secretsAvailable()) {
+      return reply.code(503).send({ error: 'The server cannot store an SMTP password yet. Set PAYMENTS_SECRET and restart.' });
+    }
+
+    const blankToNull = (v: string | undefined) => (v === undefined ? undefined : (v === '' ? null : v));
+    const patch: Record<string, unknown> = {
+      fromName: blankToNull(d.fromName), fromEmail: blankToNull(d.fromEmail), replyTo: blankToNull(d.replyTo),
+      invoiceFromName: blankToNull(d.invoiceFromName), invoiceFromEmail: blankToNull(d.invoiceFromEmail),
+      invoiceReplyTo: blankToNull(d.invoiceReplyTo),
+      smtpHost: blankToNull(d.smtpHost), smtpUser: blankToNull(d.smtpUser),
+    };
+    if (d.smtpPort !== undefined) patch.smtpPort = d.smtpPort;
+    if (d.smtpSecure !== undefined) patch.smtpSecure = d.smtpSecure;
+    if (d.smtpPass) patch.smtpPassEnc = encryptSecret(d.smtpPass);
+    else if (d.smtpPass === '') patch.smtpPassEnc = null;
+    for (const k of Object.keys(patch)) if (patch[k] === undefined) delete patch[k];
+
+    const [existing] = await db.select({ id: businessEmail.id }).from(businessEmail)
+      .where(and(eq(businessEmail.accountId, accountId), eq(businessEmail.businessId, id))).limit(1);
+    if (existing) {
+      await db.update(businessEmail).set(patch).where(eq(businessEmail.id, existing.id));
+    } else {
+      await db.insert(businessEmail).values({ accountId, businessId: id, ...patch });
+    }
     return { ok: true };
   });
 
