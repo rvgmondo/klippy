@@ -4,7 +4,7 @@ import { db } from '../db/client.js';
 import { boardColumns, boards } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { assertBoardAccess } from '../lib/access.js';
+import { assertBoardAccess, assertColumnAccess } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 const createSchema = z.object({
     boardId: z.number().int().positive(),
@@ -44,6 +44,8 @@ export async function columnRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertColumnAccess(req, reply, id, 'member')))
+            return;
         const parsed = updateSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -61,6 +63,8 @@ export async function columnRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertColumnAccess(req, reply, id, 'member')))
+            return;
         const res = await db.delete(boardColumns).where(tenantWhere(boardColumns, accountId, eq(boardColumns.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Column not found.' });

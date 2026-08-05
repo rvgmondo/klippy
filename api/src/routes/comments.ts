@@ -5,7 +5,7 @@ import { db } from '../db/client.js';
 import { taskComments, tasks } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { assertTaskAccess } from '../lib/access.js';
+import { assertTaskAccess, assertCommentAccess } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { notify } from '../lib/push.js';
 import { appUrl } from '../lib/mailer.js';
@@ -51,6 +51,7 @@ export async function commentRoutes(app: FastifyInstance) {
     const { accountId, userId, role } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertCommentAccess(req, reply, id, 'member'))) return;
     const [existing] = await db.select().from(taskComments)
       .where(tenantWhere(taskComments, accountId, eq(taskComments.id, id))).limit(1);
     if (!existing) return reply.code(404).send({ error: 'Comment not found.' });

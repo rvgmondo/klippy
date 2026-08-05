@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { type AnyMySqlColumn } from 'drizzle-orm/mysql-core';
 import { db } from '../db/client.js';
-import { businessMembers, businesses, boards, folders, tasks } from '../db/schema.js';
+import { businessMembers, businesses, boards, folders, tasks, boardColumns, taskSubtasks, taskComments } from '../db/schema.js';
 import { authOf } from './context.js';
 
 /**
@@ -150,4 +150,40 @@ export async function assertTaskAccess(
     .where(and(eq(tasks.id, taskId), eq(tasks.accountId, accountId))).limit(1);
   if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
   return assertMaybeBusiness(req, reply, row.businessId, min);
+}
+
+// Child rows (a column on a board, a subtask/comment on a task) inherit the access
+// of their parent. Each resolves to the parent id then delegates, short-circuiting
+// for owners/admins like the others.
+export async function assertColumnAccess(
+  req: FastifyRequest, reply: FastifyReply, columnId: number, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (await seesAllBusinesses(req)) return true;
+  const { accountId } = authOf(req);
+  const [row] = await db.select({ boardId: boardColumns.boardId }).from(boardColumns)
+    .where(and(eq(boardColumns.id, columnId), eq(boardColumns.accountId, accountId))).limit(1);
+  if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
+  return assertBoardAccess(req, reply, row.boardId, min);
+}
+
+export async function assertSubtaskAccess(
+  req: FastifyRequest, reply: FastifyReply, subtaskId: number, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (await seesAllBusinesses(req)) return true;
+  const { accountId } = authOf(req);
+  const [row] = await db.select({ taskId: taskSubtasks.taskId }).from(taskSubtasks)
+    .where(and(eq(taskSubtasks.id, subtaskId), eq(taskSubtasks.accountId, accountId))).limit(1);
+  if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
+  return assertTaskAccess(req, reply, row.taskId, min);
+}
+
+export async function assertCommentAccess(
+  req: FastifyRequest, reply: FastifyReply, commentId: number, min: BusinessRole = 'member',
+): Promise<boolean> {
+  if (await seesAllBusinesses(req)) return true;
+  const { accountId } = authOf(req);
+  const [row] = await db.select({ taskId: taskComments.taskId }).from(taskComments)
+    .where(and(eq(taskComments.id, commentId), eq(taskComments.accountId, accountId))).limit(1);
+  if (!row) { await reply.code(404).send({ error: 'Not found.' }); return false; }
+  return assertTaskAccess(req, reply, row.taskId, min);
 }

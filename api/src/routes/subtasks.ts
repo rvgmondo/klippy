@@ -5,7 +5,7 @@ import { db } from '../db/client.js';
 import { taskSubtasks, tasks } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { assertTaskAccess } from '../lib/access.js';
+import { assertTaskAccess, assertSubtaskAccess } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 
 async function taskInAccount(accountId: number, taskId: number): Promise<boolean> {
@@ -39,6 +39,7 @@ export async function subtaskRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertSubtaskAccess(req, reply, id, 'member'))) return;
     const parsed = z.object({
       title: z.string().trim().min(1).max(200).optional(),
       isCompleted: z.boolean().optional(),
@@ -56,6 +57,7 @@ export async function subtaskRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertSubtaskAccess(req, reply, id, 'member'))) return;
     const res = await db.delete(taskSubtasks).where(tenantWhere(taskSubtasks, accountId, eq(taskSubtasks.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subtask not found.' });
     return { ok: true };
