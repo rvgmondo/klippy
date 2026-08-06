@@ -200,6 +200,25 @@ export const businessEmail = mysqlTable('business_email', {
 }, (t) => [
     uniqueIndex('uniq_business_email').on(t.businessId),
 ]);
+// ---- Events -----------------------------------------------------------------
+// A record of the things the system did on its own, and what came of each. The
+// automations are the point of Klippy (a won deal should not need six manual
+// follow-ups), but automation you cannot see is automation you cannot trust, so
+// every emitted event and every handler's outcome is written down.
+export const events = mysqlTable('events', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }),
+    name: varchar('name', { length: 60 }).notNull(),
+    // What the event was about, e.g. the deal id and its value.
+    payload: json('payload').$type(),
+    // One line per handler: what it did, or why it did nothing.
+    results: json('results').$type(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_events_account').on(t.accountId, t.createdAt),
+]);
 // ---- Folders (nestable tree; top level = a business's "Clients"/areas) ------
 // parentId NULL => top-level folder. Self-referencing for arbitrary depth.
 export const folders = mysqlTable('folders', {

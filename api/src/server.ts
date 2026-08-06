@@ -4,6 +4,8 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { authPlugin } from './lib/context.js';
+// Importing this registers the Golden Handoff handlers on the event hub.
+import './lib/handoff.js';
 import { authRoutes } from './routes/auth.js';
 import { folderRoutes } from './routes/folders.js';
 import { boardRoutes } from './routes/boards.js';

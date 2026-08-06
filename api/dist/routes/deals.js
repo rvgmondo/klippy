@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { deals, folders, boards, boardColumns } from '../db/schema.js';
+import { deals } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
+import { emit } from '../lib/events.js';
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'];
 const stage = z.enum(STAGES);
 const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -15,6 +16,17 @@ const DEFAULT_COLUMNS = [
     { name: 'Doing', color: '#3b82f6', isDoneColumn: false },
     { name: 'Done', color: '#22c55e', isDoneColumn: true },
 ];
+/**
+ * Fire the Golden Handoff for a won deal. Kept in one place so dragging a deal into
+ * Won and pressing Convert do exactly the same thing.
+ */
+async function runHandoff(deal, ctx) {
+    const payload = {
+        dealId: deal.id, businessId: deal.businessId, title: deal.title,
+        company: deal.company, contactEmail: deal.contactEmail, value: Number(deal.value),
+    };
+    return emit('deal.won', payload, { ...ctx, businessId: deal.businessId });
+}
 export async function dealRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
     // All deals (frontend groups by stage) + a pipeline summary. Optional ?businessId filter.
@@ -103,7 +115,7 @@ export async function dealRoutes(app) {
     });
     // Move a deal to a stage / position (the pipeline drag).
     app.post('/api/v1/deals/:id/move', async (req, reply) => {
-        const { accountId } = authOf(req);
+        const { accountId, userId } = authOf(req);
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
@@ -129,7 +141,13 @@ export async function dealRoutes(app) {
             }
         });
         const [moved] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
-        return { deal: moved };
+        // Dragging a deal into Won is the moment the handoff should happen; it is the
+        // way most deals actually close, not the explicit Convert button.
+        let handoff;
+        if (parsed.data.stage === 'won' && deal.stage !== 'won' && moved) {
+            handoff = (await runHandoff(moved, { accountId, userId })).results;
+        }
+        return { deal: moved, handoff };
     });
     app.delete('/api/v1/deals/:id', async (req, reply) => {
         const { accountId } = authOf(req);
@@ -161,25 +179,15 @@ export async function dealRoutes(app) {
             return;
         if (deal.clientFolderId)
             return reply.code(409).send({ error: 'This deal is already a client.' });
-        const name = deal.company || deal.title;
-        const folderId = await db.transaction(async (tx) => {
-            const position = await nextPosition(folders, sql `account_id = ${accountId} AND parent_id IS NULL`);
-            const fIns = await tx.insert(folders).values(withTenant(accountId, {
-                parentId: null, businessId: deal.businessId, name, pillar: 'delivery', position, createdBy: userId,
-            }));
-            const fid = Number(fIns[0].insertId);
-            const bIns = await tx.insert(boards).values(withTenant(accountId, {
-                folderId: fid, name: 'Work', position: 0, createdBy: userId,
-            }));
-            const bid = Number(bIns[0].insertId);
-            await tx.insert(boardColumns).values(DEFAULT_COLUMNS.map((c, i) => withTenant(accountId, {
-                boardId: bid, name: c.name, color: c.color, isDoneColumn: c.isDoneColumn, position: i,
-            })));
-            await tx.update(deals).set({ stage: 'won', wonAt: deal.wonAt ?? new Date(), clientFolderId: fid })
-                .where(tenantWhere(deals, accountId, eq(deals.id, id)));
-            return fid;
+        await db.update(deals).set({ stage: 'won', wonAt: deal.wonAt ?? new Date() })
+            .where(tenantWhere(deals, accountId, eq(deals.id, id)));
+        const handoff = await runHandoff(deal, { accountId, userId });
+        return reply.code(201).send({
+            ok: true,
+            folderId: handoff.data.folderId ?? null,
+            name: deal.company || deal.title,
+            handoff: handoff.results,
         });
-        return reply.code(201).send({ ok: true, folderId, name });
     });
 }
 //# sourceMappingURL=deals.js.map
