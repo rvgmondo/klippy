@@ -4,7 +4,7 @@ import { ChevronDown, Layers } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, ApiError } from '../lib/api';
 import { Menu } from './Menu';
 import { NewBusinessModal } from './NewBusinessModal';
-import type { Business, BusinessType } from '../lib/types';
+import type { Business } from '../lib/types';
 
 export type BusinessSelection = number | 'all';
 
@@ -20,7 +20,7 @@ export function BusinessSwitcher({ value, onChange, full }: {
   const list = data?.businesses ?? [];
 
   const create = useMutation({
-    mutationFn: (v: { name: string; type: BusinessType }) => apiPost<{ business: Business }>('/businesses', v),
+    mutationFn: (v: { name: string; blueprint: string }) => apiPost<{ business: Business }>('/businesses', v),
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['businesses'] });
       if (res?.business?.id) onChange(res.business.id);
@@ -75,7 +75,7 @@ export function BusinessSwitcher({ value, onChange, full }: {
         <NewBusinessModal
           onClose={() => setShowNew(false)}
           isPending={create.isPending}
-          onCreate={(name, type) => create.mutate({ name, type })}
+          onCreate={(name, blueprintKey) => create.mutate({ name, blueprint: blueprintKey })}
         />
       )}
     </>

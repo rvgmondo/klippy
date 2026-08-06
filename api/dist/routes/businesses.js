@@ -9,11 +9,15 @@ import { seedNewBusiness } from '../lib/seed.js';
 import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules } from '../lib/modules.js';
+import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
     type: businessType.default('services'),
     color: z.string().trim().max(20).optional(),
+    // A named preset ("Hosting", "Shop"). Decides the type, modules and billing
+    // defaults, so the app arrives arranged for how this business actually runs.
+    blueprint: z.string().trim().max(40).optional(),
 });
 const nullableStr = (max) => z.string().trim().max(max).nullable().optional().or(z.literal(''));
 const updateSchema = z.object({
@@ -71,13 +75,22 @@ export async function businessRoutes(app) {
         // Create the business on its own. `secondaryTypes` is written explicitly rather
         // than leaning on the column's DEFAULT, because a JSON default needs MySQL
         // 8.0.13+ and a strict-mode server rejects the insert outright without it.
+        // A blueprint decides the type and how this business is set up; without one we
+        // fall back to the plain type, which is how businesses were always created.
+        const bp = blueprint(parsed.data.blueprint);
+        const prov = bp ? provisionFrom(bp) : null;
+        const type = prov?.type ?? parsed.data.type;
         const ins = await db.insert(businesses).values(withTenant(accountId, {
-            name: parsed.data.name, type: parsed.data.type, color: parsed.data.color ?? '#6366f1',
+            name: parsed.data.name, type, color: parsed.data.color ?? '#6366f1',
             secondaryTypes: [], position, createdBy: userId,
+            modules: prov?.modules ?? null,
             bizAddress: acc?.bizAddress ?? null, bizTaxNumber: acc?.bizTaxNumber ?? null,
             bizRegNumber: acc?.bizRegNumber ?? null, bankDetails: acc?.bankDetails ?? null,
             invoiceFooter: acc?.invoiceFooter ?? null, invoiceAccent: acc?.invoiceAccent ?? '#6366f1',
-            defaultTaxRate: acc?.defaultTaxRate ?? null, defaultDueDays: acc?.defaultDueDays ?? 14,
+            defaultTaxRate: prov?.defaultTaxRate != null ? String(prov.defaultTaxRate) : (acc?.defaultTaxRate ?? null),
+            defaultDueDays: prov?.defaultDueDays ?? acc?.defaultDueDays ?? 14,
+            ...(prov?.reminderOffsets ? { reminderOffsets: prov.reminderOffsets } : {}),
+            ...(prov?.suspendAfterDays !== undefined ? { suspendAfterDays: prov.suspendAfterDays } : {}),
         }));
         const businessId = Number(ins[0].insertId);
         // Seeding example content is a convenience, not part of creating the business.
@@ -85,7 +98,7 @@ export async function businessRoutes(app) {
         // exist rather than the whole thing rolling back into a 500.
         try {
             await db.transaction(async (tx) => {
-                await seedNewBusiness(tx, accountId, userId, businessId, parsed.data.type);
+                await seedNewBusiness(tx, accountId, userId, businessId, type);
             });
         }
         catch (err) {
@@ -147,6 +160,9 @@ export async function businessRoutes(app) {
     });
     // The module catalogue: what exists, which primitive it belongs to, and what each
     // one is for. Static, but served so the client and server cannot drift apart.
+    app.get('/api/v1/blueprints', async () => ({
+        blueprints: BLUEPRINTS.map((b) => ({ key: b.key, label: b.label, type: b.type, blurb: b.blurb })),
+    }));
     app.get('/api/v1/modules', async () => ({
         primitives: PRIMITIVES.map((p) => ({ key: p, label: PRIMITIVE_LABEL[p], blurb: PRIMITIVE_BLURB[p] })),
         modules: MODULES.map((m) => ({
