@@ -14,16 +14,18 @@ interface DocSummary {
   issueDate: string; dueDate: string | null; status: Status; currency: string; total: string;
 }
 interface Line { description: string; quantity: number; unitPrice: number }
+type DiscountType = 'none' | 'percent' | 'amount';
 interface FullDoc {
   document: DocSummary & {
-    clientEmail: string | null; clientAddress: string | null; taxRate: string;
+    clientEmail: string | null; clientAddress: string | null; clientVatNumber: string | null; taxRate: string;
+    discountType: DiscountType; discountValue: string; discountAmount: string;
     subtotal: string; taxAmount: string; notes: string | null;
   };
   lines: (Line & { amount: string })[];
   brand: { name: string; hasLogo: boolean; logoUrl: string | null };
   issuer: {
     name: string; logoUrl: string | null; address: string | null; taxNumber: string | null; regNumber: string | null;
-    bankDetails: string | null; footer: string | null; accent: string;
+    bankDetails: string | null; footer: string | null; accent: string; vatRegistered: boolean;
   };
 }
 
@@ -178,9 +180,12 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientAddress, setClientAddress] = useState('');
+  const [clientVat, setClientVat] = useState('');
   const [issueDate, setIssueDate] = useState(todayStr());
   const [dueDate, setDueDate] = useState('');
   const [taxRate, setTaxRate] = useState(15);
+  const [discountType, setDiscountType] = useState<DiscountType>('none');
+  const [discountValue, setDiscountValue] = useState(0);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, unitPrice: 0 }]);
   const [error, setError] = useState<string | null>(null);
@@ -234,22 +239,27 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   if (!isNew && existing.data && !ready) {
     const d = existing.data.document;
     setClientName(d.clientName); setClientEmail(d.clientEmail ?? ''); setClientAddress(d.clientAddress ?? '');
+    setClientVat(d.clientVatNumber ?? '');
     setIssueDate(d.issueDate); setDueDate(d.dueDate ?? ''); setTaxRate(Number(d.taxRate));
+    setDiscountType(d.discountType ?? 'none'); setDiscountValue(Number(d.discountValue ?? 0));
     setNotes(d.notes ?? '');
     setLines(existing.data.lines.map((l) => ({ description: l.description, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice) })));
     setReady(true);
   }
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-  const tax = subtotal * (taxRate / 100);
+  const discount = discountType === 'percent' ? subtotal * (Math.min(discountValue, 100) / 100)
+    : discountType === 'amount' ? Math.min(discountValue, subtotal) : 0;
+  const tax = (subtotal - discount) * (taxRate / 100);
   const currency = existing.data?.document.currency ?? 'ZAR';
 
   const save = useMutation({
     mutationFn: () => {
       const body = {
         type, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
-        clientAddress: clientAddress.trim() || null, issueDate, dueDate: dueDate || null,
-        taxRate, notes: notes.trim() || null,
+        clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
+        issueDate, dueDate: dueDate || null,
+        taxRate, discountType, discountValue: Number(discountValue) || 0, notes: notes.trim() || null,
         ...(isNew && businessId ? { businessId } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unitPrice: Number(l.unitPrice) || 0 })),
       };
@@ -274,10 +284,27 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
           <input className={field} placeholder="Client email (optional)" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
         </div>
         <textarea className={field + ' mt-3'} placeholder="Client address (optional)" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />
+        <input className={field + ' mt-3'} placeholder="Client VAT number (optional, for tax invoices)" value={clientVat} onChange={(e) => setClientVat(e.target.value)} />
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><label className="mb-1 block text-[11px] text-slate-500">Issue date</label><input type="date" className={field} value={issueDate} onChange={(e) => setIssueDate(e.target.value)} /></div>
           <div><label className="mb-1 block text-[11px] text-slate-500">{type === 'quote' ? 'Valid until' : 'Due date'}</label><input type="date" className={field} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
           <div><label className="mb-1 block text-[11px] text-slate-500">Tax %</label><input type="number" className={field} value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} /></div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">Discount</label>
+            <select className={field} value={discountType} onChange={(e) => setDiscountType(e.target.value as DiscountType)}>
+              <option value="none">No discount</option>
+              <option value="percent">Percent (%)</option>
+              <option value="amount">Fixed amount</option>
+            </select>
+          </div>
+          {discountType !== 'none' && (
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">{discountType === 'percent' ? 'Percent off' : 'Amount off'}</label>
+              <input type="number" min={0} className={field} value={discountValue} onChange={(e) => setDiscountValue(Number(e.target.value))} />
+            </div>
+          )}
         </div>
 
         {/* Pull from tracked time */}
@@ -341,8 +368,9 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         <div className="mt-4 flex justify-end">
           <div className="w-56 space-y-1 text-sm">
             <div className="flex justify-between text-slate-400"><span>Subtotal</span><span className="num">{money(subtotal, currency)}</span></div>
+            {discount > 0 && <div className="flex justify-between text-slate-400"><span>Discount</span><span className="num">-{money(discount, currency)}</span></div>}
             <div className="flex justify-between text-slate-400"><span>Tax ({taxRate}%)</span><span className="num">{money(tax, currency)}</span></div>
-            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="num">{money(subtotal + tax, currency)}</span></div>
+            <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="num">{money(subtotal - discount + tax, currency)}</span></div>
           </div>
         </div>
 
@@ -426,8 +454,10 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
   const issuer = data.issuer;
   const accent = issuer.accent || '#6366f1';
   const isQuote = d.type === 'quote';
-  const label = isQuote ? 'Quotation' : 'Invoice';
+  // A VAT-registered business issues a "Tax Invoice" (the wording SARS requires).
+  const label = isQuote ? 'Quotation' : issuer.vatRegistered ? 'Tax Invoice' : 'Invoice';
   const paid = d.status === 'paid';
+  const discountAmt = Number(d.discountAmount ?? 0);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
@@ -475,6 +505,7 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
                 <div className="font-semibold text-slate-800">{d.clientName}</div>
                 {d.clientEmail && <div className="text-slate-500">{d.clientEmail}</div>}
                 {d.clientAddress && <div className="whitespace-pre-wrap text-slate-500">{d.clientAddress}</div>}
+                {d.clientVatNumber && <div className="text-slate-500">VAT {d.clientVatNumber}</div>}
               </div>
               <div className="space-y-1 text-right">
                 <div className="flex justify-between gap-6"><span className="text-slate-400">Issued</span><span className="num text-slate-700">{d.issueDate}</span></div>
@@ -513,6 +544,9 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
             <div className="mb-8 flex justify-end">
               <div className="w-72 space-y-1.5 text-sm">
                 <div className="flex justify-between"><span className="text-slate-500">Subtotal</span><span className="num text-slate-700">{money(d.subtotal, cur)}</span></div>
+                {discountAmt > 0 && (
+                  <div className="flex justify-between"><span className="text-slate-500">Discount</span><span className="num text-slate-700">-{money(discountAmt, cur)}</span></div>
+                )}
                 {Number(d.taxRate) > 0 && (
                   <div className="flex justify-between"><span className="text-slate-500">Tax ({Number(d.taxRate)}%)</span><span className="num text-slate-700">{money(d.taxAmount, cur)}</span></div>
                 )}

@@ -514,13 +514,17 @@ export const documents = mysqlTable('documents', {
         .references(() => accounts.id, { onDelete: 'cascade' }),
     businessId: int('business_id', { unsigned: true })
         .references(() => businesses.id, { onDelete: 'cascade' }),
-    type: mysqlEnum('type', ['quote', 'invoice']).notNull(),
-    seq: int('seq', { unsigned: true }).notNull(), // per-account, per-type running number
+    type: mysqlEnum('type', ['quote', 'invoice', 'credit_note']).notNull(),
+    seq: int('seq', { unsigned: true }).notNull(), // per-business, per-type running number
     number: varchar('number', { length: 30 }).notNull(), // e.g. INV-0001
+    // For a credit note: the invoice it credits. Null for invoices/quotes.
+    sourceDocumentId: int('source_document_id', { unsigned: true }),
     folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
     clientName: varchar('client_name', { length: 150 }).notNull(),
     clientEmail: varchar('client_email', { length: 150 }),
     clientAddress: text('client_address'),
+    // The client's VAT number, for a full tax invoice (SARS requires it above R5000).
+    clientVatNumber: varchar('client_vat_number', { length: 60 }),
     issueDate: date('issue_date', { mode: 'string' }).notNull(),
     dueDate: date('due_date', { mode: 'string' }), // invoice due / quote valid-until
     status: mysqlEnum('status', ['draft', 'sent', 'accepted', 'paid', 'void']).default('draft').notNull(),
@@ -530,6 +534,11 @@ export const documents = mysqlTable('documents', {
     // business's suspend threshold. Drives the Collections list's flagged state.
     suspendedAt: datetime('suspended_at'),
     currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
+    // Discount applied to the subtotal before tax. 'none' | 'percent' | 'amount';
+    // discountAmount is the resolved money value, stored so totals are self-contained.
+    discountType: mysqlEnum('discount_type', ['none', 'percent', 'amount']).default('none').notNull(),
+    discountValue: decimal('discount_value', { precision: 12, scale: 2 }).default('0').notNull(),
+    discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).default('0').notNull(),
     taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0').notNull(),
     subtotal: decimal('subtotal', { precision: 12, scale: 2 }).default('0').notNull(),
     taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).default('0').notNull(),
@@ -539,7 +548,10 @@ export const documents = mysqlTable('documents', {
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [
-    uniqueIndex('uniq_doc_number').on(t.accountId, t.type, t.seq),
+    // Numbering is per business now, so the sequence is unique within a business.
+    // businessId is nullable; MySQL allows multiple NULLs here, so legacy business-less
+    // documents do not collide.
+    uniqueIndex('uniq_doc_number').on(t.accountId, t.businessId, t.type, t.seq),
     index('idx_docs_account_type').on(t.accountId, t.type, t.createdAt),
 ]);
 export const documentLines = mysqlTable('document_lines', {

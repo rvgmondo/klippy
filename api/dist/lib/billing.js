@@ -61,8 +61,9 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     const price = Number(offering.price);
     const issueDate = new Date().toISOString().slice(0, 10);
     const dueDate = addDays(issueDate, 7);
+    // Numbering is per business + type (mirrors documents.ts nextNumber).
     const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-        .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice')));
+        .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), sub.businessId == null ? sql `business_id IS NULL` : eq(documents.businessId, sub.businessId)));
     const seq = Number(row?.m ?? 0) + 1;
     const number = `INV-${String(seq).padStart(4, '0')}`;
     const docId = await db.transaction(async (tx) => {

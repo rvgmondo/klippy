@@ -23,18 +23,38 @@ const bodySchema = z.object({
     clientName: z.string().trim().min(1).max(150),
     clientEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
     clientAddress: z.string().max(2000).nullable().optional(),
+    clientVatNumber: z.string().trim().max(60).nullable().optional().or(z.literal('')),
     issueDate: dateStr,
     dueDate: dateStr.nullable().optional(),
     taxRate: z.number().min(0).max(100).optional(),
+    discountType: z.enum(['none', 'percent', 'amount']).optional(),
+    discountValue: z.number().min(0).max(100_000_000).optional(),
     notes: z.string().max(5000).nullable().optional(),
     lines: z.array(lineSchema).max(200),
 });
-const PREFIX = { quote: 'QUO-', invoice: 'INV-' };
+const PREFIX = { quote: 'QUO-', invoice: 'INV-', credit_note: 'CN-' };
 const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
-function computeTotals(lines, taxRate) {
+/**
+ * Totals with an optional discount taken off the subtotal before tax, so tax is
+ * charged on the discounted amount (the correct order for VAT).
+ */
+function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0) {
     const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-    const taxAmount = subtotal * (taxRate / 100);
-    return { subtotal, taxAmount, total: subtotal + taxAmount };
+    let discountAmount = 0;
+    if (discountType === 'percent')
+        discountAmount = subtotal * (Math.min(discountValue, 100) / 100);
+    else if (discountType === 'amount')
+        discountAmount = Math.min(discountValue, subtotal);
+    const taxable = subtotal - discountAmount;
+    const taxAmount = taxable * (taxRate / 100);
+    return { subtotal, discountAmount, taxAmount, total: taxable + taxAmount };
+}
+/** Next sequence number for a business + type (numbering is per business). */
+async function nextNumber(accountId, businessId, type) {
+    const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
+        .where(tenantWhere(documents, accountId, eq(documents.type, type), businessId == null ? sql `business_id IS NULL` : eq(documents.businessId, businessId)));
+    const seq = Number(row?.m ?? 0) + 1;
+    return { seq, number: `${PREFIX[type]}${String(seq).padStart(4, '0')}` };
 }
 export async function documentRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
@@ -128,6 +148,8 @@ export async function documentRoutes(app) {
                 bankDetails: pick('bankDetails'),
                 footer: pick('invoiceFooter'),
                 accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
+                // A VAT-registered issuer's invoices are "Tax Invoices" (SARS wording).
+                vatRegistered: !!pick('bizTaxNumber'),
             },
         };
     });
@@ -140,22 +162,23 @@ export async function documentRoutes(app) {
         const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
         const currency = account?.currency ?? 'ZAR';
         const taxRate = d.taxRate ?? 0;
-        const totals = computeTotals(d.lines, taxRate);
-        // Next number for this account + type.
-        const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-            .where(tenantWhere(documents, accountId, eq(documents.type, d.type)));
-        const seq = Number(row?.m ?? 0) + 1;
-        const number = `${PREFIX[d.type]}${String(seq).padStart(4, '0')}`;
+        const discountType = d.discountType ?? 'none';
+        const discountValue = d.discountValue ?? 0;
+        const totals = computeTotals(d.lines, taxRate, discountType, discountValue);
         const businessId = await resolveBusinessId(accountId, d.businessId);
         // A member can only raise a document in a business they can work in.
         if (businessId && !(await canSeeBusiness(req, businessId))) {
             return reply.code(403).send({ error: 'You do not have access to that business.' });
         }
+        // Numbering is per business + type.
+        const { seq, number } = await nextNumber(accountId, businessId, d.type);
         const docId = await db.transaction(async (tx) => {
             const ins = await tx.insert(documents).values(withTenant(accountId, {
                 type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
                 clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
+                clientVatNumber: d.clientVatNumber || null,
                 issueDate: d.issueDate, dueDate: d.dueDate ?? null, currency,
+                discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
                 taxRate: money(taxRate), subtotal: money(totals.subtotal),
                 taxAmount: money(totals.taxAmount), total: money(totals.total),
                 notes: d.notes ?? null, createdBy: userId,
@@ -190,11 +213,15 @@ export async function documentRoutes(app) {
         if (!(await assertMaybeBusiness(req, reply, existing.businessId)))
             return;
         const taxRate = d.taxRate ?? 0;
-        const totals = computeTotals(d.lines, taxRate);
+        const discountType = d.discountType ?? 'none';
+        const discountValue = d.discountValue ?? 0;
+        const totals = computeTotals(d.lines, taxRate, discountType, discountValue);
         await db.transaction(async (tx) => {
             await tx.update(documents).set({
                 folderId: d.folderId ?? null, clientName: d.clientName, clientEmail: d.clientEmail || null,
-                clientAddress: d.clientAddress ?? null, issueDate: d.issueDate, dueDate: d.dueDate ?? null,
+                clientAddress: d.clientAddress ?? null, clientVatNumber: d.clientVatNumber || null,
+                issueDate: d.issueDate, dueDate: d.dueDate ?? null,
+                discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
                 taxRate: money(taxRate), subtotal: money(totals.subtotal),
                 taxAmount: money(totals.taxAmount), total: money(totals.total), notes: d.notes ?? null,
             }).where(tenantWhere(documents, accountId, eq(documents.id, id)));
@@ -261,16 +288,15 @@ export async function documentRoutes(app) {
             return;
         const lines = await db.select().from(documentLines)
             .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
-        const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice')));
-        const seq = Number(row?.m ?? 0) + 1;
-        const number = `${PREFIX.invoice}${String(seq).padStart(4, '0')}`;
+        const { seq, number } = await nextNumber(accountId, quote.businessId, 'invoice');
         const today = new Date().toISOString().slice(0, 10);
         const newId = await db.transaction(async (tx) => {
             const ins = await tx.insert(documents).values(withTenant(accountId, {
                 type: 'invoice', seq, number, businessId: quote.businessId, folderId: quote.folderId,
                 clientName: quote.clientName, clientEmail: quote.clientEmail, clientAddress: quote.clientAddress,
+                clientVatNumber: quote.clientVatNumber,
                 issueDate: today, dueDate: null, currency: quote.currency, taxRate: quote.taxRate,
+                discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
                 subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
                 notes: quote.notes, createdBy: userId,
             }));
