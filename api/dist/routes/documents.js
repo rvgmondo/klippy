@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, asc, desc, eq, gte, lt, lte, isNotNull, sql, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -49,6 +49,22 @@ function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0)
     const taxAmount = taxable * (taxRate / 100);
     return { subtotal, discountAmount, taxAmount, total: taxable + taxAmount };
 }
+/**
+ * What is still owed on an invoice: its total, less payments taken (a refund is a
+ * negative payment) and less any credit notes raised against it. Credit notes are
+ * the correct way to reduce an issued invoice, since an invoice that has gone to a
+ * client should not be edited after the fact.
+ */
+async function balanceOf(accountId, docId, total) {
+    const payRows = await db.select({ amount: payments.amount }).from(payments)
+        .where(tenantWhere(payments, accountId, eq(payments.documentId, docId)));
+    const paid = payRows.reduce((s, p) => s + Number(p.amount), 0);
+    const creditRows = await db.select({ total: documents.total }).from(documents)
+        .where(tenantWhere(documents, accountId, eq(documents.type, 'credit_note'), eq(documents.sourceDocumentId, docId), ne(documents.status, 'void')));
+    const credited = creditRows.reduce((s, c) => s + Number(c.total), 0);
+    const round = (n) => Math.round(n * 100) / 100;
+    return { paid: round(paid), credited: round(credited), outstanding: round(total - paid - credited) };
+}
 /** Next sequence number for a business + type (numbering is per business). */
 async function nextNumber(accountId, businessId, type) {
     const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
@@ -97,14 +113,42 @@ export async function documentRoutes(app) {
         isNotNull(documents.dueDate), lt(documents.dueDate, today), // overdue only
         q.success && q.data.businessId ? eq(documents.businessId, q.data.businessId) : undefined, await businessScope(req, documents.businessId)))
             .orderBy(asc(documents.dueDate));
+        // Net off part payments and credit notes in two grouped queries rather than a
+        // balance lookup per row, so this stays one screen's worth of work.
+        const ids = rows.map((r) => r.id);
+        const paidBy = new Map();
+        const creditedBy = new Map();
+        if (ids.length) {
+            const payRows = await db.select({
+                documentId: payments.documentId, amount: sql `SUM(${payments.amount})`,
+            }).from(payments)
+                .where(tenantWhere(payments, accountId, inArray(payments.documentId, ids)))
+                .groupBy(payments.documentId);
+            for (const p of payRows)
+                paidBy.set(p.documentId, Number(p.amount));
+            const credRows = await db.select({
+                sourceDocumentId: documents.sourceDocumentId, amount: sql `SUM(${documents.total})`,
+            }).from(documents)
+                .where(tenantWhere(documents, accountId, eq(documents.type, 'credit_note'), inArray(documents.sourceDocumentId, ids), ne(documents.status, 'void')))
+                .groupBy(documents.sourceDocumentId);
+            for (const c of credRows)
+                if (c.sourceDocumentId != null)
+                    creditedBy.set(c.sourceDocumentId, Number(c.amount));
+        }
         const days = (d) => Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
-        const items = rows.map((r) => ({
+        const round = (n) => Math.round(n * 100) / 100;
+        const items = rows
+            .map((r) => ({
             id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
             businessId: r.businessId, currency: r.currency, total: Number(r.total),
+            // What is actually still owed, which is what you chase for.
+            outstanding: round(Number(r.total) - (paidBy.get(r.id) ?? 0) - (creditedBy.get(r.id) ?? 0)),
             dueDate: r.dueDate, daysOverdue: r.dueDate ? days(r.dueDate) : 0,
             lastReminderOn: r.lastReminderOn, suspended: !!r.suspendedAt,
-        }));
-        const outstanding = Math.round(items.reduce((s, i) => s + i.total, 0) * 100) / 100;
+        }))
+            // A fully credited or fully paid invoice is not a collections problem.
+            .filter((i) => i.outstanding > 0.001);
+        const outstanding = round(items.reduce((s, i) => s + i.outstanding, 0));
         return {
             items,
             summary: { count: items.length, outstanding, suspended: items.filter((i) => i.suspended).length },
@@ -315,6 +359,82 @@ export async function documentRoutes(app) {
             .where(tenantWhere(documents, accountId, eq(documents.id, newId))).limit(1);
         return reply.code(201).send({ document: created });
     });
+    /**
+     * Raise a credit note against an invoice.
+     *
+     * An invoice that has gone to a client should not be quietly edited, so this is
+     * how you cancel or reduce one and keep an audit trail. With no lines it credits
+     * the whole invoice; with lines it credits part of it. The credit reduces what is
+     * owed, and settles the invoice outright when nothing is left.
+     */
+    app.post('/api/v1/documents/:id/credit-note', async (req, reply) => {
+        const { accountId, userId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const parsed = z.object({
+            lines: z.array(lineSchema).max(200).optional(),
+            reason: z.string().trim().max(2000).optional(),
+            issueDate: dateStr.optional(),
+        }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+        const [inv] = await db.select().from(documents)
+            .where(tenantWhere(documents, accountId, and(eq(documents.id, id), eq(documents.type, 'invoice')))).limit(1);
+        if (!inv)
+            return reply.code(404).send({ error: 'Invoice not found.' });
+        if (!(await assertMaybeBusiness(req, reply, inv.businessId)))
+            return;
+        const taxRate = Number(inv.taxRate);
+        const bal = await balanceOf(accountId, id, Number(inv.total));
+        if (bal.outstanding <= 0.001)
+            return reply.code(400).send({ error: 'Nothing left to credit on this invoice.' });
+        // With no lines given, credit exactly what is still outstanding. The balance is
+        // tax-inclusive, so we work backwards to a net amount and let the same tax rate
+        // put it back, which keeps the credit note's VAT correct.
+        const lines = parsed.data.lines?.length
+            ? parsed.data.lines
+            : [{
+                    description: `Credit against invoice ${inv.number}`,
+                    quantity: 1,
+                    unitPrice: Math.round((bal.outstanding / (1 + taxRate / 100)) * 100) / 100,
+                }];
+        const totals = computeTotals(lines, taxRate);
+        if (totals.total > bal.outstanding + 0.02) {
+            return reply.code(400).send({
+                error: `That credits ${totals.total.toFixed(2)} but only ${bal.outstanding.toFixed(2)} is outstanding.`,
+            });
+        }
+        const { seq, number } = await nextNumber(accountId, inv.businessId, 'credit_note');
+        const issueDate = parsed.data.issueDate ?? new Date().toISOString().slice(0, 10);
+        const newId = await db.transaction(async (tx) => {
+            const ins = await tx.insert(documents).values(withTenant(accountId, {
+                type: 'credit_note', seq, number, businessId: inv.businessId,
+                sourceDocumentId: inv.id, folderId: inv.folderId,
+                clientName: inv.clientName, clientEmail: inv.clientEmail, clientAddress: inv.clientAddress,
+                clientVatNumber: inv.clientVatNumber,
+                issueDate, dueDate: null, currency: inv.currency, status: 'sent',
+                taxRate: inv.taxRate, subtotal: money(totals.subtotal),
+                taxAmount: money(totals.taxAmount), total: money(totals.total),
+                notes: parsed.data.reason ?? `Credit against invoice ${inv.number}.`, createdBy: userId,
+            }));
+            const cid = Number(ins[0].insertId);
+            await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
+                documentId: cid, description: l.description, quantity: money(l.quantity),
+                unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+            })));
+            return cid;
+        });
+        // Settle the invoice if the credit clears whatever was left.
+        const after = await balanceOf(accountId, id, Number(inv.total));
+        if (after.outstanding <= 0.001 && inv.status !== 'paid') {
+            await db.update(documents).set({ status: 'paid' })
+                .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+        }
+        const [created] = await db.select().from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.id, newId))).limit(1);
+        return reply.code(201).send({ document: created, invoiceBalance: after });
+    });
     // ---- Payments -----------------------------------------------------------
     // List payments + outstanding balance for a document.
     app.get('/api/v1/documents/:id/payments', async (req, reply) => {
@@ -330,9 +450,17 @@ export async function documentRoutes(app) {
             return;
         const rows = await db.select().from(payments)
             .where(tenantWhere(payments, accountId, eq(payments.documentId, id))).orderBy(payments.paidOn);
-        const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
         const total = Number(doc.total);
-        return { payments: rows, paid: Math.round(paid * 100) / 100, outstanding: Math.round((total - paid) * 100) / 100, total };
+        const bal = await balanceOf(accountId, id, total);
+        // Credit notes raised against this invoice, so the drawer can show why the
+        // balance is lower than the total without the user hunting for them.
+        const credits = await db.select({
+            id: documents.id, number: documents.number, total: documents.total,
+            issueDate: documents.issueDate, notes: documents.notes,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'credit_note'), eq(documents.sourceDocumentId, id), ne(documents.status, 'void')))
+            .orderBy(documents.issueDate);
+        return { payments: rows, credits, total, ...bal };
     });
     app.post('/api/v1/documents/:id/payments', async (req, reply) => {
         const { accountId, userId } = authOf(req);
@@ -340,7 +468,10 @@ export async function documentRoutes(app) {
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
         const parsed = z.object({
-            amount: z.number().positive().max(100_000_000),
+            // Negative records a REFUND against this invoice, which is why this is not
+            // simply .positive(). Zero would be a no-op, so it stays excluded.
+            amount: z.number().refine((n) => n !== 0, 'Amount cannot be zero.')
+                .refine((n) => Math.abs(n) <= 100_000_000, 'Amount is too large.'),
             paidOn: dateStr,
             method: z.string().trim().max(40).nullable().optional(),
             note: z.string().trim().max(255).nullable().optional(),
@@ -357,15 +488,19 @@ export async function documentRoutes(app) {
             documentId: id, amount: money(parsed.data.amount), paidOn: parsed.data.paidOn,
             method: parsed.data.method ?? null, note: parsed.data.note ?? null, createdBy: userId,
         }));
-        // Auto-flip to paid once the balance is covered.
-        const rows = await db.select({ amount: payments.amount }).from(payments)
-            .where(tenantWhere(payments, accountId, eq(payments.documentId, id)));
-        const paid = rows.reduce((s, p) => s + Number(p.amount), 0);
-        if (paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
+        // Auto-flip to paid once nothing is outstanding, and back to sent if a refund
+        // re-opens a balance on an invoice that had been settled.
+        const bal = await balanceOf(accountId, id, Number(doc.total));
+        const settled = bal.outstanding <= 0.001;
+        if (settled && doc.status !== 'paid') {
             await db.update(documents).set({ status: 'paid' })
                 .where(tenantWhere(documents, accountId, eq(documents.id, id)));
         }
-        return reply.code(201).send({ ok: true, paid: Math.round(paid * 100) / 100 });
+        else if (!settled && doc.status === 'paid') {
+            await db.update(documents).set({ status: 'sent' })
+                .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+        }
+        return reply.code(201).send({ ok: true, ...bal });
     });
     app.delete('/api/v1/payments/:id', async (req, reply) => {
         const { accountId } = authOf(req);

@@ -6,7 +6,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
-  businessId: number | null; currency: string; total: number; dueDate: string | null;
+  businessId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
 }
 interface Collections { items: Item[]; summary: { count: number; outstanding: number; suspended: number } }
@@ -64,7 +64,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                     <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
                       <th className="px-3 py-2">Invoice</th>
                       <th className="px-3 py-2">Client</th>
-                      <th className="px-3 py-2 text-right">Amount</th>
+                      <th className="px-3 py-2 text-right">Outstanding</th>
                       <th className="px-3 py-2 text-right">Overdue</th>
                       <th className="px-3 py-2">Last reminder</th>
                       <th className="px-3 py-2"></th>
@@ -87,7 +87,12 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                           <div className="text-slate-200">{i.clientName}</div>
                           {i.clientEmail && <div className="text-[11px] text-slate-500">{i.clientEmail}</div>}
                         </td>
-                        <td className="px-3 py-2.5 text-right num text-slate-100">{money(i.total, i.currency)}</td>
+                        <td className="px-3 py-2.5 text-right num text-slate-100">
+                          {money(i.outstanding, i.currency)}
+                          {Math.abs(i.outstanding - i.total) > 0.005 && (
+                            <div className="text-[10px] text-slate-500">of {money(i.total, i.currency)}</div>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-right num">
                           <span className={i.daysOverdue >= 14 ? 'text-red-300' : 'text-amber-300'}>{i.daysOverdue}d</span>
                         </td>
