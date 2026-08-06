@@ -80,6 +80,8 @@ export interface Business {
   invoiceAccent?: string;
   defaultTaxRate?: string | null;
   defaultDueDays?: number;
+  /** Module keys this business shows, already resolved from its type's defaults. */
+  modules?: string[];
   remindersEnabled?: boolean;
   reminderOffsets?: number[] | null;
   suspendAfterDays?: number | null;

@@ -204,6 +204,13 @@
       "when": 1786043599295,
       "tag": "0028_cloudy_victor_mancha",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1786045167507,
+      "tag": "0029_dry_pandemic",
+      "breakpoints": true
     }
   ]
 }

@@ -25,18 +25,42 @@ interface Props {
   onSelectBoard: (id: number) => void;
 }
 
-const NAV: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: 'home', label: 'Home', icon: Home },
-  { key: 'today', label: 'Today', icon: CalendarCheck },
-  { key: 'pipeline', label: 'Pipeline', icon: Target },
-  { key: 'calendar', label: 'Calendar', icon: CalendarDays },
-  { key: 'files', label: 'Files', icon: HardDrive },
-  { key: 'offerings', label: 'Offerings', icon: Package },
-  { key: 'expenses', label: 'Expenses', icon: Wallet },
-  { key: 'reports', label: 'Reports', icon: BarChart3 },
-  { key: 'billing', label: 'Billing', icon: Receipt },
-  { key: 'collections', label: 'Collections', icon: AlertTriangle },
-];
+/**
+ * Navigation is grouped by the four primitives every business runs on: bring work
+ * in, do the work, handle the money, run the machine. A flat list of ten screens
+ * never told you which part of the business you were standing in.
+ *
+ * Which modules appear is decided per business (see Settings > Modules), so a
+ * copywriter is not made to look at stock levels. Home sits above the groups
+ * because it spans all four.
+ */
+const MODULE_ICON: Record<string, LucideIcon> = {
+  pipeline: Target, offerings: Package,
+  today: CalendarCheck, calendar: CalendarDays, reports: BarChart3,
+  billing: Receipt, collections: AlertTriangle, expenses: Wallet,
+  files: HardDrive,
+};
+
+const PRIMITIVE_ORDER = ['acquisition', 'fulfillment', 'finance', 'admin'] as const;
+const PRIMITIVE_LABEL: Record<string, string> = {
+  acquisition: 'Acquisition', fulfillment: 'Fulfillment', finance: 'Finance', admin: 'Admin',
+};
+
+function NavButton({ nav, view, onNavigate }: {
+  nav: { key: string; label: string; icon: LucideIcon }; view: string; onNavigate: (v: string) => void;
+}) {
+  const Icon = nav.icon;
+  const active = view === nav.key;
+  return (
+    <button onClick={() => onNavigate(nav.key)}
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
+        active
+          ? 'bg-[var(--accent-quiet)] text-violet-300'
+          : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
+      <Icon size={16} className={`shrink-0 ${active ? 'text-violet-300' : ''}`} /> {nav.label}
+    </button>
+  );
+}
 
 function ask(prompt: string, current: string): string | null {
   const v = window.prompt(prompt, current);
@@ -68,6 +92,30 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   const shown = businessId === 'all' ? businesses : businesses.filter((b) => b.id === businessId);
   const showHeaders = businessId === 'all' && businesses.length > 1;
 
+  // The module catalogue tells us what exists and where it belongs; the business
+  // tells us what it uses. Viewing all businesses shows the union, since hiding a
+  // screen that one of them needs would be worse than showing one it does not.
+  const catalogue = useQuery({
+    queryKey: ['modules'],
+    queryFn: () => apiGet<{ modules: { key: string; label: string; primitive: string }[] }>('/modules'),
+    staleTime: 60 * 60 * 1000,
+  });
+  const enabled = new Set(
+    businessId === 'all'
+      ? businesses.flatMap((b) => b.modules ?? [])
+      : (businesses.find((b) => b.id === businessId)?.modules ?? []),
+  );
+  const defs = catalogue.data?.modules ?? [];
+  // Until the catalogue loads, or for a business with nothing resolved yet, fall
+  // back to showing everything rather than an empty sidebar.
+  const showAll = defs.length === 0 || enabled.size === 0;
+  const navGroups = PRIMITIVE_ORDER.map((primitive) => ({
+    primitive,
+    items: defs
+      .filter((m) => m.primitive === primitive && (showAll || enabled.has(m.key)))
+      .map((m) => ({ key: m.key, label: m.label, icon: MODULE_ICON[m.key] ?? Home })),
+  })).filter((g) => g.items.length > 0);
+
   return (
     <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
       <div className="flex h-14 items-center gap-2 border-b border-slate-800 px-4">
@@ -86,21 +134,19 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
       </div>
 
-      {/* Primary navigation */}
-      <div className="space-y-0.5 border-b border-slate-800 px-2 py-2">
-        {NAV.map((n) => {
-          const Icon = n.icon;
-          const active = view === n.key;
-          return (
-            <button key={n.key} onClick={() => onNavigate(n.key)}
-              className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
-                active
-                  ? 'bg-[var(--accent-quiet)] text-violet-300'
-                  : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
-              <Icon size={16} className={`shrink-0 ${active ? 'text-violet-300' : ''}`} /> {n.label}
-            </button>
-          );
-        })}
+      {/* Primary navigation, grouped by the four primitives */}
+      <div className="space-y-2 border-b border-slate-800 px-2 py-2">
+        <NavButton nav={{ key: 'home', label: 'Home', icon: Home }} view={view} onNavigate={onNavigate} />
+        {navGroups.map((g) => (
+          <div key={g.primitive}>
+            <div className="px-2.5 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+              {PRIMITIVE_LABEL[g.primitive]}
+            </div>
+            <div className="space-y-0.5">
+              {g.items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} />)}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Boards tree */}

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User, Palette, Building2, Receipt, BellRing, Mail, Users, Building,
-  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, type LucideIcon,
+  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -20,6 +20,7 @@ import { NotesPanel } from './NotesPanel';
 import { AutomationPanel } from './AutomationPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 import { AccountPanel } from './AccountPanel';
+import { ModulesPanel } from './ModulesPanel';
 
 /**
  * Settings as a real page.
@@ -33,7 +34,7 @@ import { AccountPanel } from './AccountPanel';
 
 type SectionId =
   | 'profile' | 'appearance'
-  | `biz:${BusinessSection}`
+  | `biz:${BusinessSection}` | 'biz:modules'
   | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'automation'
   | 'labels' | 'tokens' | 'notes';
 
@@ -45,6 +46,7 @@ const YOU: Item[] = [
 ];
 
 const BUSINESS: Item[] = [
+  { id: 'biz:modules', label: 'Modules', icon: LayoutGrid, hint: 'Which parts of Klippy this business uses' },
   { id: 'biz:brand', label: 'Brand', icon: Building2, hint: 'Logo, display name and brand colour' },
   { id: 'biz:invoicing', label: 'Invoicing', icon: Receipt, hint: 'Address, VAT number, bank details and terms' },
   { id: 'biz:reminders', label: 'Payment reminders', icon: BellRing, hint: 'When unpaid invoices get chased' },
@@ -141,6 +143,7 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
 function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
   if (id.startsWith('biz:')) {
     if (!business) return <p className="text-sm text-slate-500">Pick a business first.</p>;
+    if (id === 'biz:modules') return <ModulesPanel business={business} />;
     return <BusinessSettingsPanel business={business} only={id.slice(4) as BusinessSection} />;
   }
   switch (id) {

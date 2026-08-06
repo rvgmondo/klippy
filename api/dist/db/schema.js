@@ -108,6 +108,10 @@ export const businesses = mysqlTable('businesses', {
     // they just widen which offering fields show by default. Empty array is common.
     secondaryTypes: json('secondary_types').$type()
         .default([]).notNull(),
+    // Which modules this business shows, so a copywriter is not made to look at
+    // stock levels. Null means "whatever this business type starts with", which is
+    // what almost every business stays on; a stored list is an explicit override.
+    modules: json('modules').$type(),
     color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
     // Free-form notes for this business: strategy, logins to remember, whatever the
     // owner wants kept next to it. Separate from folder/client notes.

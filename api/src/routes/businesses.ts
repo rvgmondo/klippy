@@ -9,6 +9,7 @@ import { intId, nextPosition } from '../lib/http.js';
 import { seedNewBusiness } from '../lib/seed.js';
 import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
+import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules } from '../lib/modules.js';
 
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
@@ -32,6 +33,8 @@ const updateSchema = z.object({
   invoiceAccent: z.string().trim().max(20).optional(),
   defaultTaxRate: z.number().min(0).max(100).nullable().optional(),
   defaultDueDays: z.number().int().min(0).max(365).optional(),
+  // Which modules show. Null resets to the business type's defaults.
+  modules: z.array(z.string().max(40)).max(40).nullable().optional(),
   // Reminder schedule.
   remindersEnabled: z.boolean().optional(),
   reminderOffsets: z.array(z.number().int().min(-60).max(365)).max(10).nullable().optional(),
@@ -50,7 +53,14 @@ export async function businessRoutes(app: FastifyInstance) {
       .where(tenantWhere(businesses, accountId))
       .orderBy(asc(businesses.position));
     const allowed = await accessibleBusinessIds(req);
-    return { businesses: allowed ? rows.filter((b) => allowed.has(b.id)) : rows };
+    const visible = allowed ? rows.filter((b) => allowed.has(b.id)) : rows;
+    // Resolve modules here so the client never has to know the defaulting rules.
+    return {
+      businesses: visible.map((b) => ({
+        ...b,
+        modules: effectiveModules(b.modules, b.type, b.secondaryTypes ?? []),
+      })),
+    };
   });
 
   app.post('/api/v1/businesses', async (req, reply) => {
@@ -135,6 +145,15 @@ export async function businessRoutes(app: FastifyInstance) {
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Business not found.' });
     return { ok: true };
   });
+
+  // The module catalogue: what exists, which primitive it belongs to, and what each
+  // one is for. Static, but served so the client and server cannot drift apart.
+  app.get('/api/v1/modules', async () => ({
+    primitives: PRIMITIVES.map((p) => ({ key: p, label: PRIMITIVE_LABEL[p], blurb: PRIMITIVE_BLURB[p] })),
+    modules: MODULES.map((m) => ({
+      key: m.key, label: m.label, primitive: m.primitive, core: !!m.core, hint: m.hint,
+    })),
+  }));
 
   // ---- Access: who can see/work in this business, and at what role -----------
   // Managing access needs admin on the business (account owners/admins qualify).
