@@ -1,0 +1,1 @@
+ALTER TABLE `subscriptions` ADD `interval_months` int unsigned DEFAULT 1 NOT NULL;

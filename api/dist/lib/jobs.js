@@ -2,7 +2,7 @@ import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses } from '../db/schema.js';
 import { sendMail, sendBusinessMail, appUrl } from './mailer.js';
-import { addOneMonth, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
+import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -95,8 +95,9 @@ export async function runSubscriptionBilling() {
                 createdBy: sub.createdBy, autoSend: sub.autoSend,
             });
             await db.update(subscriptions).set({
-                // Anchor on the start day so month-end bills spring back rather than drift.
-                nextBillDate: addOneMonth(sub.nextBillDate, anchorDayOf(sub.startedOn)),
+                // Advance by the subscription's own interval (monthly, quarterly, annual),
+                // anchored on the start day so month-end bills spring back rather than drift.
+                nextBillDate: addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, anchorDayOf(sub.startedOn)),
                 lastBilledAt: new Date(),
             }).where(eq(subscriptions.id, sub.id));
             billed++;

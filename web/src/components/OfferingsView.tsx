@@ -10,6 +10,10 @@ const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'code', label: 'Code' }, { value: 'content', label: 'Content' },
 ];
 
+/** How a billing cadence reads: short form on a row, long form in a sentence. */
+const INTERVAL_SHORT: Record<number, string> = { 1: 'mo', 3: 'quarter', 6: '6mo', 12: 'yr' };
+const INTERVAL_WORD: Record<number, string> = { 1: 'month', 3: 'quarter', 6: 'six months', 12: 'year' };
+
 function money(v: string | number) {
   const n = typeof v === 'string' ? Number(v) : v;
   return `R ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -180,7 +184,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                   {subs.map((s) => (
                     <tr key={s.id} className={`border-t border-slate-800 ${s.status === 'canceled' ? 'opacity-50' : ''}`}>
                       <td className="px-3 py-2 text-slate-200">{s.clientName}</td>
-                      <td className="px-3 py-2 text-slate-300">{s.offeringName} <span className="text-slate-500">({money(s.price)}/mo)</span></td>
+                      <td className="px-3 py-2 text-slate-300">{s.offeringName} <span className="text-slate-500">({money(s.price)}/{INTERVAL_SHORT[s.intervalMonths ?? 1] ?? `${s.intervalMonths}mo`})</span></td>
                       <td className="px-3 py-2">
                         <span className={`rounded-md px-2 py-0.5 text-[11px] ${
                           s.status === 'active' ? 'bg-green-600/30 text-green-200'
@@ -241,6 +245,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
 }) {
   const [offeringId, setOfferingId] = useState<string>(recurringOfferings[0] ? String(recurringOfferings[0].id) : '');
   const [folderId, setFolderId] = useState('');
+  const [intervalMonths, setIntervalMonths] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
   const foldersQ = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
@@ -248,7 +253,9 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
     f.parentId === null && f.pillar === 'delivery' && (businessId === undefined || f.businessId === businessId));
 
   const start = useMutation({
-    mutationFn: () => apiPost('/subscriptions', { offeringId: Number(offeringId), folderId: Number(folderId), businessId }),
+    mutationFn: () => apiPost('/subscriptions', {
+      offeringId: Number(offeringId), folderId: Number(folderId), businessId, intervalMonths,
+    }),
     onSuccess: onStarted,
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not start subscription.'),
   });
@@ -275,7 +282,19 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
           {clientFolders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select>
 
-        <p className="mb-4 text-[11px] text-slate-500">This bills the first month immediately as a draft invoice, then repeats automatically every month after.</p>
+        <label className="mb-1 block text-xs text-slate-400">Bills every</label>
+        <select value={intervalMonths} onChange={(e) => setIntervalMonths(Number(e.target.value))}
+          className="mb-4 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500">
+          <option value={1}>Month</option>
+          <option value={3}>Quarter (3 months)</option>
+          <option value={6}>6 months</option>
+          <option value={12}>Year</option>
+        </select>
+
+        <p className="mb-4 text-[11px] text-slate-500">
+          Bills the first {INTERVAL_WORD[intervalMonths] ?? 'cycle'} immediately as a draft invoice, then repeats automatically. A month-end
+          date stays at month end rather than drifting earlier.
+        </p>
 
         {error && <p className="mb-3 text-xs text-red-400">{error}</p>}
         <button type="submit" disabled={!offeringId || !folderId || start.isPending}

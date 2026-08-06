@@ -651,6 +651,9 @@ export const subscriptions = mysqlTable('subscriptions', {
     // subscription online. With it, later cycles can be charged automatically
     // (auto-debit) instead of only emailing an invoice. Null until they pay once.
     payfastToken: varchar('payfast_token', { length: 100 }),
+    // How often this bills, in months: 1 monthly, 3 quarterly, 12 annually. Hosting
+    // and domains are usually sold by the year, so monthly-only was a real gap.
+    intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),
     startedOn: date('started_on', { mode: 'string' }).notNull(),
     nextBillDate: date('next_bill_date', { mode: 'string' }).notNull(),
     lastBilledAt: datetime('last_billed_at'),

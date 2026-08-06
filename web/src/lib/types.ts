@@ -23,6 +23,8 @@ export interface Subscription {
   id: number;
   businessId: number;
   status: 'active' | 'paused' | 'canceled';
+  /** Billing cadence in months: 1 monthly, 3 quarterly, 12 annually. */
+  intervalMonths: number;
   startedOn: string;
   nextBillDate: string;
   lastBilledAt: string | null;

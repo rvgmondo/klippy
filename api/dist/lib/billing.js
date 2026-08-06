@@ -19,10 +19,20 @@ const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
  * 31 Jan -> 28 Feb -> 31 Mar -> 30 Apr -> 31 May.
  */
 export function addOneMonth(dateStr, anchorDay) {
+    return addMonths(dateStr, 1, anchorDay);
+}
+/**
+ * The same arithmetic over any number of months, which is what lets a subscription
+ * bill quarterly or annually rather than only monthly. Hosting and domains are
+ * usually sold by the year, so this is the difference between Klippy being able to
+ * run that business and not.
+ */
+export function addMonths(dateStr, months, anchorDay) {
     const [y, m, d] = dateStr.split('-').map(Number);
     const day = anchorDay ?? d;
-    // First of the following month, then clamp the anchor day to that month's length.
-    const target = new Date(Date.UTC(y, m, 1));
+    const step = Math.max(1, Math.round(months));
+    // First of the target month, then clamp the anchor day to that month's length.
+    const target = new Date(Date.UTC(y, m - 1 + step, 1));
     const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
     target.setUTCDate(Math.min(day, lastDay));
     return target.toISOString().slice(0, 10);

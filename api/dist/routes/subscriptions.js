@@ -7,7 +7,7 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
-import { addOneMonth, generateSubscriptionInvoice } from '../lib/billing.js';
+import { addMonths, generateSubscriptionInvoice } from '../lib/billing.js';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const status = z.enum(['active', 'paused', 'canceled']);
@@ -21,6 +21,7 @@ export async function subscriptionRoutes(app) {
         const scope = await businessScope(req, subscriptions.businessId);
         const rows = await db.select({
             id: subscriptions.id, businessId: subscriptions.businessId, status: subscriptions.status,
+            intervalMonths: subscriptions.intervalMonths,
             startedOn: subscriptions.startedOn, nextBillDate: subscriptions.nextBillDate,
             lastBilledAt: subscriptions.lastBilledAt,
             offeringId: subscriptions.offeringId, offeringName: offerings.name, price: offerings.price, unit: offerings.unit,
@@ -42,6 +43,8 @@ export async function subscriptionRoutes(app) {
             folderId: z.number().int().positive(),
             startedOn: dateStr.optional(),
             autoSend: z.boolean().optional(),
+            // 1 monthly, 3 quarterly, 6 half-yearly, 12 annually. Anything up to 5 years.
+            intervalMonths: z.number().int().min(1).max(60).optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -58,9 +61,11 @@ export async function subscriptionRoutes(app) {
         if (!businessId)
             return reply.code(400).send({ error: 'No business found for this account.' });
         const startedOn = d.startedOn ?? todayStr();
+        const intervalMonths = d.intervalMonths ?? 1;
         const ins = await db.insert(subscriptions).values(withTenant(accountId, {
             businessId, offeringId: d.offeringId, folderId: d.folderId, status: 'active',
-            startedOn, nextBillDate: addOneMonth(startedOn), autoSend: d.autoSend ?? false, createdBy: userId,
+            startedOn, nextBillDate: addMonths(startedOn, intervalMonths),
+            intervalMonths, autoSend: d.autoSend ?? false, createdBy: userId,
         }));
         const id = Number(ins[0].insertId);
         try {
