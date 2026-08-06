@@ -122,6 +122,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const rows = await db.select({
       id: documents.id, number: documents.number, clientName: documents.clientName,
       clientEmail: documents.clientEmail, businessId: documents.businessId,
+      folderId: documents.folderId,
       currency: documents.currency, total: documents.total, dueDate: documents.dueDate,
       lastReminderOn: documents.lastReminderOn, suspendedAt: documents.suspendedAt,
     }).from(documents)
@@ -163,7 +164,7 @@ export async function documentRoutes(app: FastifyInstance) {
     const items = rows
       .map((r) => ({
         id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
-        businessId: r.businessId, currency: r.currency, total: Number(r.total),
+        businessId: r.businessId, folderId: r.folderId, currency: r.currency, total: Number(r.total),
         // What is actually still owed, which is what you chase for.
         outstanding: round(Number(r.total) - (paidBy.get(r.id) ?? 0) - (creditedBy.get(r.id) ?? 0)),
         dueDate: r.dueDate, daysOverdue: r.dueDate ? days(r.dueDate) : 0,
@@ -175,6 +176,94 @@ export async function documentRoutes(app: FastifyInstance) {
     return {
       items,
       summary: { count: items.length, outstanding, suspended: items.filter((i) => i.suspended).length },
+    };
+  });
+
+  /**
+   * A client statement: every invoice, credit note and payment for one client over
+   * a date range, oldest first, with a running balance. This is what you send when
+   * someone asks "what do we actually owe you", and what you check before chasing.
+   *
+   * Entries are ordered by date, then by kind so that on a day where an invoice was
+   * both raised and paid the charge lands before the payment and the balance reads
+   * sensibly.
+   */
+  app.get('/api/v1/statements/:id', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const folderId = intId(req);
+    if (!folderId) return reply.code(400).send({ error: 'Bad id.' });
+    const q = z.object({ from: dateStr.optional(), to: dateStr.optional() }).safeParse(req.query);
+    const from = q.success ? q.data.from : undefined;
+    const to = q.success ? q.data.to : undefined;
+
+    const [client] = await db.select({ id: folders.id, name: folders.name, businessId: folders.businessId })
+      .from(folders).where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
+    if (!client) return reply.code(404).send({ error: 'Client not found.' });
+    if (!(await assertMaybeBusiness(req, reply, client.businessId, 'viewer'))) return;
+
+    const docs = await db.select({
+      id: documents.id, type: documents.type, number: documents.number, issueDate: documents.issueDate,
+      dueDate: documents.dueDate, total: documents.total, status: documents.status, currency: documents.currency,
+    }).from(documents)
+      .where(tenantWhere(documents, accountId,
+        eq(documents.folderId, folderId),
+        inArray(documents.type, ['invoice', 'credit_note']),
+        ne(documents.status, 'void'),
+        ne(documents.status, 'draft'),      // a draft has not been issued to anyone
+        from ? gte(documents.issueDate, from) : undefined,
+        to ? lte(documents.issueDate, to) : undefined,
+      ));
+
+    // Payments belong to those documents, so pull them by document id.
+    const docIds = docs.map((d) => d.id);
+    const payRows = docIds.length
+      ? await db.select({
+          id: payments.id, documentId: payments.documentId, amount: payments.amount,
+          paidOn: payments.paidOn, method: payments.method,
+        }).from(payments)
+          .where(tenantWhere(payments, accountId,
+            inArray(payments.documentId, docIds),
+            from ? gte(payments.paidOn, from) : undefined,
+            to ? lte(payments.paidOn, to) : undefined,
+          ))
+      : [];
+    const numberOf = new Map(docs.map((d) => [d.id, d.number]));
+
+    type Entry = { date: string; kind: 'invoice' | 'credit_note' | 'payment' | 'refund'; ref: string; detail: string | null; charge: number; credit: number };
+    const entries: Entry[] = [
+      ...docs.map((d): Entry => d.type === 'invoice'
+        ? { date: d.issueDate, kind: 'invoice', ref: d.number, detail: d.dueDate ? `due ${d.dueDate}` : null, charge: Number(d.total), credit: 0 }
+        : { date: d.issueDate, kind: 'credit_note', ref: d.number, detail: 'credit note', charge: 0, credit: Number(d.total) }),
+      ...payRows.map((p): Entry => {
+        const amt = Number(p.amount);
+        const against = numberOf.get(p.documentId) ?? '';
+        return amt < 0
+          ? { date: p.paidOn, kind: 'refund', ref: against, detail: `refund${p.method ? ` (${p.method})` : ''}`, charge: -amt, credit: 0 }
+          : { date: p.paidOn, kind: 'payment', ref: against, detail: `payment${p.method ? ` (${p.method})` : ''}`, charge: 0, credit: amt };
+      }),
+    ];
+    // Charges before credits on the same day, so the running balance reads right.
+    const rank = { invoice: 0, refund: 1, credit_note: 2, payment: 3 };
+    entries.sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind]);
+
+    const round = (n: number) => Math.round(n * 100) / 100;
+    let balance = 0;
+    const rows = entries.map((e) => {
+      balance = round(balance + e.charge - e.credit);
+      return { ...e, charge: round(e.charge), credit: round(e.credit), balance };
+    });
+
+    return {
+      client: { id: client.id, name: client.name, businessId: client.businessId },
+      from: from ?? null, to: to ?? null,
+      currency: docs[0]?.currency ?? 'ZAR',
+      entries: rows,
+      summary: {
+        invoiced: round(entries.reduce((s, e) => s + (e.kind === 'invoice' ? e.charge : 0), 0)),
+        credited: round(entries.reduce((s, e) => s + (e.kind === 'credit_note' ? e.credit : 0), 0)),
+        received: round(entries.reduce((s, e) => s + (e.kind === 'payment' ? e.credit : 0) - (e.kind === 'refund' ? e.charge : 0), 0)),
+        balance: round(balance),
+      },
     };
   });
 

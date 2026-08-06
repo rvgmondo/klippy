@@ -1,12 +1,14 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, AlertTriangle } from 'lucide-react';
+import { Mail, AlertTriangle, FileText } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
+import { StatementView } from './StatementView';
 import type { BusinessSelection } from './BusinessSwitcher';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
-  businessId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
+  businessId: number | null; folderId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
 }
 interface Collections { items: Item[]; summary: { count: number; outstanding: number; suspended: number } }
@@ -23,6 +25,7 @@ function money(v: number, currency: string) {
  */
 export function CollectionsView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
+  const [statementFor, setStatementFor] = useState<number | null>(null);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data, error, refetch } = useQuery({
     queryKey: ['collections', businessId],
@@ -98,13 +101,22 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                         </td>
                         <td className="px-3 py-2.5 num text-[11px] text-slate-500">{i.lastReminderOn ?? 'never'}</td>
                         <td className="px-3 py-2.5 text-right">
-                          {i.clientEmail && (
-                            <button onClick={() => remind.mutate(i.id)} disabled={remind.isPending}
-                              title="Email this invoice again now"
-                              className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
-                              <Mail size={12} /> Nudge
-                            </button>
-                          )}
+                          <div className="flex justify-end gap-1.5">
+                            {i.folderId && (
+                              <button onClick={() => setStatementFor(i.folderId)}
+                                title="Statement of account for this client"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">
+                                <FileText size={12} /> Statement
+                              </button>
+                            )}
+                            {i.clientEmail && (
+                              <button onClick={() => remind.mutate(i.id)} disabled={remind.isPending}
+                                title="Email this invoice again now"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                                <Mail size={12} /> Nudge
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -118,6 +130,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
           </>
         )}
       </div>
+      {statementFor && <StatementView folderId={statementFor} onClose={() => setStatementFor(null)} />}
     </div>
   );
 }
