@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
+import { CommandCentre } from './CommandCentre';
 import { useAuth } from '../lib/auth';
 import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -28,9 +29,6 @@ function monthStart(): string {
 }
 function todayStr(): string { return new Date().toISOString().slice(0, 10); }
 
-const PRIORITY_COLOR: Record<Priority, string> = {
-  none: '#6b7280', low: '#64748b', medium: '#eab308', high: '#f97316', urgent: '#ef4444',
-};
 function fmtHours(seconds: number): string {
   const h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
@@ -122,6 +120,9 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             error when the numbers are money. */}
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
 
+        {/* What needs you today, and the one thing holding the business back. */}
+        <CommandCentre businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />
+
         {/* Pillar bento */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <PillarCard
@@ -140,26 +141,8 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             subs={[['Due today', String(d?.operations.dueToday ?? 0)], ['Overdue', String(d?.operations.overdue ?? 0)], ['This week', fmtHours(d?.operations.weekSeconds ?? 0)]]} />
         </div>
 
-        {/* Up next + side */}
+        {/* Businesses and the rest */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <Panel className="lg:col-span-2">
-            <PanelHead title="Up next" meta="delivery" action={onNavigate ? { label: 'Calendar', onClick: () => onNavigate('calendar') } : undefined} />
-            {(d?.upcoming.length ?? 0) === 0 ? (
-              <p className="py-6 text-center text-sm text-slate-500">Nothing due. Clear runway.</p>
-            ) : (
-              <div className="-mx-1">
-                {d!.upcoming.slice(0, 6).map((t) => (
-                  <button key={t.id} onClick={() => setOpenTask({ id: t.id, boardId: t.boardId })}
-                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-slate-800/50">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
-                    <span className="flex-1 truncate text-sm text-slate-200">{t.title}</span>
-                    <span className="num text-[11px] text-slate-500">{t.dueDate}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </Panel>
-
           {businessId === 'all' && bizList.length > 1 ? (
             <Panel>
               <PanelHead title="Businesses" meta="tap to focus" />
@@ -193,7 +176,9 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             accent={(money_.data?.totals.profit ?? 0) >= 0} warn={(money_.data?.totals.profit ?? 0) < 0} />
           <Kpi label="MRR" value={money(money_.data?.totals.mrr ?? 0)}
             onClick={onNavigate ? () => onNavigate('offerings') : undefined} />
-          <Kpi label="Overdue" value={String((d?.delivery.overdue ?? 0) + (d?.operations.overdue ?? 0))} />
+          {/* "Overdue" alone read as overdue MONEY next to the constraint panel,
+              which counts invoices. This one has always been about work. */}
+          <Kpi label="Overdue work" value={String((d?.delivery.overdue ?? 0) + (d?.operations.overdue ?? 0))} />
           <Kpi label="Time this week" value={fmtHours(d?.weekSecondsAll ?? 0)} />
         </div>
 
