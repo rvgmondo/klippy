@@ -9,6 +9,7 @@ import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
 import { CollectionsView } from '../components/CollectionsView';
+import { BrandThemeSync } from '../components/BrandThemeSync';
 import { TodayView } from '../components/TodayView';
 import { OfferingsView } from '../components/OfferingsView';
 import { ExpensesView } from '../components/ExpensesView';
@@ -56,6 +57,9 @@ export function Workspace() {
 
   return (
     <div className="flex h-full">
+      {/* Working in a business skins the app in that business's brand. */}
+      <BrandThemeSync businessId={businessId} />
+
       {/* Sidebar: fixed drawer under lg, static column at lg+ */}
       <div
         className={`fixed inset-y-0 left-0 z-40 w-64 transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${

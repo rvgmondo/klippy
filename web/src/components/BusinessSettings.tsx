@@ -125,7 +125,7 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
             </div>
 
             <div>
-              <label className={label}>Accent colour on quotes and invoices</label>
+              <label className={label}>Brand colour</label>
               <div className="flex flex-wrap items-center gap-2">
                 {ACCENTS.map((c) => (
                   <button key={c} onClick={() => set('invoiceAccent', c)}
@@ -135,6 +135,9 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
                 <input type="color" value={form.invoiceAccent} onChange={(e) => set('invoiceAccent', e.target.value)}
                   className="h-7 w-10 cursor-pointer rounded border border-slate-700 bg-transparent" title="Custom colour" />
               </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Used on this business's quotes and invoices, and it skins all of Klippy while you are working in {business.name}.
+              </p>
             </div>
           </section>
 
