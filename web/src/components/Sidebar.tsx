@@ -46,17 +46,33 @@ const PRIMITIVE_LABEL: Record<string, string> = {
   acquisition: 'Acquisition', fulfillment: 'Fulfillment', finance: 'Finance', admin: 'Admin',
 };
 
-function NavButton({ nav, view, onNavigate }: {
-  nav: { key: string; label: string; icon: LucideIcon }; view: string; onNavigate: (v: string) => void;
+/**
+ * Groups collapse, and stay collapsed.
+ *
+ * Grouping the modules by primitive made the sidebar readable but cost real estate:
+ * the nav took two thirds of the height and squeezed the boards tree, which is the
+ * part you are in all day, into a sliver. Collapsed groups keep the structure
+ * visible while handing the space back to the work. The group holding wherever you
+ * are opens itself, so the current screen is never hidden.
+ */
+const NAV_OPEN_KEY = 'klippy.navGroups';
+function loadOpenGroups(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(NAV_OPEN_KEY) ?? '{}'); } catch { return {}; }
+}
+
+function NavButton({ nav, view, onNavigate, compact }: {
+  nav: { key: string; label: string; icon: LucideIcon }; view: string;
+  onNavigate: (v: string) => void; compact?: boolean;
 }) {
   const Icon = nav.icon;
   const active = view === nav.key;
   return (
     <button onClick={() => onNavigate(nav.key)}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
-        active
-          ? 'bg-[var(--accent-quiet)] text-violet-300'
-          : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
+      className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 text-sm transition ${
+        compact ? 'py-1.5' : 'py-2 font-medium'
+      } ${active
+        ? 'bg-[var(--accent-quiet)] font-medium text-violet-300'
+        : 'text-slate-300 hover:bg-slate-800/60 hover:text-slate-100'}`}>
       <Icon size={16} className={`shrink-0 ${active ? 'text-violet-300' : ''}`} /> {nav.label}
     </button>
   );
@@ -109,6 +125,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   // Until the catalogue loads, or for a business with nothing resolved yet, fall
   // back to showing everything rather than an empty sidebar.
   const showAll = defs.length === 0 || enabled.size === 0;
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(loadOpenGroups);
   const navGroups = PRIMITIVE_ORDER.map((primitive) => ({
     primitive,
     items: defs
@@ -134,22 +151,46 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
       </div>
 
-      {/* Primary navigation, grouped by the four primitives */}
-      <div className="space-y-2 border-b border-slate-800 px-2 py-2">
+      {/* Primary navigation, grouped by the four primitives and collapsed by
+          default so the boards below get the room. */}
+      <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2">
         <NavButton nav={{ key: 'home', label: 'Home', icon: Home }} view={view} onNavigate={onNavigate} />
-        {navGroups.map((g) => (
-          <div key={g.primitive}>
-            <div className="px-2.5 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-              {PRIMITIVE_LABEL[g.primitive]}
+        {navGroups.map((g) => {
+          // The group you are currently in is always open, so the active screen is
+          // never hidden behind a collapsed header.
+          const hasActive = g.items.some((i) => i.key === view);
+          const open = hasActive || (openGroups[g.primitive] ?? false);
+          return (
+            <div key={g.primitive}>
+              <button
+                onClick={() => setOpenGroups((o) => {
+                  const next = { ...o, [g.primitive]: !open };
+                  try { localStorage.setItem(NAV_OPEN_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+                  return next;
+                })}
+                className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800/40 hover:text-slate-300">
+                {open ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
+                <span className="truncate">{PRIMITIVE_LABEL[g.primitive]}</span>
+                {!open && (
+                  <span className="ml-auto shrink-0 text-[10px] font-normal normal-case text-slate-600">
+                    {g.items.length}
+                  </span>
+                )}
+              </button>
+              {open && (
+                <div className="space-y-0.5 pb-0.5">
+                  {g.items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} compact />)}
+                </div>
+              )}
             </div>
-            <div className="space-y-0.5">
-              {g.items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} />)}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Boards tree */}
+      {/* The boards tree: the part you are in all day, so it gets the height. */}
+      <div className="shrink-0 px-3.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+        {account?.folderLabelPlural || 'Clients'} and boards
+      </div>
       <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         {shown.length === 0 && (
           <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
