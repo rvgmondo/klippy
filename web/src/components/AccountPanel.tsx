@@ -1,67 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { X } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
-import { PeoplePanel } from './PeoplePanel';
-import { LabelsPanel } from './LabelsPanel';
-import { ProfilePanel } from './ProfilePanel';
-import { TeamsPanel } from './TeamsPanel';
-import { TokensPanel } from './TokensPanel';
-import { AppearancePanel } from './AppearancePanel';
-import { BrandingPanel } from './BrandingPanel';
-import { NotesPanel } from './NotesPanel';
-import { AutomationPanel } from './AutomationPanel';
-import { PaymentsPanel } from './PaymentsPanel';
 
-// Account-level settings. Anything a CLIENT sees (brand, invoicing) lives per
-// business in Business Settings, not here. This is your login, your team, and how
-// the app looks to them.
-type Tab = 'profile' | 'appearance' | 'account' | 'branding' | 'payments' | 'people' | 'teams' | 'labels' | 'tokens' | 'automation' | 'notes';
-
-export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('profile');
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-          <h2 className="text-lg font-semibold text-slate-100">Settings</h2>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
-        </div>
-
-        <div className="flex gap-1 overflow-x-auto border-b border-slate-800 px-4 pt-2">
-          {(['profile', 'appearance', 'account', 'branding', 'payments', 'people', 'teams', 'labels', 'tokens', 'automation', 'notes'] as Tab[]).map((t) => (
-            <button key={t} onClick={() => setTab(t)}
-              className={`shrink-0 rounded-t-lg px-3 py-2 text-sm font-medium capitalize ${tab === t ? 'bg-slate-900 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-              {t}
-            </button>
-          ))}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {tab === 'profile' && <ProfilePanel />}
-          {tab === 'appearance' && <AppearancePanel />}
-          {tab === 'account' && <WorkspaceTab />}
-          {tab === 'branding' && <BrandingPanel />}
-          {tab === 'payments' && <PaymentsPanel />}
-          {tab === 'people' && <PeoplePanel />}
-          {tab === 'teams' && <TeamsPanel />}
-          {tab === 'labels' && <LabelsPanel />}
-          {tab === 'tokens' && <TokensPanel />}
-          {tab === 'automation' && <AutomationPanel />}
-          {tab === 'notes' && <NotesPanel />}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WorkspaceTab() {
+/**
+ * The account everyone in it shares: its name, what top-level folders are called,
+ * and (for the owner) deleting the whole thing. Anything a CLIENT sees lives per
+ * business instead, so several companies can run under one login.
+ */
+export function AccountPanel() {
   const { account, user, updateAccount } = useAuth();
   const [name, setName] = useState(account?.name ?? '');
   const [singular, setSingular] = useState(account?.folderLabelSingular ?? 'Client');

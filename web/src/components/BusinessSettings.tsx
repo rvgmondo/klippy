@@ -6,13 +6,50 @@ import type { Business } from '../lib/types';
 
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
 
+/** The sections a business carries, so the Settings page can show one at a time. */
+export type BusinessSection = 'brand' | 'invoicing' | 'reminders' | 'email' | 'access';
+
 /**
  * Everything a client sees for one business: its brand (name, logo, colour) and the
  * "from" details on its quotes and invoices. This is the business's own identity,
  * separate from the account, so one login can run several companies that each look
  * like their own business.
+ *
+ * Modal wrapper, kept for the quick jump from a business dashboard. The Settings
+ * page renders the same panels inline, one section at a time.
  */
 export function BusinessSettings({ business, onClose }: { business: Business; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">{business.name}</h2>
+            <p className="text-[11px] text-slate-500">Brand and invoicing, as your clients see it</p>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <BusinessSettingsPanel business={business} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The business settings themselves, with no modal chrome. `only` narrows it to a
+ * single section so the Settings page can give each one its own nav entry instead
+ * of stacking five of them into one long scroll.
+ */
+export function BusinessSettingsPanel({ business, only }: { business: Business; only?: BusinessSection }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     brandName: business.brandName ?? '',
@@ -33,13 +70,10 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
   const [hasLogo, setHasLogo] = useState(!!business.logoPath);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm({ ...form, [k]: v });
+  const show = (s: BusinessSection) => !only || only === s;
+  // Brand, invoicing and reminders share one save, so any of them shows the button.
+  const showSave = show('brand') || show('invoicing') || show('reminders');
 
   const save = useMutation({
     mutationFn: () => apiPatch(`/businesses/${business.id}`, {
@@ -80,20 +114,10 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
   const label = 'mb-1 block text-xs font-medium text-slate-400';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
-        onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-100">{business.name}</h2>
-            <p className="text-[11px] text-slate-500">Brand and invoicing, as your clients see it</p>
-          </div>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
-        </div>
-
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
+    <>
+      <div className="space-y-6">
           {/* Brand */}
-          <section className="space-y-4">
+          {show('brand') && <section className="space-y-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Brand</h3>
             <div className="flex items-center gap-4">
               <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl border border-slate-700 bg-slate-900">
@@ -139,16 +163,16 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
                 Used on this business's quotes and invoices, and it skins all of Klippy while you are working in {business.name}.
               </p>
             </div>
-          </section>
+          </section>}
 
           {/* Email */}
-          <EmailSection businessId={business.id} businessName={business.name} />
+          {show('email') && <EmailSection businessId={business.id} businessName={business.name} />}
 
           {/* Access */}
-          <AccessSection businessId={business.id} businessName={business.name} />
+          {show('access') && <AccessSection businessId={business.id} businessName={business.name} />}
 
           {/* Invoicing */}
-          <section className="space-y-4 border-t border-slate-800 pt-5">
+          {show('invoicing') && <section className="space-y-4 border-t border-slate-800 pt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoicing details</h3>
             <div>
               <label className={label}>Address</label>
@@ -187,10 +211,10 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
                   onChange={(e) => set('defaultDueDays', Number(e.target.value))} />
               </div>
             </div>
-          </section>
+          </section>}
 
           {/* Payment reminders */}
-          <section className="space-y-4 border-t border-slate-800 pt-5">
+          {show('reminders') && <section className="space-y-4 border-t border-slate-800 pt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment reminders</h3>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={form.remindersEnabled}
@@ -213,10 +237,11 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
                 Once this overdue, a final "service at risk" notice is sent and the invoice shows in Collections as flagged. Klippy notifies, it does not cut off service.
               </p>
             </div>
-          </section>
-        </div>
+          </section>}
+      </div>
 
-        <div className="flex items-center gap-3 border-t border-slate-800 px-5 py-3">
+      {showSave && (
+        <div className="mt-5 flex items-center gap-3 border-t border-slate-800 pt-4">
           <button onClick={() => save.mutate()} disabled={save.isPending}
             className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
@@ -224,8 +249,8 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
           {saved && <span className="text-sm text-violet-300">Saved</span>}
           {save.error && <span className="text-sm text-red-400">{(save.error as Error).message}</span>}
         </div>
-      </div>
-    </div>
+      )}
+    </>
   );
 }
 

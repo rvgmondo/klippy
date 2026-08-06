@@ -17,16 +17,16 @@ import { PipelineView } from '../components/PipelineView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
-import { SettingsModal } from '../components/SettingsModal';
+import { SettingsView } from '../components/SettingsView';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections';
+type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'settings';
 
 const VIEW_LABELS: Record<View, string> = {
   home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
   today: 'Today', files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
-  collections: 'Collections',
+  collections: 'Collections', settings: 'Settings',
 };
 const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
@@ -42,7 +42,6 @@ export function Workspace() {
   const [boardId, setBoardId] = useState<number | null>(null);
   const [view, setView] = useState<View>('home');
   const [showTimer, setShowTimer] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [businessId, setBusinessId] = useState<BusinessSelection>(loadBusiness);
   const selectBusiness = (v: BusinessSelection) => { setBusinessId(v); localStorage.setItem('klippy.business', String(v)); };
@@ -101,8 +100,10 @@ export function Workspace() {
               <div className="text-xs font-medium text-slate-200">{user?.name}</div>
               <div className="text-[11px] text-slate-500">{account?.name}</div>
             </div>
-            <button onClick={() => setShowSettings(true)} title="Settings"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200">
+            <button onClick={() => setView('settings')} title="Settings"
+              className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-slate-800 hover:text-slate-200 ${
+                view === 'settings' ? 'text-[var(--accent)]' : 'text-slate-400'
+              }`}>
               <Settings size={15} />
             </button>
             <button onClick={logout} title="Sign out"
@@ -129,11 +130,11 @@ export function Workspace() {
           {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
           {view === 'collections' && <CollectionsView businessId={businessId} />}
+          {view === 'settings' && <SettingsView businessId={businessId} />}
         </main>
       </div>
 
       {showTimer && <FocusTimer onClose={() => setShowTimer(false)} />}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
