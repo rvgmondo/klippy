@@ -9,6 +9,7 @@ import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
+import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 
 const lineSchema = z.object({
@@ -265,6 +266,25 @@ export async function documentRoutes(app: FastifyInstance) {
         balance: round(balance),
       },
     };
+  });
+
+  // The document as a PDF file, the same one that gets attached to its email.
+  app.get('/api/v1/documents/:id/pdf', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [doc] = await db.select({ businessId: documents.businessId }).from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!doc) return reply.code(404).send({ error: 'Not found.' });
+    if (!(await assertMaybeBusiness(req, reply, doc.businessId, 'viewer'))) return;
+    const pdf = await renderDocumentPdf(accountId, id);
+    if (!pdf) return reply.code(404).send({ error: 'Not found.' });
+    // ?inline=1 previews it in the browser instead of downloading.
+    const inline = (req.query as { inline?: string })?.inline === '1';
+    return reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${pdf.filename}"`)
+      .send(pdf.buffer);
   });
 
   // One document with its line items.
@@ -667,9 +687,16 @@ export async function documentRoutes(app: FastifyInstance) {
     ].join('\n');
 
     try {
+      // Attach the document itself. A failed render must not stop the email, so a
+      // client still gets the details in the body either way.
+      const pdf = await renderDocumentPdf(accountId, doc.id).catch((err) => {
+        req.log.error({ err, docId: doc.id }, 'invoice pdf render failed, sending without it');
+        return null;
+      });
       await sendBusinessMail({
         accountId, businessId: doc.businessId, purpose: 'invoice',
         to, subject: `${label} ${doc.number} from ${brand}`, text: body,
+        attachments: pdf ? [{ filename: pdf.filename, content: pdf.buffer }] : undefined,
       });
     } catch (err) {
       req.log.error({ err }, 'document email failed');

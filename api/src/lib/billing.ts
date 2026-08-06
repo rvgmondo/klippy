@@ -4,6 +4,7 @@ import { documents, documentLines, accounts, businesses, offerings, folders } fr
 import { tenantWhere, withTenant } from './tenant.js';
 import { sendBusinessMail } from './mailer.js';
 import { payLinkFor } from './paylink.js';
+import { renderDocumentPdf } from './pdf.js';
 
 const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
@@ -108,9 +109,13 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   if (sub.autoSend && folder.billingEmail) {
     try {
       const payLink = await payLinkFor(accountId, docId);
+      // Same as a manual send: attach the invoice, but never let a render failure
+      // stop the automated run.
+      const pdf = await renderDocumentPdf(accountId, docId).catch(() => null);
       await sendBusinessMail({
         accountId, businessId: sub.businessId, purpose: 'invoice',
         to: folder.billingEmail,
+        attachments: pdf ? [{ filename: pdf.filename, content: pdf.buffer }] : undefined,
         subject: `${brand} ${number}`,
         text: [
           `Hi ${folder.name},`,

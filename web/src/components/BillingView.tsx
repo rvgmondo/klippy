@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard } from 'lucide-react';
+import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard , Download } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 
@@ -504,8 +504,13 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
       <div className="mx-auto my-4 max-w-3xl" onClick={(e) => e.stopPropagation()}>
         <div className="no-print mb-3 flex justify-end gap-2">
-          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">
-            <Printer size={15} /> Print / Save as PDF
+          {/* The same PDF the client receives by email, rather than a browser print. */}
+          <a href={`/api/v1/documents/${id}/pdf`} download
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">
+            <Download size={15} /> Download PDF
+          </a>
+          <button onClick={() => window.print()} className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">
+            <Printer size={15} /> Print
           </button>
           <button onClick={onClose} className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">Close</button>
         </div>

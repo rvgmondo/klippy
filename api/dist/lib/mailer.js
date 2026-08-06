@@ -84,22 +84,31 @@ function safeDecrypt(enc) {
         return undefined;
     }
 }
-/**
- * Send a mail addressed as a business (invoices, quotes, reminders). Falls back to
- * logging when nothing can send, exactly like sendMail, so nothing throws for a lack
- * of configuration.
- */
 export async function sendBusinessMail(opts) {
     // No business (legacy doc) -> the plain account sender.
-    if (!opts.businessId)
-        return sendMail(opts.to, opts.subject, opts.text);
+    if (!opts.businessId) {
+        const t = getTransport();
+        if (!t) {
+            // eslint-disable-next-line no-console
+            console.log(`[mailer:not-configured] would send to ${opts.to}: ${opts.subject}${opts.attachments?.length ? ` (+${opts.attachments.length} attachment)` : ''}`);
+            return;
+        }
+        await t.sendMail({
+            from: process.env.SMTP_FROM ?? 'Klippy <no-reply@localhost>',
+            to: opts.to, subject: opts.subject, text: opts.text, attachments: opts.attachments,
+        });
+        return;
+    }
     const s = await resolveBusinessSender(opts.accountId, opts.businessId, opts.purpose);
     if (!s.transport) {
         // eslint-disable-next-line no-console
-        console.log(`[mailer:not-configured] would send (biz ${opts.businessId}) from ${s.from}${s.replyTo ? ` reply-to ${s.replyTo}` : ''} to ${opts.to}: ${opts.subject}`);
+        console.log(`[mailer:not-configured] would send (biz ${opts.businessId}) from ${s.from}${s.replyTo ? ` reply-to ${s.replyTo}` : ''} to ${opts.to}: ${opts.subject}${opts.attachments?.length ? ` (+${opts.attachments.map((a) => a.filename).join(', ')})` : ''}`);
         return;
     }
-    await s.transport.sendMail({ from: s.from, replyTo: s.replyTo, to: opts.to, subject: opts.subject, text: opts.text });
+    await s.transport.sendMail({
+        from: s.from, replyTo: s.replyTo, to: opts.to, subject: opts.subject, text: opts.text,
+        attachments: opts.attachments,
+    });
 }
 export function appUrl() {
     return (process.env.APP_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
