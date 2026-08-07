@@ -13,6 +13,8 @@ import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
 import { ALLOWED_FONTS, isAllowedFont } from '../lib/fonts.js';
 import { sanitiseTemplate, PLACEHOLDERS } from '../lib/template.js';
 import { nextNumberFor } from '../lib/numbering.js';
+import { PDF_TEMPLATES, PDF_TYPEFACES, TEMPLATE_INFO, TYPEFACE_INFO } from '../lib/pdfThemes.js';
+import { renderSamplePdf } from '../lib/pdf.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -44,6 +46,9 @@ const updateSchema = z.object({
     // client, since the family name is later interpolated into CSS.
     fontDisplay: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
     fontBody: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
+    // PDF design.
+    pdfTemplate: z.enum(PDF_TEMPLATES).nullable().optional(),
+    pdfTypeface: z.enum(PDF_TYPEFACES).nullable().optional(),
     // Document numbering: prefix per type, and where the count starts.
     prefixInvoice: nullableStr(12),
     prefixQuote: nullableStr(12),
@@ -215,6 +220,29 @@ export async function businessRoutes(app) {
             out[t] = { prefix: n.prefix, nextNumber: n.number, nextSeq: n.seq, highestUsed: n.highestUsed };
         }
         return { numbering: out };
+    });
+    /** The PDF designs on offer, so the picker and the renderer cannot drift. */
+    app.get('/api/v1/pdf-designs', async () => ({
+        templates: TEMPLATE_INFO, typefaces: TYPEFACE_INFO,
+    }));
+    /**
+     * A worked example in a chosen design, using this business's own brand, logo and
+     * details. Seeing the actual document matters when the thing being chosen is what
+     * every client receives, and a swatch would not tell you.
+     */
+    app.get('/api/v1/businesses/:id/pdf-preview', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
+        const q = req.query;
+        const buf = await renderSamplePdf(accountId, id, { template: q.template, typeface: q.typeface });
+        return reply
+            .header('Content-Type', 'application/pdf')
+            .header('Content-Disposition', 'inline; filename="preview.pdf"')
+            .send(buf);
     });
     // ---- Access: who can see/work in this business, and at what role -----------
     // Managing access needs admin on the business (account owners/admins qualify).

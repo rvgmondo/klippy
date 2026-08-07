@@ -1,5 +1,5 @@
 import { createWriteStream, createReadStream } from 'node:fs';
-import { mkdir, unlink, stat } from 'node:fs/promises';
+import { mkdir, unlink, stat, readFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
@@ -10,6 +10,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { assertBusinessAccess, canSeeBusiness } from '../lib/access.js';
+import { checkImage } from '../lib/imageGuard.js';
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB is plenty for a logo
 const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
 const uploadDir = () => process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), '../data/uploads');
@@ -40,6 +41,21 @@ async function saveImage(req, reply, prefix) {
         await unlink(dest).catch(() => { });
         await reply.code(400).send({ error: 'Image must be under 2MB.' });
         return null;
+    }
+    // Check the bytes, not just the declared type. A truncated PNG passes the
+    // mimetype check and then costs pdfkit about fifty seconds per invoice before it
+    // gives up, so a bad file is refused here rather than quietly poisoning every
+    // document this business ever sends. PNG and JPEG only for logos, since those are
+    // the two the PDF can embed; the others stay allowed for non-document images.
+    const looksLikeDocumentImage = /\.(png|jpe?g)$/i.test(stored) || part.mimetype.startsWith('image/png') || part.mimetype.startsWith('image/jpeg');
+    if (looksLikeDocumentImage) {
+        const bytes = await readFile(dest).catch(() => null);
+        const check = bytes ? checkImage(bytes) : { ok: false, reason: 'Could not read the upload.' };
+        if (!check.ok) {
+            await unlink(dest).catch(() => { });
+            await reply.code(400).send({ error: check.reason ?? 'That image could not be read.' });
+            return null;
+        }
     }
     return stored;
 }

@@ -135,6 +135,11 @@ export const businesses = mysqlTable('businesses', {
   // start matters when moving from another system: you continue at 1043 rather
   // than restarting at 1, and the next number is always
   // max(highest used + 1, start) so raising it can never collide.
+  // Which PDF design this business's documents use, and its typeface. The
+  // typeface is sans/serif/mono because pdfkit gets the standard PDF families for
+  // free; a real brand font would mean shipping and licensing a TTF.
+  pdfTemplate: varchar('pdf_template', { length: 20 }),
+  pdfTypeface: varchar('pdf_typeface', { length: 10 }),
   prefixInvoice: varchar('prefix_invoice', { length: 12 }),
   prefixQuote: varchar('prefix_quote', { length: 12 }),
   prefixCreditNote: varchar('prefix_credit_note', { length: 12 }),

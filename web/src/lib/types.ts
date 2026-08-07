@@ -88,6 +88,9 @@ export interface Business {
   /** Custom document blocks, in the restricted HTML subset. Sanitised on save. */
   invoiceHeaderHtml?: string | null;
   invoiceFooterHtml?: string | null;
+  /** Which PDF design this business's documents use, and its print typeface. */
+  pdfTemplate?: string | null;
+  pdfTypeface?: string | null;
   /** Document numbering: prefix per type, and where the count starts. */
   prefixInvoice?: string | null;
   prefixQuote?: string | null;
