@@ -82,6 +82,9 @@ export interface Business {
   defaultDueDays?: number;
   /** Module keys this business shows, already resolved from its type's defaults. */
   modules?: string[];
+  /** Typefaces from the curated Google Fonts list; null means the house fonts. */
+  fontDisplay?: string | null;
+  fontBody?: string | null;
   remindersEnabled?: boolean;
   reminderOffsets?: number[] | null;
   suspendAfterDays?: number | null;

@@ -10,6 +10,8 @@
  * accent with nothing left behind.
  */
 
+import { isAllowedFont, loadFont } from './fonts.js';
+
 type Rgb = { r: number; g: number; b: number };
 
 /** The custom properties we set, so clearing removes exactly what we added. */
@@ -125,6 +127,23 @@ export function brandRamp(hex: string, mode: 'dark' | 'light') {
     accentQuiet: `rgba(${Math.round(base.r)}, ${Math.round(base.g)}, ${Math.round(base.b)}, .14)`,
     ramp: Object.fromEntries(Object.entries(ramp).map(([k, v]) => [k, toHex(v)])) as Record<string, string>,
   };
+}
+
+/**
+ * Wear a business's typefaces. Each family is fetched from Google once, then the
+ * two CSS variables are re-pointed; passing null for both restores the house
+ * fonts. Anything not on the curated list is ignored rather than injected.
+ */
+export function applyBrandFonts(display: string | null | undefined, body: string | null | undefined): void {
+  const root = document.documentElement;
+  const set = (varName: string, family: string | null | undefined) => {
+    if (!isAllowedFont(family)) { root.style.removeProperty(varName); return; }
+    loadFont(family);
+    // Quoted, so a family with spaces is a single CSS token.
+    root.style.setProperty(varName, `"${family}"`);
+  };
+  set('--font-display', display);
+  set('--font-body', body);
 }
 
 /** Skin the app in a business's brand colour. Pass null to hand control back. */

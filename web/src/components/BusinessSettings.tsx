@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Upload, Trash2 } from 'lucide-react';
 import { apiGet, apiPatch, apiPut, apiDelete } from '../lib/api';
 import type { Business } from '../lib/types';
+import { fontsFor, loadFont } from '../lib/fonts';
 
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
 
@@ -59,6 +60,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     bankDetails: business.bankDetails ?? '',
     invoiceFooter: business.invoiceFooter ?? '',
     invoiceAccent: business.invoiceAccent ?? '#6366f1',
+    fontDisplay: business.fontDisplay ?? '',
+    fontBody: business.fontBody ?? '',
     defaultTaxRate: business.defaultTaxRate != null ? String(Number(business.defaultTaxRate)) : '',
     defaultDueDays: business.defaultDueDays ?? 14,
     remindersEnabled: business.remindersEnabled ?? true,
@@ -80,6 +83,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
       brandName: form.brandName, bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
       bizRegNumber: form.bizRegNumber, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
       invoiceAccent: form.invoiceAccent,
+      fontDisplay: form.fontDisplay || null,
+      fontBody: form.fontBody || null,
       defaultTaxRate: form.defaultTaxRate === '' ? null : Number(form.defaultTaxRate),
       defaultDueDays: Number(form.defaultDueDays),
       remindersEnabled: form.remindersEnabled,
@@ -163,6 +168,27 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                 Used on this business's quotes and invoices, and it skins all of Klippy while you are working in {business.name}.
               </p>
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {([['fontDisplay', 'display', 'Headings'], ['fontBody', 'body', 'Body text']] as const).map(([key, role, lbl]) => (
+                <div key={key}>
+                  <label className={label}>{lbl}</label>
+                  <select className={field} value={form[key]}
+                    onChange={(e) => { set(key, e.target.value); loadFont(e.target.value); }}>
+                    <option value="">Klippy default</option>
+                    {fontsFor(role).map((f) => <option key={f.family} value={f.family}>{f.family}</option>)}
+                  </select>
+                  {form[key] && (
+                    <p className="mt-1.5 truncate text-lg text-slate-200" style={{ fontFamily: `"${form[key]}"` }}>
+                      {business.brandName || business.name}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Fonts come from Google Fonts. They apply to Klippy while you work in this business, and to its invoices.
+            </p>
           </section>}
 
           {/* Email */}

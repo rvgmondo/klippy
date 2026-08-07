@@ -20,6 +20,9 @@
  */
 :root {
   color-scheme: dark;
+  /* House typefaces. A focused business may re-point these at its own. */
+  --font-body: "Hanken Grotesk";
+  --font-display: "Bricolage Grotesque";
   --app-bg: #0e1013;
   --app-fg: #e7e9ee;
 
@@ -123,13 +126,15 @@ body {
   margin: 0;
   background: var(--app-bg);
   color: var(--app-fg);
-  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-body), ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   transition: background-color .15s ease, color .15s ease;
 }
 
-/* Type roles for the Midnight Signal system. */
-.font-display { font-family: "Bricolage Grotesque", "Hanken Grotesk", sans-serif; letter-spacing: -0.01em; }
+/* Type roles for the Midnight Signal system. The two families are variables so a
+ * business can wear its own typeface (see lib/brandTheme.ts); unset, they are the
+ * house fonts. */
+.font-display { font-family: var(--font-display), var(--font-body), sans-serif; letter-spacing: -0.01em; }
 .num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
 /* iOS standalone PWA: keep chrome out from under the notch, status bar and

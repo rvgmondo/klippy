@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
-import { applyBrandTheme } from '../lib/brandTheme';
+import { applyBrandTheme, applyBrandFonts } from '../lib/brandTheme';
 import { useAuth } from '../lib/auth';
 import type { Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -23,6 +23,8 @@ export function BrandThemeSync({ businessId }: { businessId: BusinessSelection }
 
   const focused = businessId === 'all' ? undefined : data?.businesses.find((b) => b.id === businessId);
   const brand = focused?.invoiceAccent ?? null;
+  const fontDisplay = focused?.fontDisplay ?? null;
+  const fontBody = focused?.fontBody ?? null;
   // The person's own theme choice re-derives the ramp, since the readable shades
   // differ between dark and light mode.
   const mode = user?.theme ?? 'dark';
@@ -31,6 +33,13 @@ export function BrandThemeSync({ businessId }: { businessId: BusinessSelection }
     applyBrandTheme(brand);
     return () => applyBrandTheme(null);
   }, [brand, mode]);
+
+  // Typefaces are separate from colour: a business may set one and not the other,
+  // and each font has to be fetched before it can be applied.
+  useEffect(() => {
+    applyBrandFonts(fontDisplay, fontBody);
+    return () => applyBrandFonts(null, null);
+  }, [fontDisplay, fontBody]);
 
   return null;
 }

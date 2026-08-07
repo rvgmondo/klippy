@@ -291,6 +291,9 @@ export async function documentRoutes(app) {
                 accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
                 // A VAT-registered issuer's invoices are "Tax Invoices" (SARS wording).
                 vatRegistered: !!pick('bizTaxNumber'),
+                // The business's own typefaces, so its invoice looks like its brand.
+                fontDisplay: business?.fontDisplay ?? null,
+                fontBody: business?.fontBody ?? null,
             },
         };
     });

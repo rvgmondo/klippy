@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard , Download } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { loadFont } from '../lib/fonts';
 
 interface TreeFolder { id: number; parentId: number | null; name: string }
 
@@ -26,6 +27,7 @@ interface FullDoc {
   issuer: {
     name: string; logoUrl: string | null; address: string | null; taxNumber: string | null; regNumber: string | null;
     bankDetails: string | null; footer: string | null; accent: string; vatRegistered: boolean;
+    fontDisplay: string | null; fontBody: string | null;
   };
 }
 
@@ -499,6 +501,7 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
   const label = isQuote ? 'Quotation' : issuer.vatRegistered ? 'Tax Invoice' : 'Invoice';
   const paid = d.status === 'paid';
   const discountAmt = Number(d.discountAmount ?? 0);
+  loadFont(issuer.fontDisplay); loadFont(issuer.fontBody);
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
@@ -517,7 +520,11 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
 
         {/* The document. Everything below reads on white so it prints cleanly, with a
             single accent colour the owner picks in Settings > Invoicing. */}
-        <div className="print-area overflow-hidden rounded-xl bg-white text-slate-900 shadow-xl">
+        {/* The business's own typefaces, so the printed invoice matches its brand. */}
+        <div className="print-area overflow-hidden rounded-xl bg-white text-slate-900 shadow-xl"
+          style={{
+            fontFamily: issuer.fontBody ? `"${issuer.fontBody}", sans-serif` : undefined,
+          }}>
           {/* Accent header band */}
           <div className="px-10 pb-7 pt-9" style={{ borderTop: `5px solid ${accent}` }}>
             <div className="flex items-start justify-between gap-6">

@@ -120,6 +120,11 @@ export const businesses = mysqlTable('businesses', {
   // stock levels. Null means "whatever this business type starts with", which is
   // what almost every business stays on; a stored list is an explicit override.
   modules: json('modules').$type<string[]>(),
+  // Typefaces, from a curated Google Fonts list (see web/src/lib/fonts.ts). Null
+  // means the house fonts. Applied to the app while this business is focused, and
+  // to its invoices.
+  fontDisplay: varchar('font_display', { length: 60 }),
+  fontBody: varchar('font_body', { length: 60 }),
   color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
   // Free-form notes for this business: strategy, logins to remember, whatever the
   // owner wants kept next to it. Separate from folder/client notes.

@@ -10,6 +10,7 @@ import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules } from '../lib/modules.js';
 import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
+import { ALLOWED_FONTS, isAllowedFont } from '../lib/fonts.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -37,6 +38,10 @@ const updateSchema = z.object({
     defaultDueDays: z.number().int().min(0).max(365).optional(),
     // Which modules show. Null resets to the business type's defaults.
     modules: z.array(z.string().max(40)).max(40).nullable().optional(),
+    // Typefaces. Checked against the allow-list here rather than trusting the
+    // client, since the family name is later interpolated into CSS.
+    fontDisplay: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
+    fontBody: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
     // Reminder schedule.
     remindersEnabled: z.boolean().optional(),
     reminderOffsets: z.array(z.number().int().min(-60).max(365)).max(10).nullable().optional(),
@@ -126,7 +131,7 @@ export async function businessRoutes(app) {
             patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
         }
         // Empty strings from the form mean "clear it"; decimals are stored as strings.
-        for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter']) {
+        for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody']) {
             if (patch[k] === '')
                 patch[k] = null;
         }
@@ -160,6 +165,7 @@ export async function businessRoutes(app) {
     });
     // The module catalogue: what exists, which primitive it belongs to, and what each
     // one is for. Static, but served so the client and server cannot drift apart.
+    app.get('/api/v1/fonts', async () => ({ fonts: ALLOWED_FONTS }));
     app.get('/api/v1/blueprints', async () => ({
         blueprints: BLUEPRINTS.map((b) => ({ key: b.key, label: b.label, type: b.type, blurb: b.blurb })),
     }));
