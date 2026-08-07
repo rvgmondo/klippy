@@ -6,7 +6,8 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
-import { sendBusinessMail } from '../lib/mailer.js';
+import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
+import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
@@ -650,19 +651,29 @@ export async function documentRoutes(app) {
         // A one-click way to pay, when PayFast is on. Invoices only, never quotes.
         const payLink = doc.type === 'invoice' && doc.status !== 'paid'
             ? await payLinkFor(accountId, doc.id) : null;
-        const body = [
-            `Hi ${doc.clientName},`, '',
-            parsed.data.message?.trim() || `Please find ${doc.type} ${doc.number} below.`, '',
-            `${label} ${doc.number}`,
-            `Issued: ${doc.issueDate}${doc.dueDate ? `   ${doc.type === 'quote' ? 'Valid until' : 'Due'}: ${doc.dueDate}` : ''}`, '',
-            lineText, '',
-            `Subtotal: ${fmt(doc.subtotal)}`,
-            `Tax (${Number(doc.taxRate)}%): ${fmt(doc.taxAmount)}`,
-            `Total: ${fmt(doc.total)}`, '',
-            payLink ? `Pay online: ${payLink}\n` : '',
-            doc.notes?.trim() ? `${doc.notes.trim()}\n` : '',
-            `Regards,`, brand,
-        ].join('\n');
+        // One branded layout for every send, with its plain-text twin alongside.
+        const emailBrand = await emailBrandFor(accountId, doc.businessId);
+        const content = {
+            heading: `${label} ${doc.number}`,
+            body: [
+                `Hi ${doc.clientName},`,
+                parsed.data.message?.trim()
+                    || `Please find ${doc.type} ${doc.number} below. The full document is attached as a PDF.`,
+            ],
+            facts: [
+                ['Issued', doc.issueDate],
+                ...(doc.dueDate ? [[doc.type === 'quote' ? 'Valid until' : 'Due', doc.dueDate]] : []),
+                ['Subtotal', fmt(doc.subtotal)],
+                ...(Number(doc.taxRate) > 0
+                    ? [[`Tax (${Number(doc.taxRate)}%)`, fmt(doc.taxAmount)]] : []),
+                ['Total', fmt(doc.total)],
+            ],
+            ...(payLink ? { button: { label: 'Pay online', url: payLink } } : {}),
+            ...(doc.notes?.trim() ? { note: doc.notes.trim() } : {}),
+        };
+        const html = renderEmail(emailBrand, content);
+        // The text twin also carries the line items, which the HTML leaves to the PDF.
+        const body = `${renderEmailText(emailBrand, content)}\n\nItems:\n${lineText}`;
         try {
             // Attach the document itself. A failed render must not stop the email, so a
             // client still gets the details in the body either way.
@@ -672,7 +683,7 @@ export async function documentRoutes(app) {
             });
             await sendBusinessMail({
                 accountId, businessId: doc.businessId, purpose: 'invoice',
-                to, subject: `${label} ${doc.number} from ${brand}`, text: body,
+                to, subject: `${label} ${doc.number} from ${brand}`, text: body, html,
                 attachments: pdf ? [{ filename: pdf.filename, content: pdf.buffer }] : undefined,
             });
         }

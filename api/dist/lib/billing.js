@@ -3,7 +3,8 @@ import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { nextNumberFor } from './numbering.js';
-import { sendBusinessMail } from './mailer.js';
+import { sendBusinessMail, emailBrandFor } from './mailer.js';
+import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { renderDocumentPdf } from './pdf.js';
 const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
@@ -98,21 +99,28 @@ export async function generateSubscriptionInvoice(accountId, sub) {
             // Same as a manual send: attach the invoice, but never let a render failure
             // stop the automated run.
             const pdf = await renderDocumentPdf(accountId, docId).catch(() => null);
+            // Branded like every other send, so a recurring invoice does not look like
+            // the one email the business did not bother with.
+            const emailBrand = await emailBrandFor(accountId, sub.businessId);
+            const content = {
+                heading: `Invoice ${number}`,
+                body: [
+                    `Hi ${folder.name},`,
+                    `Your invoice for ${offering.name} is attached.`,
+                ],
+                facts: [
+                    ['Amount', `${currency} ${money(price)}`],
+                    ['Due', dueDate],
+                ],
+                ...(payLink ? { button: { label: 'Pay online', url: payLink } } : {}),
+            };
             await sendBusinessMail({
                 accountId, businessId: sub.businessId, purpose: 'invoice',
                 to: folder.billingEmail,
                 attachments: pdf ? [{ filename: pdf.filename, content: pdf.buffer }] : undefined,
                 subject: `${brand} ${number}`,
-                text: [
-                    `Hi ${folder.name},`,
-                    '',
-                    `Invoice ${number} for ${offering.name} is attached below.`,
-                    `Amount: ${currency} ${money(price)}`,
-                    `Due: ${dueDate}`,
-                    '',
-                    ...(payLink ? [`Pay online: ${payLink}`, ''] : []),
-                    'Thank you.',
-                ].join('\n'),
+                text: renderEmailText(emailBrand, content),
+                html: renderEmail(emailBrand, content),
             });
             await db.update(documents).set({ status: 'sent' })
                 .where(tenantWhere(documents, accountId, eq(documents.id, docId)));

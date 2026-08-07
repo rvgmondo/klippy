@@ -1,7 +1,9 @@
 import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses } from '../db/schema.js';
-import { sendMail, sendBusinessMail, appUrl } from './mailer.js';
+import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
+import { renderEmail, renderEmailText } from './emailLayout.js';
+import { payLinkFor } from './paylink.js';
 import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 
 /**
@@ -166,21 +168,34 @@ export async function runInvoiceReminders(): Promise<string> {
     if (doc.lastReminderOn === today) continue; // never twice in a day
 
     const overdueBy = -daysBetween(doc.dueDate!, today); // >0 means overdue
+    // A chase with a button that takes the payment is worth far more than one
+    // asking them to go and find the invoice. Null when PayFast is not set up.
+    const payLink = await payLinkFor(doc.accountId, doc.id).catch(() => null);
 
     // Suspension supersedes a normal reminder: once far enough overdue and not yet
     // flagged, send the final notice and mark it, so the Collections list shows it.
     if (cfg.suspendAfter != null && overdueBy >= cfg.suspendAfter && !doc.suspendedAt) {
-      const body = [
-        `Hi ${doc.clientName},`, '',
-        `Invoice ${doc.number} for ${doc.currency} ${doc.total} is now ${overdueBy} days overdue and has not been paid.`,
-        'To avoid any interruption to your service, please settle it as soon as possible.',
-        '', 'If you have already paid, please let us know so we can update our records.',
-        '', 'Thank you.',
-      ].join('\n');
+      const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
+      const content = {
+        heading: `Invoice ${doc.number} is ${overdueBy} days overdue`,
+        body: [
+          `Hi ${doc.clientName},`,
+          `Invoice ${doc.number} has not been paid and is now ${overdueBy} days past its due date.`,
+          'To avoid any interruption to your service, please settle it as soon as possible.',
+        ],
+        facts: [
+          ['Amount', `${doc.currency} ${doc.total}`] as [string, string],
+          ['Was due', doc.dueDate!] as [string, string],
+          ['Days overdue', String(overdueBy)] as [string, string],
+        ],
+        ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),
+        note: 'If you have already paid, please let us know so we can update our records.',
+      };
       try {
         await sendBusinessMail({
           accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-          to: doc.clientEmail!, subject: `Action needed: invoice ${doc.number} overdue`, text: body,
+          to: doc.clientEmail!, subject: `Action needed: invoice ${doc.number} overdue`,
+          text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
         });
         await db.update(documents).set({ lastReminderOn: today, suspendedAt: new Date() })
           .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
@@ -200,18 +215,28 @@ export async function runInvoiceReminders(): Promise<string> {
     const subject = overdueBy > 0 ? `Overdue: invoice ${doc.number}`
       : overdueBy === 0 ? `Invoice ${doc.number} is due today`
         : `Reminder: invoice ${doc.number} is due soon`;
-    const body = [
-      `Hi ${doc.clientName},`, '',
-      overdueBy > 0
-        ? `Invoice ${doc.number} for ${doc.currency} ${doc.total} was due on ${doc.dueDate}, ${overdueBy} day${overdueBy === 1 ? '' : 's'} ago.`
-        : `This is a reminder that invoice ${doc.number} for ${doc.currency} ${doc.total} is due on ${doc.dueDate}.`,
-      '', 'If it is already paid, please ignore this.', '', 'Thank you.',
-    ].join('\n');
+    const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
+    const content = {
+      heading: subject,
+      body: [
+        `Hi ${doc.clientName},`,
+        overdueBy > 0
+          ? `Invoice ${doc.number} was due on ${doc.dueDate}, ${overdueBy} day${overdueBy === 1 ? '' : 's'} ago.`
+          : `This is a reminder that invoice ${doc.number} is due on ${doc.dueDate}.`,
+      ],
+      facts: [
+        ['Amount', `${doc.currency} ${doc.total}`] as [string, string],
+        [overdueBy > 0 ? 'Was due' : 'Due', doc.dueDate!] as [string, string],
+      ],
+      ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),
+      note: 'If it is already paid, please ignore this.',
+    };
 
     try {
       await sendBusinessMail({
         accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-        to: doc.clientEmail!, subject, text: body,
+        to: doc.clientEmail!, subject,
+        text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
       });
       await db.update(documents).set({ lastReminderOn: today })
         .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));

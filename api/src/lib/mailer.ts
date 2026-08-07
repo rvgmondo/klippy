@@ -1,8 +1,9 @@
 import nodemailer from 'nodemailer';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businessEmail, businesses } from '../db/schema.js';
+import { businessEmail, businesses, accounts } from '../db/schema.js';
 import { decryptSecret } from './secretbox.js';
+import type { EmailBrand } from './emailLayout.js';
 
 /**
  * Sends mail via SMTP if configured (SMTP_HOST etc). If not configured, it
@@ -101,6 +102,8 @@ export interface MailAttachment { filename: string; content: Buffer }
 export async function sendBusinessMail(opts: {
   accountId: number; businessId: number | null; purpose: Purpose;
   to: string; subject: string; text: string; attachments?: MailAttachment[];
+  /** Branded HTML body. Always sent WITH `text`, never instead of it. */
+  html?: string;
 }): Promise<void> {
   // No business (legacy doc) -> the plain account sender.
   if (!opts.businessId) {
@@ -112,7 +115,8 @@ export async function sendBusinessMail(opts: {
     }
     await t.sendMail({
       from: process.env.SMTP_FROM ?? 'Klippy <no-reply@localhost>',
-      to: opts.to, subject: opts.subject, text: opts.text, attachments: opts.attachments,
+      to: opts.to, subject: opts.subject, text: opts.text, html: opts.html,
+      attachments: opts.attachments,
     });
     return;
   }
@@ -123,11 +127,38 @@ export async function sendBusinessMail(opts: {
     return;
   }
   await s.transport.sendMail({
-    from: s.from, replyTo: s.replyTo, to: opts.to, subject: opts.subject, text: opts.text,
+    from: s.from, replyTo: s.replyTo, to: opts.to, subject: opts.subject,
+    text: opts.text, html: opts.html,
     attachments: opts.attachments,
   });
 }
 
 export function appUrl(): string {
   return (process.env.APP_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
+}
+
+/**
+ * The brand a business's email should wear. Falls back to the account, then to
+ * Klippy, so an email always looks like it came from someone.
+ *
+ * The logo has to be an absolute URL: an email is read outside the app, so a
+ * relative path resolves against the mail client and shows nothing.
+ */
+export async function emailBrandFor(accountId: number, businessId: number | null): Promise<EmailBrand> {
+  const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+  const [business] = businessId
+    ? await db.select().from(businesses).where(eq(businesses.id, businessId)).limit(1)
+    : [undefined];
+  const base = appUrl();
+  const logoUrl = business?.logoPath
+    ? `${base}/api/v1/businesses/${business.id}/logo`
+    : account?.logoPath ? `${base}/api/v1/account/logo` : null;
+  return {
+    name: business?.brandName || business?.name || account?.brandName || 'Klippy',
+    accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
+    logoUrl,
+    fontBody: business?.fontBody ?? null,
+    address: business?.bizAddress ?? account?.bizAddress ?? null,
+    footerNote: business?.invoiceFooter ?? account?.invoiceFooter ?? null,
+  };
 }

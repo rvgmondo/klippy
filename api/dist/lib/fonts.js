@@ -20,4 +20,16 @@ const SET = new Set(ALLOWED_FONTS);
 export function isAllowedFont(family) {
     return typeof family === 'string' && SET.has(family);
 }
+/**
+ * A CSS font stack for an email or PDF context.
+ *
+ * The chosen family leads, but it is only ever an enhancement: most email clients
+ * will not load a web font, so the stack always ends in something every device
+ * already has. Quoted because family names contain spaces, and only names that
+ * passed the allow-list get this far.
+ */
+export function fontStack(family) {
+    const safe = family && isAllowedFont(family) ? `'${family}', ` : '';
+    return `${safe}-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif`;
+}
 //# sourceMappingURL=fonts.js.map
