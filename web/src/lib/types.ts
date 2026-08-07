@@ -85,6 +85,9 @@ export interface Business {
   /** Typefaces from the curated Google Fonts list; null means the house fonts. */
   fontDisplay?: string | null;
   fontBody?: string | null;
+  /** Custom document blocks, in the restricted HTML subset. Sanitised on save. */
+  invoiceHeaderHtml?: string | null;
+  invoiceFooterHtml?: string | null;
   remindersEnabled?: boolean;
   reminderOffsets?: number[] | null;
   suspendAfterDays?: number | null;

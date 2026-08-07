@@ -232,6 +232,13 @@
       "when": 1786082640074,
       "tag": "0032_typical_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1786083089393,
+      "tag": "0033_wandering_shadowcat",
+      "breakpoints": true
     }
   ]
 }

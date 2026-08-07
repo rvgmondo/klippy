@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
+import { fillTemplate, htmlToPdfRuns, templateDataFor } from './template.js';
 /**
  * Renders a document to a real PDF, so an emailed invoice arrives as a file the
  * client can file or forward rather than a wall of text they have to trust.
@@ -59,6 +60,13 @@ export async function renderDocumentPdf(accountId, docId) {
         const n = typeof v === 'string' ? Number(v) : v;
         return `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
     };
+    // The business's custom blocks, filled with this document's values. Sanitised
+    // when saved, so what arrives here is already the restricted subset.
+    const tplData = templateDataFor(doc, business, account);
+    const headerRuns = business?.invoiceHeaderHtml
+        ? htmlToPdfRuns(fillTemplate(business.invoiceHeaderHtml, tplData)) : [];
+    const footerRuns = business?.invoiceFooterHtml
+        ? htmlToPdfRuns(fillTemplate(business.invoiceFooterHtml, tplData)) : [];
     const pdf = new PDFDocument({ size: 'A4', margin: 0 });
     const chunks = [];
     pdf.on('data', (c) => chunks.push(c));
@@ -66,6 +74,28 @@ export async function renderDocumentPdf(accountId, docId) {
     const M = 50; // page margin
     const W = pdf.page.width;
     const right = W - M;
+    /**
+     * Draw a template block. The same words as the screen, with the emphasis and
+     * structure carried over rather than flattened into one paragraph.
+     */
+    const drawRuns = (runs, y0, width) => {
+        let y = y0;
+        for (const r of runs) {
+            if (r.rule) {
+                pdf.moveTo(M, y + 3).lineTo(M + width, y + 3).lineWidth(0.5).strokeColor('#cbd5e1').stroke();
+                y += 10;
+                continue;
+            }
+            const size = r.heading === 1 ? 13 : r.heading === 2 ? 11 : r.heading === 3 ? 10 : 9;
+            const font = r.bold || r.heading ? (r.italic ? 'Helvetica-BoldOblique' : 'Helvetica-Bold')
+                : (r.italic ? 'Helvetica-Oblique' : 'Helvetica');
+            const text = r.bullet ? `•  ${r.text}` : r.text;
+            pdf.font(font).fontSize(size).fillColor(r.heading ? '#0f172a' : '#475569');
+            pdf.text(text, M, y, { width });
+            y = pdf.y + (r.heading ? 3 : 1);
+        }
+        return y;
+    };
     // Accent band across the top, matching the on-screen document.
     pdf.rect(0, 0, W, 6).fill(accent);
     // ---- Letterhead ----------------------------------------------------------
@@ -122,6 +152,10 @@ export async function renderDocumentPdf(accountId, docId) {
         dy += 14;
     }
     y = Math.max(leftEnd, dy) + 22;
+    // ---- The business's own header block --------------------------------------
+    if (headerRuns.length) {
+        y = drawRuns(headerRuns, y, right - M) + 12;
+    }
     // ---- Line items ----------------------------------------------------------
     const colQty = right - 210, colUnit = right - 150, colAmt = right - 80;
     pdf.font('Helvetica-Bold').fontSize(8).fillColor('#64748b');
@@ -184,6 +218,15 @@ export async function renderDocumentPdf(accountId, docId) {
         const nx = bank && doc.type !== 'quote' ? M + 270 : M;
         pdf.font('Helvetica-Bold').fontSize(8).fillColor(accent).text('NOTES', nx, y);
         pdf.font('Helvetica').fontSize(9).fillColor('#475569').text(doc.notes, nx, pdf.y + 3, { width: 240 });
+    }
+    // The business's own closing block, above the one-line footer.
+    if (footerRuns.length) {
+        y = Math.max(y, pdf.y) + 14;
+        if (y > pdf.page.height - 120) {
+            pdf.addPage();
+            y = M;
+        }
+        drawRuns(footerRuns, y, right - M);
     }
     const footer = pick('invoiceFooter');
     if (footer) {

@@ -10,6 +10,7 @@ import { sendBusinessMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
+import { templateDataFor, fillTemplate } from '../lib/template.js';
 const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
     quantity: z.number().nonnegative().max(1_000_000),
@@ -294,6 +295,12 @@ export async function documentRoutes(app) {
                 // The business's own typefaces, so its invoice looks like its brand.
                 fontDisplay: business?.fontDisplay ?? null,
                 fontBody: business?.fontBody ?? null,
+                // Custom blocks, already sanitised on save and now with the placeholders
+                // filled. Resolved HERE so the screen and the PDF render the same words.
+                headerHtml: business?.invoiceHeaderHtml
+                    ? fillTemplate(business.invoiceHeaderHtml, templateDataFor(doc, business, account)) : null,
+                footerHtml: business?.invoiceFooterHtml
+                    ? fillTemplate(business.invoiceFooterHtml, templateDataFor(doc, business, account)) : null,
             },
         };
     });

@@ -11,6 +11,7 @@ import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules } from '../lib/modules.js';
 import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
 import { ALLOWED_FONTS, isAllowedFont } from '../lib/fonts.js';
+import { sanitiseTemplate, PLACEHOLDERS } from '../lib/template.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -42,6 +43,9 @@ const updateSchema = z.object({
     // client, since the family name is later interpolated into CSS.
     fontDisplay: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
     fontBody: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
+    // Custom document blocks. Accepted as typed, then sanitised below.
+    invoiceHeaderHtml: z.string().max(20000).nullable().optional(),
+    invoiceFooterHtml: z.string().max(20000).nullable().optional(),
     // Reminder schedule.
     remindersEnabled: z.boolean().optional(),
     reminderOffsets: z.array(z.number().int().min(-60).max(365)).max(10).nullable().optional(),
@@ -138,6 +142,13 @@ export async function businessRoutes(app) {
         if (parsed.data.defaultTaxRate !== undefined) {
             patch.defaultTaxRate = parsed.data.defaultTaxRate === null ? null : String(parsed.data.defaultTaxRate);
         }
+        // Sanitise templates on the way IN, so nothing unsafe is ever stored and every
+        // reader gets clean markup without having to remember to clean it.
+        for (const k of ['invoiceHeaderHtml', 'invoiceFooterHtml']) {
+            if (parsed.data[k] !== undefined) {
+                patch[k] = parsed.data[k] ? sanitiseTemplate(parsed.data[k]) || null : null;
+            }
+        }
         const res = await db.update(businesses).set(patch)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
         if (!res[0].affectedRows)
@@ -166,6 +177,8 @@ export async function businessRoutes(app) {
     // The module catalogue: what exists, which primitive it belongs to, and what each
     // one is for. Static, but served so the client and server cannot drift apart.
     app.get('/api/v1/fonts', async () => ({ fonts: ALLOWED_FONTS }));
+    // What a template may refer to, so the editor's help and the renderer agree.
+    app.get('/api/v1/template-placeholders', async () => ({ placeholders: PLACEHOLDERS }));
     app.get('/api/v1/blueprints', async () => ({
         blueprints: BLUEPRINTS.map((b) => ({ key: b.key, label: b.label, type: b.type, blurb: b.blurb })),
     }));

@@ -28,6 +28,7 @@ interface FullDoc {
     name: string; logoUrl: string | null; address: string | null; taxNumber: string | null; regNumber: string | null;
     bankDetails: string | null; footer: string | null; accent: string; vatRegistered: boolean;
     fontDisplay: string | null; fontBody: string | null;
+    headerHtml: string | null; footerHtml: string | null;
   };
 }
 
@@ -571,6 +572,13 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
               </div>
             </div>
 
+            {/* The business's own header block. Sanitised server-side on save and
+                again nothing but the allowed subset is ever returned. */}
+            {issuer.headerHtml && (
+              <div className="tpl mb-6 text-sm text-slate-700"
+                dangerouslySetInnerHTML={{ __html: issuer.headerHtml }} />
+            )}
+
             {/* Line items */}
             <table className="mb-6 w-full text-sm">
               <thead>
@@ -608,6 +616,12 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
                 </div>
               </div>
             </div>
+
+            {/* The business's own closing block, above the payment details. */}
+            {issuer.footerHtml && (
+              <div className="tpl mb-5 border-t border-slate-200 pt-4 text-sm text-slate-700"
+                dangerouslySetInnerHTML={{ __html: issuer.footerHtml }} />
+            )}
 
             {/* Payment details + notes footer */}
             {(issuer.bankDetails || d.notes || issuer.footer) && (

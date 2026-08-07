@@ -168,3 +168,22 @@ body {
   .no-print { display: none !important; }
   @page { margin: 14mm; }
 }
+
+/* ---- Invoice template blocks -----------------------------------------------
+ * A business's custom header/footer uses a small HTML subset (see
+ * api/src/lib/template.ts). Tailwind's reset strips list markers and heading
+ * sizes, so the subset gets its look back here, scoped to .tpl so it cannot
+ * leak into the rest of the app. */
+.tpl h1 { font-size: 1.25rem; font-weight: 700; margin: 0 0 .35rem; }
+.tpl h2 { font-size: 1.05rem; font-weight: 700; margin: 0 0 .3rem; }
+.tpl h3 { font-size: .95rem; font-weight: 600; margin: 0 0 .25rem; }
+.tpl p { margin: 0 0 .5rem; }
+.tpl ul, .tpl ol { margin: 0 0 .5rem; padding-left: 1.25rem; }
+.tpl ul { list-style: disc; }
+.tpl ol { list-style: decimal; }
+.tpl li { margin: .15rem 0; }
+.tpl strong, .tpl b { font-weight: 700; }
+.tpl em, .tpl i { font-style: italic; }
+.tpl u { text-decoration: underline; }
+.tpl a { color: inherit; text-decoration: underline; }
+.tpl hr { border: 0; border-top: 1px solid currentColor; opacity: .25; margin: .6rem 0; }

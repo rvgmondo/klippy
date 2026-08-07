@@ -117,6 +117,11 @@ export const businesses = mysqlTable('businesses', {
     // to its invoices.
     fontDisplay: varchar('font_display', { length: 60 }),
     fontBody: varchar('font_body', { length: 60 }),
+    // Custom blocks on this business's documents, in a restricted HTML subset that
+    // both the on-screen invoice and the pdfkit PDF can render (see lib/template.ts).
+    // Sanitised on save; placeholders are filled at render time.
+    invoiceHeaderHtml: text('invoice_header_html'),
+    invoiceFooterHtml: text('invoice_footer_html'),
     color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
     // Free-form notes for this business: strategy, logins to remember, whatever the
     // owner wants kept next to it. Separate from folder/client notes.

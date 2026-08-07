@@ -59,6 +59,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     bizRegNumber: business.bizRegNumber ?? '',
     bankDetails: business.bankDetails ?? '',
     invoiceFooter: business.invoiceFooter ?? '',
+    invoiceHeaderHtml: business.invoiceHeaderHtml ?? '',
+    invoiceFooterHtml: business.invoiceFooterHtml ?? '',
     invoiceAccent: business.invoiceAccent ?? '#6366f1',
     fontDisplay: business.fontDisplay ?? '',
     fontBody: business.fontBody ?? '',
@@ -82,6 +84,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     mutationFn: () => apiPatch(`/businesses/${business.id}`, {
       brandName: form.brandName, bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
       bizRegNumber: form.bizRegNumber, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
+      invoiceHeaderHtml: form.invoiceHeaderHtml || null,
+      invoiceFooterHtml: form.invoiceFooterHtml || null,
       invoiceAccent: form.invoiceAccent,
       fontDisplay: form.fontDisplay || null,
       fontBody: form.fontBody || null,
@@ -237,6 +241,10 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                   onChange={(e) => set('defaultDueDays', Number(e.target.value))} />
               </div>
             </div>
+
+            <TemplateEditor
+              header={form.invoiceHeaderHtml} footer={form.invoiceFooterHtml}
+              onHeader={(v) => set('invoiceHeaderHtml', v)} onFooter={(v) => set('invoiceFooterHtml', v)} />
           </section>}
 
           {/* Payment reminders */}
@@ -448,5 +456,75 @@ function AccessSection({ businessId, businessName }: { businessId: number; busin
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * Edit the custom blocks on this business's documents.
+ *
+ * Deliberately a restricted subset rather than free HTML: whatever goes here has
+ * to render identically on screen AND in the PDF the client actually receives, and
+ * pdfkit cannot draw arbitrary markup. Anything outside the subset is dropped when
+ * it saves, which is also what stops one person's template running as script in
+ * everyone else's browser.
+ */
+function TemplateEditor({ header, footer, onHeader, onFooter }: {
+  header: string; footer: string;
+  onHeader: (v: string) => void; onFooter: (v: string) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['template-placeholders'],
+    queryFn: () => apiGet<{ placeholders: { key: string; label: string }[] }>('/template-placeholders'),
+    staleTime: 60 * 60 * 1000,
+  });
+  const [open, setOpen] = useState(!!header || !!footer);
+  const area = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 font-mono text-xs text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)] min-h-[90px] resize-y';
+
+  return (
+    <div className="border-t border-slate-800 pt-4">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="text-[11px] text-slate-500 underline decoration-dotted hover:text-slate-300">
+        {open ? 'Hide' : 'Customise'} what appears on this business's invoices
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-4">
+          <p className="text-[11px] text-slate-500">
+            These blocks appear above the line items and below the totals, on both the invoice
+            on screen and the PDF your client receives. Allowed:{' '}
+            <code className="text-slate-400">p, strong, em, u, h1 h2 h3, ul ol li, a, br, hr</code>.
+            Anything else is removed when you save.
+          </p>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-400">Header block</label>
+            <textarea className={area} value={header} onChange={(e) => onHeader(e.target.value)}
+              placeholder={'<p>Thank you for your business, {{client.name}}.</p>'} />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-400">Footer block</label>
+            <textarea className={area} value={footer} onChange={(e) => onFooter(e.target.value)}
+              placeholder={'<h3>Terms</h3><ul><li>Payment within 7 days</li><li>EFT only</li></ul>'} />
+          </div>
+
+          {data && (
+            <div>
+              <div className="mb-1.5 text-[11px] text-slate-500">
+                Click to copy a placeholder. It is replaced with the real value on each document.
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {data.placeholders.map((p) => (
+                  <button type="button" key={p.key} title={p.label}
+                    onClick={() => navigator.clipboard?.writeText(`{{${p.key}}}`)}
+                    className="rounded-full border border-slate-700 px-2 py-0.5 font-mono text-[10px] text-slate-400 hover:border-slate-500 hover:text-slate-200">
+                    {`{{${p.key}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
