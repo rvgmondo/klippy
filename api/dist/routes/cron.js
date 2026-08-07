@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { safeEqual } from '../lib/portalAuth.js';
 import { jobRuns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { JOBS, runJob, runDueJobs } from '../lib/jobs.js';
@@ -16,7 +17,10 @@ export async function cronRoutes(app) {
         const secret = process.env.CRON_SECRET;
         if (!secret)
             return 'unset';
-        return req.headers['x-cron-key'] === secret ? 'ok' : 'bad';
+        // Constant-time, so the key cannot be recovered a character at a time by
+        // timing the reply. Cheap insurance on an endpoint that runs billing.
+        const given = req.headers['x-cron-key'] ?? '';
+        return safeEqual(given, secret) ? 'ok' : 'bad';
     };
     for (const job of JOBS) {
         app.post(`/api/v1/cron/${job.name}`, async (req, reply) => {

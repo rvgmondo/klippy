@@ -35,10 +35,39 @@ export async function accessibleBusinessIds(req) {
     const a = await loadAccess(req);
     return a.all ? null : a.ids;
 }
+/**
+ * Does this business belong to the caller's account?
+ *
+ * "All businesses" for an owner or admin means all of THEIRS. Without this check
+ * `all: true` answers yes to any id in the system, including another customer's,
+ * and every guard built on it silently becomes a no-op across the tenant wall.
+ * Most handlers survived that anyway because they re-query through tenantWhere and
+ * find nothing, but a handler whose own query is keyed on (accountId, businessId)
+ * has no such second line of defence: it would happily create and read a row
+ * against a business that is not theirs.
+ *
+ * Cached per request, since a handler may ask more than once.
+ */
+async function businessInAccount(req, businessId) {
+    const { accountId } = authOf(req);
+    const cache = (req._ownBusinesses ??= new Map());
+    const hit = cache.get(businessId);
+    if (hit !== undefined)
+        return hit;
+    const [row] = await db.select({ id: businesses.id }).from(businesses)
+        .where(and(eq(businesses.id, businessId), eq(businesses.accountId, accountId))).limit(1);
+    const ok = !!row;
+    cache.set(businessId, ok);
+    return ok;
+}
 /** Can this request see the given business at all? */
 export async function canSeeBusiness(req, businessId) {
     const a = await loadAccess(req);
-    return a.all || a.ids.has(businessId);
+    // A member's ids come from business_members filtered by account, so they are
+    // already account-scoped; only the owner/admin "all" needs the check.
+    if (!a.all)
+        return a.ids.has(businessId);
+    return businessInAccount(req, businessId);
 }
 /**
  * The request's effective role on one business: 'admin' for account owners/admins,
@@ -46,8 +75,10 @@ export async function canSeeBusiness(req, businessId) {
  */
 export async function businessRole(req, businessId) {
     const a = await loadAccess(req);
+    // Same rule as canSeeBusiness: owning the account grants admin on the account's
+    // OWN businesses, and no role at all on anybody else's.
     if (a.all)
-        return 'admin';
+        return (await businessInAccount(req, businessId)) ? 'admin' : null;
     return a.roles.get(businessId) ?? null;
 }
 const RANK = { viewer: 0, member: 1, admin: 2 };

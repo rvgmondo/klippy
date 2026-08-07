@@ -31,6 +31,11 @@ const PORTAL_AUDIENCE = 'klippy-portal';
 const TOKEN_TTL = '30d';
 /** Long enough to arrive and be clicked, short enough that a forwarded mail is stale. */
 export const LINK_TTL_MINUTES = 30;
+/** Mirrors the staff login policy, because the portal is the more exposed door. */
+export const PORTAL_MAX_ATTEMPTS = 6;
+export const PORTAL_LOCKOUT_SECONDS = 15 * 60;
+/** Shortest gap between sign-in emails to one address. */
+export const LINK_MIN_GAP_SECONDS = 60;
 
 export interface PortalTokenPayload {
   pid: number;   // portal user id
@@ -112,6 +117,13 @@ export async function issueLoginToken(email: string): Promise<{ raw: string; use
     .limit(1);
   if (!user) return null;
 
+  // Throttle. Without this the endpoint is a way to fill a client's inbox, or to
+  // push a shared-hosting mail queue over its limit, at one request per keystroke.
+  // The caller still answers the same either way, so this leaks nothing.
+  if (user.lastLinkAt && Date.now() - user.lastLinkAt.getTime() < LINK_MIN_GAP_SECONDS * 1000) {
+    return null;
+  }
+
   // Retire this person's outstanding links first, so asking for a second link
   // invalidates the first. Otherwise every request piles up another working key.
   await db.update(portalLoginTokens).set({ usedAt: new Date() })
@@ -123,6 +135,7 @@ export async function issueLoginToken(email: string): Promise<{ raw: string; use
     tokenHash: hashToken(raw),
     expiresAt: new Date(Date.now() + LINK_TTL_MINUTES * 60000),
   });
+  await db.update(portalUsers).set({ lastLinkAt: new Date() }).where(eq(portalUsers.id, user.id));
   return { raw, user };
 }
 
@@ -146,7 +159,9 @@ export async function consumeLoginToken(raw: string): Promise<typeof portalUsers
   const [user] = await db.select().from(portalUsers)
     .where(and(eq(portalUsers.id, row.portalUserId), eq(portalUsers.isActive, true))).limit(1);
   if (!user) return null;
-  await db.update(portalUsers).set({ lastLoginAt: new Date() }).where(eq(portalUsers.id, user.id));
+  await db.update(portalUsers)
+    .set({ lastLoginAt: new Date(), failedAttempts: 0, lockedUntil: null })
+    .where(eq(portalUsers.id, user.id));
   return user;
 }
 
@@ -161,13 +176,30 @@ export async function passwordLogin(email: string, password: string): Promise<ty
     .where(and(eq(portalUsers.email, normaliseEmail(email)), eq(portalUsers.isActive, true)))
     .limit(1);
 
+  // Locked out: refuse without even comparing, but say nothing different to the
+  // caller, so the lockout itself is not a signal that the address is real.
+  if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) return null;
+
   // Always run a comparison, even with nobody to compare against, so the timing of
   // a miss matches the timing of a wrong password.
   const hash = user?.passwordHash ?? '$2a$12$0000000000000000000000000000000000000000000000000000';
   const ok = await verifyPassword(password, hash).catch(() => false);
-  if (!user || !user.passwordHash || !ok) return null;
 
-  await db.update(portalUsers).set({ lastLoginAt: new Date() }).where(eq(portalUsers.id, user.id));
+  if (!user || !user.passwordHash || !ok) {
+    if (user) {
+      const attempts = user.failedAttempts + 1;
+      await db.update(portalUsers).set({
+        failedAttempts: attempts,
+        lockedUntil: attempts >= PORTAL_MAX_ATTEMPTS
+          ? new Date(Date.now() + PORTAL_LOCKOUT_SECONDS * 1000) : null,
+      }).where(eq(portalUsers.id, user.id));
+    }
+    return null;
+  }
+
+  await db.update(portalUsers)
+    .set({ lastLoginAt: new Date(), failedAttempts: 0, lockedUntil: null })
+    .where(eq(portalUsers.id, user.id));
   return user;
 }
 

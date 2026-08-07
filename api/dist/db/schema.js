@@ -857,6 +857,13 @@ export const portalUsers = mysqlTable('portal_users', {
     passwordHash: varchar('password_hash', { length: 100 }),
     isActive: boolean('is_active').default(true).notNull(),
     lastLoginAt: datetime('last_login_at'),
+    // Same lockout the staff login has had all along. Without it a portal password
+    // can be guessed at indefinitely, and the portal is the internet-facing door.
+    failedAttempts: int('failed_attempts', { unsigned: true }).default(0).notNull(),
+    lockedUntil: datetime('locked_until'),
+    // When a sign-in link was last sent, so the endpoint cannot be used to bombard
+    // a client's inbox, or to hammer the mail server, one request at a time.
+    lastLinkAt: datetime('last_link_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [

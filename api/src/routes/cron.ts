@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
+import { safeEqual } from '../lib/portalAuth.js';
 import { jobRuns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { JOBS, runJob, runDueJobs, type JobName } from '../lib/jobs.js';
@@ -17,7 +18,10 @@ export async function cronRoutes(app: FastifyInstance) {
   const bySecret = (req: { headers: Record<string, unknown> }): 'ok' | 'unset' | 'bad' => {
     const secret = process.env.CRON_SECRET;
     if (!secret) return 'unset';
-    return (req.headers['x-cron-key'] as string | undefined) === secret ? 'ok' : 'bad';
+    // Constant-time, so the key cannot be recovered a character at a time by
+    // timing the reply. Cheap insurance on an endpoint that runs billing.
+    const given = (req.headers['x-cron-key'] as string | undefined) ?? '';
+    return safeEqual(given, secret) ? 'ok' : 'bad';
   };
 
   for (const job of JOBS) {

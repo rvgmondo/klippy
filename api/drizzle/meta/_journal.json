@@ -288,6 +288,13 @@
       "when": 1786114959228,
       "tag": "0040_client_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "5",
+      "when": 1786118726664,
+      "tag": "0041_portal_lockout",
+      "breakpoints": true
     }
   ]
 }
