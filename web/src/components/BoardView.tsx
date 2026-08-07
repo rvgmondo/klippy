@@ -8,9 +8,10 @@ import {
   SortableContext, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Flag, MoreHorizontal, GripVertical } from 'lucide-react';
+import { Plus, Flag, MoreHorizontal, GripVertical, Copy } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { BoardListView } from './BoardListView';
+import { BoardActions } from './BoardActions';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
@@ -37,6 +38,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
   const qc = useQueryClient();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
+  const [showActions, setShowActions] = useState(false);
   // Board or list. Remembered, because it is a preference about how someone
   // thinks, not a per-board decision.
   const [mode, setMode] = useState<'board' | 'list'>(
@@ -183,7 +185,11 @@ export function BoardView({ boardId }: { boardId: number | null }) {
         {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <BoardFilters value={filters} onChange={setFilters} />
-          <div className="ml-auto flex shrink-0 gap-1 rounded-lg bg-slate-900 p-1">
+          <button onClick={() => setShowActions(true)} title="Copy this board, or start one from a template"
+            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+            <Copy size={13} /> Copy / template
+          </button>
+          <div className="flex shrink-0 gap-1 rounded-lg bg-slate-900 p-1">
             {(['board', 'list'] as const).map((m) => (
               <button key={m} onClick={() => setModeSticky(m)}
                 className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize ${
@@ -226,6 +232,12 @@ export function BoardView({ boardId }: { boardId: number | null }) {
           ) : null}
         </DragOverlay>
       </DndContext>
+      )}
+
+      {showActions && (
+        <BoardActions boardId={boardId} boardName={data.board.name}
+          onClose={() => setShowActions(false)}
+          onCreated={() => { setShowActions(false); qc.invalidateQueries({ queryKey: ['folders'] }); }} />
       )}
 
       {openTaskId !== null && <CardDetail taskId={openTaskId} boardId={boardId} onClose={() => setOpenTaskId(null)} />}
