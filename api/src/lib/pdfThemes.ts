@@ -128,6 +128,28 @@ function inkOn(accent: [number, number, number]): string {
 // ---- Shared pieces ----------------------------------------------------------
 
 /**
+ * Draw a figure so it can never wrap.
+ *
+ * Money broke across two lines on a real invoice: the amount due box was 88pt and
+ * "ZAR 15,000.00" at 14pt needs 94.9pt, so pdfkit helpfully wrapped it and the
+ * total read as "Amount due ZAR" over "15,000.00". Guessing a width that suits
+ * every currency prefix and every order of magnitude is not possible, so instead
+ * the text is measured and the size stepped down until it fits, with lineBreak
+ * off as a hard guarantee. A total one point smaller is invisible; a total split
+ * across two lines is the first thing you notice.
+ */
+function fitText(
+  c: Ctx, text: string, x: number, y: number, width: number,
+  font: string, maxSize: number, align: 'left' | 'right' = 'right',
+): void {
+  const { pdf } = c;
+  let size = maxSize;
+  pdf.font(font);
+  while (size > 6 && pdf.fontSize(size).widthOfString(text) > width) size -= 0.25;
+  pdf.fontSize(size).text(text, x, y, { width, align, lineBreak: false });
+}
+
+/**
  * The line-item table, with the column geometry each layout passes in.
  *
  * Pagination is handled here rather than per layout: when a table runs past the
@@ -176,9 +198,10 @@ function drawLines(c: Ctx, y: number, opts: {
     pdf.font(f.regular).fontSize(size).fillColor(INK);
     pdf.text(l.description, left, y, { width: descW });
     pdf.fillColor(INK);
-    pdf.text(l.quantity, colQty, y, { width: 40, align: 'right' });
-    pdf.text(l.unitPrice, colUnit, y, { width: 64, align: 'right' });
-    pdf.font(f.regular).fillColor(INK_STRONG).text(l.amount, colAmt, y, { width: 74, align: 'right' });
+    pdf.text(l.quantity, colQty, y, { width: 40, align: 'right', lineBreak: false });
+    fitText(c, l.unitPrice, colUnit, y, 64, f.regular, size);
+    pdf.fillColor(INK_STRONG);
+    fitText(c, l.amount, colAmt, y, 74, f.regular, size);
     y += Math.max(h, size + 2) + gap;
     pdf.moveTo(left, y - gap / 2).lineTo(left + width, y - gap / 2)
       .lineWidth(0.5).strokeColor(HAIRLINE).stroke();
@@ -195,9 +218,14 @@ function drawTotals(c: Ctx, y: number, opts: { boxed?: boolean; left?: number; w
   const { pdf, d, f } = c;
   const width = opts.width ?? 250;
   const left = opts.left ?? (c.right - width);
+  // Figures get a generous column, and fitText shrinks anything still too long.
+  const valueW = Math.min(140, Math.round(width * 0.56));
+  const valueX = left + width - valueW;
   const line = (k: string, v: string) => {
-    pdf.font(f.regular).fontSize(9.5).fillColor(MUTED).text(k, left, y, { width: width - 90, align: 'right' });
-    pdf.font(f.regular).fontSize(9.5).fillColor(INK).text(v, left + width - 88, y, { width: 88, align: 'right' });
+    pdf.font(f.regular).fontSize(9.5).fillColor(MUTED)
+      .text(k, left, y, { width: width - valueW - 10, align: 'right' });
+    pdf.fillColor(INK);
+    fitText(c, v, valueX, y, valueW, f.regular, 9.5);
     y += 15;
   };
   line('Subtotal', d.totals.subtotal);
@@ -211,16 +239,17 @@ function drawTotals(c: Ctx, y: number, opts: { boxed?: boolean; left?: number; w
     const ink = c.accent === '#ffffff' ? INK_STRONG : inkOn([
       parseInt(c.accent.slice(1, 3), 16), parseInt(c.accent.slice(3, 5), 16), parseInt(c.accent.slice(5, 7), 16),
     ]);
-    pdf.font(f.bold).fontSize(10).fillColor(ink).text(dueLabel, left + 12, y + 11);
-    pdf.font(f.bold).fontSize(13).fillColor(ink)
-      .text(d.totals.total, left + width - 100, y + 9, { width: 88, align: 'right' });
+    pdf.font(f.bold).fontSize(10).fillColor(ink).text(dueLabel, left + 12, y + 11, { lineBreak: false });
+    pdf.fillColor(ink);
+    fitText(c, d.totals.total, valueX - 12, y + 9, valueW, f.bold, 13);
     y += 42;
   } else {
     pdf.moveTo(left, y).lineTo(left + width, y).lineWidth(1).strokeColor(c.accent).stroke();
     y += 8;
-    pdf.font(f.bold).fontSize(11).fillColor(INK_STRONG).text(dueLabel, left, y, { width: width - 90, align: 'right' });
-    pdf.font(f.bold).fontSize(14).fillColor(INK_STRONG)
-      .text(d.totals.total, left + width - 88, y - 2, { width: 88, align: 'right' });
+    pdf.font(f.bold).fontSize(11).fillColor(INK_STRONG)
+      .text(dueLabel, left, y, { width: width - valueW - 10, align: 'right', lineBreak: false });
+    pdf.fillColor(INK_STRONG);
+    fitText(c, d.totals.total, valueX, y - 2, valueW, f.bold, 14);
     y += 24;
   }
   return y;
