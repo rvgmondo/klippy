@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, lt, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals } from '../db/schema.js';
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
@@ -22,7 +22,7 @@ import { runHostingSuspensions } from './hosting.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions';
+export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions' | 'deal-follow-ups';
 
 export const JOBS: { name: JobName; label: string; description: string; hour: number }[] = [
   {
@@ -44,6 +44,12 @@ export const JOBS: { name: JobName; label: string; description: string; hour: nu
     // nobody is suspended over money that has arrived.
     description: 'Warns clients whose hosting invoices are overdue, then suspends the account once it is past the limit. Off unless a number of days is set.',
     hour: 9,
+  },
+  {
+    name: 'deal-follow-ups',
+    label: 'Follow-up reminders',
+    description: 'Emails you the deals you said you would chase today, and the ones you said you would chase and did not.',
+    hour: 7,
   },
   {
     name: 'invoice-reminders',
@@ -151,6 +157,75 @@ export async function runSubscriptionBilling(): Promise<string> {
     }
   }
   return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}`;
+}
+
+/**
+ * Tell people what they said they would chase.
+ *
+ * Deals rarely die on a no. They die because a follow-up date passed and nobody
+ * noticed, and after a fortnight it feels too late to ask. So overdue ones are
+ * listed first and by how late they are, because the awkward ones are exactly the
+ * ones worth reviving.
+ *
+ * Sent to whoever created the deal, since they are the one holding the thread.
+ */
+export async function runDealFollowUps(): Promise<string> {
+  const today = todayStr();
+  const due = await db.select({
+    id: deals.id, title: deals.title, company: deals.company, stage: deals.stage,
+    value: deals.value, accountId: deals.accountId, businessId: deals.businessId,
+    createdBy: deals.createdBy, nextFollowUpAt: deals.nextFollowUpAt,
+    followUpNote: deals.followUpNote,
+  }).from(deals)
+    .where(and(
+      isNotNull(deals.nextFollowUpAt),
+      lte(deals.nextFollowUpAt, today),
+      inArray(deals.stage, ['lead', 'contacted', 'proposal']),
+    ));
+  if (!due.length) return 'nothing due';
+
+  // One email per person, not one per deal. Five separate reminders at 7am is how
+  // a useful nudge becomes something you filter to a folder.
+  const byUser = new Map<number, typeof due>();
+  for (const d of due) {
+    if (!d.createdBy) continue;
+    const list = byUser.get(d.createdBy) ?? [];
+    list.push(d);
+    byUser.set(d.createdBy, list);
+  }
+
+  let sent = 0;
+  for (const [userId, list] of byUser) {
+    const [u] = await db.select({ email: users.email, name: users.name }).from(users)
+      .where(and(eq(users.id, userId), eq(users.isActive, true))).limit(1);
+    if (!u) continue;
+
+    list.sort((a, b) => (a.nextFollowUpAt ?? '').localeCompare(b.nextFollowUpAt ?? ''));
+    const lines = list.map((d) => {
+      const late = daysBetween(today, d.nextFollowUpAt!);
+      const when = late === 0 ? 'today' : `${late} day${late === 1 ? '' : 's'} ago`;
+      const who = d.company ? ` (${d.company})` : '';
+      return `  - ${d.title}${who} - due ${when}${d.followUpNote ? `: ${d.followUpNote}` : ''}`;
+    });
+    const overdue = list.filter((d) => daysBetween(today, d.nextFollowUpAt!) > 0).length;
+
+    const body = [
+      `Morning ${u.name},`,
+      '',
+      overdue
+        ? `${list.length} to follow up, ${overdue} of them already overdue:`
+        : `${list.length} to follow up today:`,
+      ...lines,
+      '',
+      `Open the pipeline: ${appUrl()}`,
+      '',
+      'To stop these, clear the follow-up date on a deal.',
+    ].join('\n');
+
+    await sendMail(u.email, `Klippy: ${list.length} to follow up${overdue ? `, ${overdue} overdue` : ''}`, body);
+    sent++;
+  }
+  return `${sent} sent for ${due.length} deals due`;
 }
 
 /** The reminder schedule to use when a business has not set its own. */
@@ -286,6 +361,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   'daily-digest': runDailyDigest,
   'bill-subscriptions': runSubscriptionBilling,
   'hosting-suspensions': runHostingSuspensions,
+  'deal-follow-ups': runDealFollowUps,
   'invoice-reminders': runInvoiceReminders,
 };
 

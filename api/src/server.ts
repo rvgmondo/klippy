@@ -41,6 +41,7 @@ import { labelRoutes } from './routes/labels.js';
 import { paymentRoutes } from './routes/payments.js';
 import { hostingRoutes } from './routes/hosting.js';
 import { portalRoutes, portalAdminRoutes } from './routes/portal.js';
+import { crmRoutes } from './routes/crm.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -144,6 +145,7 @@ export function buildServer() {
   app.register(hostingRoutes);
   app.register(portalRoutes);
   app.register(portalAdminRoutes);
+  app.register(crmRoutes);
 
   return app;
 }

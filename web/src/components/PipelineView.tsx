@@ -14,6 +14,13 @@ interface Deal {
   id: number; title: string; company: string | null; contactName: string | null;
   contactEmail: string | null; contactPhone: string | null; value: string;
   stage: Stage; notes: string | null; clientFolderId: number | null;
+  contactId?: number | null; source?: string | null;
+  nextFollowUpAt?: string | null; followUpNote?: string | null;
+}
+interface Contact { id: number; name: string; email: string | null; company: string | null }
+interface Activity {
+  id: number; kind: 'note' | 'call' | 'email' | 'meeting' | 'stage';
+  body: string | null; occurredAt: string;
 }
 interface Summary { openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number }
 
@@ -86,6 +93,12 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
         </button>
       </div>
 
+      <FollowUpStrip businessId={typeof businessId === 'number' ? businessId : undefined}
+        onOpen={(dealId) => {
+          const d = deals.find((x) => x.id === dealId);
+          if (d) setEditing(d);
+        }} />
+
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
           {STAGES.map((st) => (
@@ -98,6 +111,59 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
 
       {adding && <DealEditor businessId={newBusinessId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
       {editing && <DealEditor deal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
+    </div>
+  );
+}
+
+/**
+ * What is due to be chased, above the board.
+ *
+ * The pipeline shows what exists; this shows what needs doing today, which is a
+ * different question and the one that actually loses money when nobody answers it.
+ * Hidden entirely when nothing is due, so it never becomes furniture people stop
+ * reading.
+ */
+function FollowUpStrip({ businessId, onOpen }: {
+  businessId?: number; onOpen: (dealId: number) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ['follow-ups', businessId],
+    queryFn: () => apiGet<{
+      followUps: { id: number; title: string; company: string | null; nextFollowUpAt: string;
+        followUpNote: string | null; contactName: string | null }[];
+      today: string;
+    }>('/deals/follow-ups'),
+  });
+  const rows = data?.followUps ?? [];
+  if (!rows.length) return null;
+
+  const late = (d: string) => Math.round(
+    (Date.parse((data!.today) + 'T00:00:00Z') - Date.parse(d + 'T00:00:00Z')) / 86400000);
+
+  return (
+    <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+      <div className="mb-1.5 text-xs font-semibold text-amber-200">
+        {rows.length} to follow up
+      </div>
+      <div className="space-y-1">
+        {rows.slice(0, 6).map((f) => {
+          const d = late(f.nextFollowUpAt);
+          return (
+            <button key={f.id} onClick={() => onOpen(f.id)}
+              className="flex w-full flex-wrap items-baseline gap-x-2 rounded-lg px-1.5 py-1 text-left text-xs hover:bg-amber-500/10">
+              <span className="font-medium text-amber-100">{f.title}</span>
+              {f.company && <span className="text-amber-200/70">{f.company}</span>}
+              <span className={d > 0 ? 'text-red-300' : 'text-amber-200/70'}>
+                {d > 0 ? `${d} day${d === 1 ? '' : 's'} overdue` : 'today'}
+              </span>
+              {f.followUpNote && <span className="text-amber-200/60">{f.followUpNote}</span>}
+            </button>
+          );
+        })}
+        {rows.length > 6 && (
+          <div className="px-1.5 pt-1 text-[11px] text-amber-200/70">and {rows.length - 6} more</div>
+        )}
+      </div>
     </div>
   );
 }
@@ -133,6 +199,17 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onGoToCli
   );
 }
 
+/** How late a follow-up is, in plain words. Null when there is nothing to chase. */
+function followUpState(deal: Deal, today: string): { label: string; overdue: boolean } | null {
+  if (!deal.nextFollowUpAt) return null;
+  if (deal.stage === 'won' || deal.stage === 'lost') return null;
+  const days = Math.round(
+    (Date.parse(today + 'T00:00:00Z') - Date.parse(deal.nextFollowUpAt + 'T00:00:00Z')) / 86400000);
+  if (days > 0) return { label: `${days}d overdue`, overdue: true };
+  if (days === 0) return { label: 'follow up today', overdue: true };
+  return { label: `follow up ${deal.nextFollowUpAt}`, overdue: false };
+}
+
 function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
   deal: Deal; money: (v: number | string) => string; onOpen: (d: Deal) => void;
   onConvert: (id: number) => void; onDelete: (id: number) => void; onGoToClients?: () => void;
@@ -164,6 +241,19 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
           <span className="inline-flex items-center gap-1 rounded bg-green-600/20 px-1.5 py-0.5 text-green-300"><ArrowRightLeft size={10} /> client</span>
         )}
       </div>
+
+      {/* An overdue chase should be visible on the board, not only after opening
+          the deal. That is the whole point of writing the date down. */}
+      {(() => {
+        const f = followUpState(deal, new Date().toISOString().slice(0, 10));
+        if (!f) return null;
+        return (
+          <div className={`mt-1.5 rounded px-1.5 py-0.5 text-[10px] ${
+            f.overdue ? 'bg-red-600/20 text-red-300' : 'bg-slate-700/60 text-slate-400'}`}>
+            {f.label}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -177,7 +267,17 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
   const [contactPhone, setContactPhone] = useState(deal?.contactPhone ?? '');
   const [value, setValue] = useState(deal ? String(Number(deal.value)) : '');
   const [notes, setNotes] = useState(deal?.notes ?? '');
+  const [contactId, setContactId] = useState<number | null>(deal?.contactId ?? null);
+  const [source, setSource] = useState(deal?.source ?? '');
+  const [followUp, setFollowUp] = useState(deal?.nextFollowUpAt ?? '');
+  const [followUpNote, setFollowUpNote] = useState(deal?.followUpNote ?? '');
   const [error, setError] = useState<string | null>(null);
+
+  const contactsQ = useQuery({
+    queryKey: ['contacts', businessId],
+    queryFn: () => apiGet<{ contacts: Contact[] }>(
+      businessId ? `/contacts?businessId=${businessId}` : '/contacts'),
+  });
 
   const save = useMutation({
     mutationFn: () => {
@@ -185,6 +285,8 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
         title: title.trim(), company: company.trim() || null, contactName: contactName.trim() || null,
         contactEmail: contactEmail.trim() || null, contactPhone: contactPhone.trim() || null,
         value: Number(value) || 0, notes: notes.trim() || null,
+        contactId, source: source.trim() || null,
+        nextFollowUpAt: followUp || null, followUpNote: followUpNote.trim() || null,
         ...(isNew && businessId ? { businessId } : {}),
       };
       return isNew ? apiPost('/deals', body) : apiPatch(`/deals/${deal!.id}`, body);
@@ -213,14 +315,114 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
             <input className={field} placeholder="Email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
             <input className={field} placeholder="Phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
           </div>
+          <select className={field} value={contactId ?? ''}
+            onChange={(e) => {
+              const v = e.target.value ? Number(e.target.value) : null;
+              setContactId(v);
+              const c = contactsQ.data?.contacts.find((x) => x.id === v);
+              // Keep the flat fields in step, so the deal still reads correctly
+              // anywhere the contact record is not loaded alongside it.
+              if (c) { setContactName(c.name); setContactEmail(c.email ?? ''); if (c.company) setCompany(c.company); }
+            }}>
+            <option value="">Link a saved contact (optional)</option>
+            {(contactsQ.data?.contacts ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.company ? ' - ' + c.company : ''}</option>
+            ))}
+          </select>
+          <input className={field} placeholder="Where did this lead come from? (referral, Google, ...)"
+            value={source} onChange={(e) => setSource(e.target.value)} />
+
+          {/* The field that actually saves deals. A date turns "I must chase them"
+              from something you remember at 2am into something on a list. */}
+          <div className="rounded-lg border border-slate-800 p-2.5">
+            <div className="mb-1.5 text-[11px] font-medium text-slate-400">Follow up</div>
+            <div className="grid grid-cols-2 gap-2">
+              <input className={field} type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+              <input className={field} placeholder="About what?" value={followUpNote}
+                onChange={(e) => setFollowUpNote(e.target.value)} />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              One email each morning lists whatever is due, the overdue ones first.
+            </p>
+          </div>
+
           <textarea className={field + ' min-h-16 resize-y'} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
           {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
           <button onClick={() => title.trim() ? save.mutate() : setError('Give the deal a title.')} disabled={save.isPending}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
+
+          {!isNew && <DealActivity dealId={deal!.id} />}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What has happened on this deal, newest first.
+ *
+ * Stage moves are written by the app rather than typed, because the one thing
+ * nobody remembers to record is when something moved, and it is the first thing
+ * you want when a deal has gone quiet.
+ */
+function DealActivity({ dealId }: { dealId: number }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<'note' | 'call' | 'email' | 'meeting'>('note');
+  const [body, setBody] = useState('');
+
+  const key = ['deal-activity', dealId];
+  const { data } = useQuery({
+    queryKey: key,
+    queryFn: () => apiGet<{ activity: Activity[] }>(`/deals/${dealId}/activity`),
+  });
+  const add = useMutation({
+    mutationFn: () => apiPost(`/deals/${dealId}/activity`, { kind, body: body.trim() }),
+    onSuccess: () => { setBody(''); qc.invalidateQueries({ queryKey: key }); },
+  });
+
+  const rows = data?.activity ?? [];
+  const f = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const LABEL: Record<string, string> = { note: 'Note', call: 'Call', email: 'Email', meeting: 'Meeting', stage: 'Stage' };
+
+  return (
+    <div className="mt-4 border-t border-slate-800 pt-3">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">History</div>
+
+      <form className="mb-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (body.trim()) add.mutate(); }}>
+        <select className={f} value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+          <option value="note">Note</option>
+          <option value="call">Call</option>
+          <option value="email">Email</option>
+          <option value="meeting">Meeting</option>
+        </select>
+        <input className={f + ' flex-1'} placeholder="What happened?" value={body}
+          onChange={(e) => setBody(e.target.value)} />
+        <button type="submit" disabled={!body.trim() || add.isPending}
+          className="rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-40">
+          Log
+        </button>
+      </form>
+
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-slate-500">Nothing logged yet.</p>
+      ) : (
+        <div className="max-h-48 space-y-1.5 overflow-y-auto">
+          {rows.map((a) => (
+            <div key={a.id} className="flex gap-2 text-[11px]">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 ${
+                a.kind === 'stage' ? 'bg-slate-800 text-slate-400' : 'bg-violet-600/20 text-violet-300'}`}>
+                {LABEL[a.kind] ?? a.kind}
+              </span>
+              <span className="flex-1 text-slate-300">{a.body}</span>
+              <span className="shrink-0 num text-slate-600">
+                {new Date(a.occurredAt).toLocaleDateString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

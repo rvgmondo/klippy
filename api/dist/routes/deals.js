@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { deals } from '../db/schema.js';
+import { deals, dealActivities } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
@@ -65,6 +65,10 @@ export async function dealRoutes(app) {
             value: z.number().min(0).max(1_000_000_000).optional(),
             stage: stage.optional(),
             notes: z.string().max(5000).nullable().optional(),
+            contactId: z.number().int().positive().nullable().optional(),
+            source: z.string().trim().max(60).nullable().optional(),
+            nextFollowUpAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+            followUpNote: z.string().trim().max(200).nullable().optional(),
             businessId: z.number().int().positive().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
@@ -76,6 +80,8 @@ export async function dealRoutes(app) {
         const ins = await db.insert(deals).values(withTenant(accountId, {
             businessId, title: d.title, company: d.company ?? null, contactName: d.contactName ?? null,
             contactEmail: d.contactEmail || null, contactPhone: d.contactPhone ?? null,
+            contactId: d.contactId ?? null, source: d.source ?? null,
+            nextFollowUpAt: d.nextFollowUpAt ?? null, followUpNote: d.followUpNote ?? null,
             value: money(d.value ?? 0), stage: st, notes: d.notes ?? null, position, createdBy: userId,
         }));
         const [created] = await db.select().from(deals)
@@ -95,6 +101,10 @@ export async function dealRoutes(app) {
             contactPhone: z.string().trim().max(40).nullable().optional(),
             value: z.number().min(0).max(1_000_000_000).optional(),
             notes: z.string().max(5000).nullable().optional(),
+            contactId: z.number().int().positive().nullable().optional(),
+            source: z.string().trim().max(60).nullable().optional(),
+            nextFollowUpAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+            followUpNote: z.string().trim().max(200).nullable().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -141,6 +151,13 @@ export async function dealRoutes(app) {
             }
         });
         const [moved] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+        if (deal.stage !== parsed.data.stage) {
+            await db.insert(dealActivities).values(withTenant(accountId, {
+                dealId: id, kind: 'stage',
+                body: `Moved from ${deal.stage} to ${parsed.data.stage}`,
+                occurredAt: new Date(), createdBy: userId,
+            })).catch(() => { });
+        }
         // Dragging a deal into Won is the moment the handoff should happen; it is the
         // way most deals actually close, not the explicit Convert button.
         let handoff;

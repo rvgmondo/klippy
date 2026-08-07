@@ -295,6 +295,20 @@
       "when": 1786118726664,
       "tag": "0041_portal_lockout",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "5",
+      "when": 1786122640039,
+      "tag": "0042_crm_depth",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "5",
+      "when": 1786122641039,
+      "tag": "0043_backfill_contacts_without_names",
+      "breakpoints": true
     }
   ]
 }

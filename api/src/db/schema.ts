@@ -1045,6 +1045,26 @@ export const deals = mysqlTable('deals', {
   stage: mysqlEnum('stage', ['lead', 'contacted', 'proposal', 'won', 'lost']).default('lead').notNull(),
   notes: text('notes'),
   position: int('position', { unsigned: true }).default(0).notNull(),
+  /**
+   * The person, once they are a record rather than three fields.
+   *
+   * The contactName/Email/Phone columns above stay as the fallback for deals that
+   * predate contacts, and for a lead where all you have is a name scribbled down.
+   * When contactId is set it wins: one place to correct a phone number, and the
+   * same person across three deals is one person.
+   */
+  contactId: int('contact_id', { unsigned: true }),
+  /** Where this lead came from, so you can tell what is actually working. */
+  source: varchar('source', { length: 60 }),
+  /**
+   * When to chase this next, and what about.
+   *
+   * The single most valuable field here. Deals rarely die because the answer was
+   * no; they die because nobody followed up and everyone felt too awkward to ask
+   * twice. A date turns that from a memory problem into a list.
+   */
+  nextFollowUpAt: date('next_follow_up_at', { mode: 'string' }),
+  followUpNote: varchar('follow_up_note', { length: 200 }),
   // Set when a won deal is turned into a delivery client.
   clientFolderId: int('client_folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
   wonAt: datetime('won_at'),
@@ -1053,6 +1073,60 @@ export const deals = mysqlTable('deals', {
   updatedAt: updatedAt(),
 }, (t) => [
   index('idx_deals_account_stage').on(t.accountId, t.stage, t.position),
+  index('idx_deals_followup').on(t.accountId, t.nextFollowUpAt),
+]);
+
+/**
+ * A person you deal with, kept once rather than copied onto every deal.
+ *
+ * Separate from `users` (who work here) and from `folders` (which are client
+ * companies). A contact may belong to a client company, or to nobody yet because
+ * they are still a lead. Deliberately not unique on email: two people can share an
+ * info@ address, and refusing to save the second one helps nobody.
+ */
+export const contacts = mysqlTable('contacts', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true })
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 120 }).notNull(),
+  email: varchar('email', { length: 150 }),
+  phone: varchar('phone', { length: 40 }),
+  company: varchar('company', { length: 150 }),
+  role: varchar('role', { length: 80 }),
+  notes: text('notes'),
+  /** The client company they belong to, once there is one. */
+  folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_contacts_account_business').on(t.accountId, t.businessId),
+  index('idx_contacts_email').on(t.accountId, t.email),
+]);
+
+/**
+ * What has actually happened on a deal: calls, emails, meetings, notes, and the
+ * stage moves recorded automatically.
+ *
+ * Without this a deal is a title and a number, and "where did we leave it" is
+ * answered by searching your inbox. Stage changes are logged by the app rather than
+ * typed, because the one thing nobody remembers to write down is when it moved.
+ */
+export const dealActivities = mysqlTable('deal_activities', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  dealId: int('deal_id', { unsigned: true }).notNull()
+    .references(() => deals.id, { onDelete: 'cascade' }),
+  kind: mysqlEnum('kind', ['note', 'call', 'email', 'meeting', 'stage']).default('note').notNull(),
+  body: text('body'),
+  occurredAt: datetime('occurred_at').notNull(),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+}, (t) => [
+  index('idx_deal_activities').on(t.accountId, t.dealId, t.occurredAt),
 ]);
 
 // ---- Relations (for db.query.* nested reads) ------------------------------
