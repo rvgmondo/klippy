@@ -148,6 +148,37 @@ export async function brandingRoutes(app: FastifyInstance) {
     return sendImage(reply, biz?.logoPath ?? null);
   });
 
+  /**
+   * Is this business's logo actually usable right now?
+   *
+   * "The logo does not show" has several causes that look identical in the UI: none
+   * set, the row points at a file that is no longer on disk (uploads living inside
+   * the deployed tree get wiped by a deploy), or a file that is there but corrupt.
+   * Guessing between them wastes an afternoon, so the app says which it is.
+   */
+  app.get('/api/v1/businesses/:id/logo-status', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await canSeeBusiness(req, id))) return reply.code(404).send({ error: 'Not found.' });
+    const [biz] = await db.select({ logoPath: businesses.logoPath }).from(businesses)
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, id))).limit(1);
+
+    if (!biz?.logoPath) return { set: false, ok: false, reason: 'No logo uploaded for this business yet.' };
+    const full = path.join(uploadDir(), biz.logoPath);
+    const bytes = await readFile(full).catch(() => null);
+    if (!bytes) {
+      return {
+        set: true, ok: false, missing: true,
+        reason: 'The logo is recorded but its file is not on the server any more. This happens when uploads are stored inside the deployed folder and a deploy replaces it. Re-upload the logo, and keep uploads on a path the deploy does not touch.',
+      };
+    }
+    const check = checkImage(bytes);
+    return check.ok
+      ? { set: true, ok: true, width: check.width, height: check.height, reason: '' }
+      : { set: true, ok: false, reason: `The file is there but cannot be read: ${check.reason}` };
+  });
+
   // ---- Per-business (folder) image ----
   app.post('/api/v1/folders/:id/image', async (req, reply) => {
     const { accountId } = authOf(req);

@@ -160,6 +160,7 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
               </div>
             </div>
             {uploadLogo.error && <p className="text-[11px] text-red-400">{(uploadLogo.error as Error).message}</p>}
+            <LogoStatus businessId={business.id} bust={logoBust} />
 
             <div>
               <label className={label}>Display name on documents</label>
@@ -613,6 +614,38 @@ function NumberingEditor({ businessId, form, set, field, label }: {
         })}
       </div>
       <p className="text-[11px] text-slate-500">Save to apply. The next number updates when you reopen this page.</p>
+    </div>
+  );
+}
+
+/**
+ * Says why a logo is not showing.
+ *
+ * "The logo does not pull through" has three different causes that look identical:
+ * none uploaded, the file is gone from the server, or it is there but unreadable.
+ * Only the middle one needs explaining, because it is not the user's fault and the
+ * fix is not obvious: uploads kept inside the deployed folder get wiped whenever
+ * the app is deployed.
+ */
+function LogoStatus({ businessId, bust }: { businessId: number; bust: number }) {
+  const { data } = useQuery({
+    queryKey: ['logo-status', businessId, bust],
+    queryFn: () => apiGet<{ set: boolean; ok: boolean; missing?: boolean; reason: string; width?: number; height?: number }>(
+      `/businesses/${businessId}/logo-status`),
+    retry: false,
+  });
+  if (!data || !data.set) return null;
+  if (data.ok) {
+    return (
+      <p className="text-[11px] text-slate-500">
+        Logo is {data.width} by {data.height} pixels and renders on documents.
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+      <div className="text-xs font-medium text-amber-300">This logo will not appear on documents</div>
+      <p className="mt-1 text-[11px] text-amber-200/80">{data.reason}</p>
     </div>
   );
 }

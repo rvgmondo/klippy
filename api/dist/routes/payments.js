@@ -1,13 +1,13 @@
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings, documents, payments } from '../db/schema.js';
+import { paymentSettings, documents, payments, events } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { appUrl } from '../lib/mailer.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
-import { buildCheckout, verifyItnSignature, validateItnWithServer, isValidItnHost, } from '../lib/payfast.js';
+import { buildCheckout, verifyItnSignature, validateItnWithServer, signature, } from '../lib/payfast.js';
 /** Load and decrypt an account's PayFast credentials, or null if not usable. */
 async function loadCreds(accountId) {
     const [row] = await db.select().from(paymentSettings)
@@ -175,6 +175,31 @@ export async function paymentRoutes(app) {
             + `<form id="pf" action="${url}" method="post">${inputs}</form>`
             + `<script>document.getElementById('pf').submit()</script>`);
     });
+    /**
+     * What PayFast has actually sent us, most recent first.
+     *
+     * Without this a failed payment is invisible: the money leaves the customer, the
+     * invoice stays unpaid, and there is nothing to look at. Each row says which
+     * check passed or failed and why.
+     */
+    app.get('/api/v1/account/payfast/activity', { preHandler: app.requireAuth }, async (req) => {
+        const { accountId } = authOf(req);
+        const rows = await db.select({
+            id: events.id, createdAt: events.createdAt,
+            payload: events.payload, results: events.results,
+        }).from(events)
+            .where(and(eq(events.accountId, accountId), eq(events.name, 'payfast.itn')))
+            .orderBy(desc(events.id))
+            .limit(20);
+        return {
+            activity: rows.map((r) => ({
+                id: r.id, at: r.createdAt,
+                ok: r.results?.[0]?.ok ?? false,
+                outcome: r.results?.[0]?.outcome ?? '',
+                detail: r.payload ?? {},
+            })),
+        };
+    });
     // ---- ITN webhook (PUBLIC: PayFast calls this, no user session) -----------
     // Always answers 200 so PayFast stops retrying, but only records a payment once
     // the notification passes every check: right shape, our signature, the amount we
@@ -198,22 +223,53 @@ export async function paymentRoutes(app) {
             if (!settings || !settings.enabled)
                 return ok();
             const passphrase = settings.passphraseEnc ? decryptSecret(settings.passphraseEnc) : null;
-            // Advisory: log if the source host is not a known PayFast one. The server
-            // validation below is the authoritative origin check, so this only warns.
-            if (!isValidItnHost(req.hostname)) {
-                req.log.warn({ host: req.hostname }, 'payfast ITN from unexpected host');
-            }
             const sigOk = verifyItnSignature(body, passphrase);
             const amountOk = Math.abs(Number(body.amount_gross || 0) - Number(doc.total)) < 0.01;
             const complete = body.payment_status === 'COMPLETE';
+            /**
+             * Write down what happened, where it can actually be seen.
+             *
+             * Every rejection used to go to req.log, which on shared hosting means a file
+             * nobody reads. A payment that silently does not arrive is the worst possible
+             * failure to debug, so each attempt is recorded with the outcome of every
+             * check. The signature is recorded too: it is a hash, not a secret, and
+             * comparing ours against theirs is what tells you whether the passphrase is
+             * the problem.
+             */
+            const record = async (outcome, ok2) => {
+                await db.insert(events).values({
+                    accountId: doc.accountId,
+                    businessId: doc.businessId,
+                    name: 'payfast.itn',
+                    payload: {
+                        docId, number: doc.number,
+                        paymentStatus: body.payment_status ?? '(none)',
+                        amountGross: body.amount_gross ?? '(none)',
+                        expected: String(doc.total),
+                        pfPaymentId: body.pf_payment_id ?? '',
+                        sandbox: settings.sandbox,
+                        passphraseSet: !!passphrase,
+                        signatureTheirs: (body.signature ?? '').slice(0, 12),
+                        signatureOurs: signature(body, passphrase).slice(0, 12),
+                    },
+                    results: [{ handler: 'payfast.itn', outcome, ok: ok2 }],
+                }).catch(() => { });
+            };
             if (!sigOk || !amountOk || !complete) {
+                const why = [
+                    !complete && `payment_status is ${body.payment_status || 'missing'}, not COMPLETE`,
+                    !sigOk && 'the signature did not match, which usually means the passphrase here differs from the one on your PayFast account',
+                    !amountOk && `the amount ${body.amount_gross} does not match the invoice total ${doc.total}`,
+                ].filter(Boolean).join('; ');
                 req.log.warn({ docId, sigOk, amountOk, status: body.payment_status }, 'payfast ITN rejected');
+                await record(`Rejected: ${why}`, false);
                 return ok();
             }
             // Definitive check: PayFast confirms it sent this exact payload.
             const serverOk = await validateItnWithServer(raw, settings.sandbox);
             if (!serverOk) {
                 req.log.warn({ docId }, 'payfast ITN failed server validation');
+                await record('Rejected: PayFast did not confirm this notification when we handed it back. If the sandbox is unreachable from the server this check cannot pass.', false);
                 return ok();
             }
             // Idempotency: if we already logged this PayFast payment id, do nothing.
@@ -240,6 +296,7 @@ export async function paymentRoutes(app) {
                     .where(tenantWhere(documents, doc.accountId, eq(documents.id, docId)));
             }
             req.log.info({ docId, pfId }, 'payfast payment recorded');
+            await record(`Payment of ${body.amount_gross} recorded against ${doc.number}`, true);
             return ok();
         }
         catch (err) {

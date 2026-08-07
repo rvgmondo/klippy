@@ -110,6 +110,73 @@ export function PaymentsPanel() {
         </button>
         {saved && <span className="text-sm text-violet-300">Saved</span>}
       </div>
+
+      <PayfastActivity />
     </div>
+  );
+}
+
+/**
+ * What PayFast has actually sent, most recent first.
+ *
+ * A payment that silently does not arrive is the worst thing to debug: the money
+ * leaves the customer, the invoice stays unpaid, and there is nothing to look at.
+ * Each row says which check passed or failed and why, so the answer is here rather
+ * than in a log file on the server.
+ */
+export function PayfastActivity() {
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['payfast-activity'],
+    queryFn: () => apiGet<{
+      activity: { id: number; at: string; ok: boolean; outcome: string; detail: Record<string, unknown> }[];
+    }>('/account/payfast/activity'),
+    retry: false,
+  });
+  const rows = data?.activity ?? [];
+
+  return (
+    <section className="mt-6 border-t border-slate-800 pt-5">
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recent PayFast notifications</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            PayFast tells the server about a payment separately from sending the customer back here.
+            If an invoice is not marked paid, the reason is in this list.
+          </p>
+        </div>
+        <button onClick={() => refetch()} disabled={isFetching}
+          className="shrink-0 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+          {isFetching ? 'Checking...' : 'Refresh'}
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-700 p-4 text-xs text-slate-400">
+          Nothing received yet. If you have paid a sandbox invoice and this is still empty, PayFast never
+          reached the server: check that your app URL is the public https address and that
+          /api/v1/payfast/notify is reachable from outside.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((r) => (
+            <div key={r.id}
+              className={`rounded-lg border px-3 py-2 ${r.ok ? 'border-green-500/25 bg-green-500/5' : 'border-amber-500/25 bg-amber-500/5'}`}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className={`text-xs font-medium ${r.ok ? 'text-green-300' : 'text-amber-300'}`}>
+                  {String(r.detail.number ?? '')}
+                </span>
+                <span className="num text-[10px] text-slate-500">{new Date(r.at).toLocaleString()}</span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-300">{r.outcome}</p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                status {String(r.detail.paymentStatus)} | they sent {String(r.detail.amountGross)},
+                invoice is {String(r.detail.expected)} | signature theirs {String(r.detail.signatureTheirs)},
+                ours {String(r.detail.signatureOurs)} | passphrase {r.detail.passphraseSet ? 'set' : 'not set'}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
