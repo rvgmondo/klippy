@@ -40,6 +40,12 @@ export function PdfDesignPanel({ business }: { business: Business }) {
 
   // The preview URL carries the pending choice, so it shows what Save would do.
   const previewUrl = `/api/v1/businesses/${business.id}/pdf-preview?template=${template}&typeface=${typeface}&issuer=${issuer}`;
+  // PDF open parameters. Without these the browser wraps the document in its own
+  // viewer, and the toolbar plus the thumbnail rail eat enough width that the page
+  // renders at about 60% in a corner, which is a poor way to judge a design.
+  // FitH makes it fill the width instead. Ignored by viewers that do not support
+  // them, so nothing breaks where they are not honoured.
+  const embedUrl = `${previewUrl}#toolbar=0&navpanes=0&scrollbar=0&statusbar=0&view=FitH`;
   const dirty = template !== (business.pdfTemplate ?? 'modern')
     || typeface !== (business.pdfTypeface ?? 'sans')
     || issuer !== (business.pdfIssuerPlacement ?? 'footer');
@@ -112,10 +118,11 @@ export function PdfDesignPanel({ business }: { business: Business }) {
             Open full size <ExternalLink size={11} />
           </a>
         </div>
-        {/* Keyed so changing the design forces a reload rather than showing a cached page. */}
-        <object key={previewUrl} data={previewUrl} type="application/pdf"
-          className="h-[460px] w-full rounded-lg border border-slate-700 bg-slate-900">
-          <div className="p-4 text-xs text-slate-400">
+        {/* Keyed so changing the design forces a reload rather than showing a cached page.
+            White behind it, because the thing being judged is ink on paper. */}
+        <object key={embedUrl} data={embedUrl} type="application/pdf"
+          className="h-[620px] w-full rounded-lg border border-slate-700 bg-white">
+          <div className="p-4 text-xs text-slate-600">
             Your browser will not show the PDF inline.{' '}
             <a href={previewUrl} target="_blank" rel="noreferrer" className="text-[var(--accent)] underline">
               Open the preview in a new tab
