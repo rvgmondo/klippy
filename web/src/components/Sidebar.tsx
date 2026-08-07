@@ -11,6 +11,7 @@ import {
   Home, Target, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, AlertTriangle, type LucideIcon,
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { PortalAccessModal } from './PortalAccessModal';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
 import { BusinessSwitcher, type BusinessSelection } from './BusinessSwitcher';
@@ -336,6 +337,7 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
 }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(depth === 0);
+  const [portalFor, setPortalFor] = useState<{ id: number; name: string } | null>(null);
   const children = all.filter((f) => f.parentId === folder.id);
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({ id: `f-${folder.id}` });
@@ -443,6 +445,8 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
               if (v === null) return;
               setBillingEmail.mutate(v.trim());
             } }] : []),
+            // Only top-level folders are clients, and only a client has a portal.
+            ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
             { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`)) deleteFolder.mutate(); } },
           ]}
@@ -456,6 +460,11 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
           <FolderList folders={children} all={all} depth={depth + 1}
             selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
         </div>
+      )}
+
+      {portalFor && (
+        <PortalAccessModal folderId={portalFor.id} folderName={portalFor.name}
+          onClose={() => setPortalFor(null)} />
       )}
     </div>
   );

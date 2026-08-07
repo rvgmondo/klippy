@@ -105,7 +105,7 @@ export async function portalRoutes(app: FastifyInstance) {
 
     const issued = await issueLoginToken(parsed.data.email);
     if (issued) {
-      const link = `${appUrl()}/portal/enter?token=${encodeURIComponent(issued.raw)}`;
+      const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
       const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);
       const content = {
         heading: 'Your sign-in link',
@@ -319,8 +319,8 @@ export async function portalRoutes(app: FastifyInstance) {
       amount: balance.outstanding,
       itemName: `Invoice ${doc.number}`,
       mPaymentId: `doc-${doc.id}`,
-      returnUrl: `${base}/portal?paid=${encodeURIComponent(doc.number)}`,
-      cancelUrl: `${base}/portal?cancelled=${encodeURIComponent(doc.number)}`,
+      returnUrl: `${base}/?portal=1&paid=${encodeURIComponent(doc.number)}`,
+      cancelUrl: `${base}/?portal=1&cancelled=${encodeURIComponent(doc.number)}`,
       notifyUrl: `${base}/api/v1/payfast/notify`,
       buyerEmail: c.user.email,
     });
@@ -573,7 +573,7 @@ export async function portalAdminRoutes(app: FastifyInstance) {
 async function sendInvite(email: string): Promise<void> {
   const issued = await issueLoginToken(email);
   if (!issued) return;
-  const link = `${appUrl()}/portal/enter?token=${encodeURIComponent(issued.raw)}`;
+  const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
   const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);
   const content = {
     heading: 'Your account is ready',

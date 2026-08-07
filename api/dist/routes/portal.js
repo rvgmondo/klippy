@@ -64,7 +64,7 @@ export async function portalRoutes(app) {
             return reply.code(400).send({ error: 'Enter a valid email address.' });
         const issued = await issueLoginToken(parsed.data.email);
         if (issued) {
-            const link = `${appUrl()}/portal/enter?token=${encodeURIComponent(issued.raw)}`;
+            const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
             const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);
             const content = {
                 heading: 'Your sign-in link',
@@ -284,8 +284,8 @@ export async function portalRoutes(app) {
             amount: balance.outstanding,
             itemName: `Invoice ${doc.number}`,
             mPaymentId: `doc-${doc.id}`,
-            returnUrl: `${base}/portal?paid=${encodeURIComponent(doc.number)}`,
-            cancelUrl: `${base}/portal?cancelled=${encodeURIComponent(doc.number)}`,
+            returnUrl: `${base}/?portal=1&paid=${encodeURIComponent(doc.number)}`,
+            cancelUrl: `${base}/?portal=1&cancelled=${encodeURIComponent(doc.number)}`,
             notifyUrl: `${base}/api/v1/payfast/notify`,
             buyerEmail: c.user.email,
         });
@@ -544,7 +544,7 @@ async function sendInvite(email) {
     const issued = await issueLoginToken(email);
     if (!issued)
         return;
-    const link = `${appUrl()}/portal/enter?token=${encodeURIComponent(issued.raw)}`;
+    const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
     const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);
     const content = {
         heading: 'Your account is ready',
