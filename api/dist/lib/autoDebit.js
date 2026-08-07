@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { autoDebitAttempts, documents, payments, paymentSettings, subscriptions, events, } from '../db/schema.js';
+import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
+import { settingsFor } from './paymentSettings.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
 import { chargeToken } from './payfast.js';
@@ -19,12 +20,13 @@ export async function attemptAutoDebit(r) {
         });
         return { outcome, detail };
     };
-    const [settings] = await db.select().from(paymentSettings)
-        .where(eq(paymentSettings.accountId, r.accountId)).limit(1);
+    // Per business, so a subscription is charged through the merchant account that
+    // business actually banks into.
+    const settings = await settingsFor(r.accountId, r.businessId);
     if (!settings?.enabled)
-        return { outcome: 'skipped', detail: 'PayFast is off for this account.' };
+        return { outcome: 'skipped', detail: 'PayFast is not set up for this business.' };
     if (!settings.autoDebitEnabled)
-        return { outcome: 'skipped', detail: 'Auto-debit is off for this account.' };
+        return { outcome: 'skipped', detail: 'Auto-debit is off for this business.' };
     const [sub] = await db.select().from(subscriptions)
         .where(tenantWhere(subscriptions, r.accountId, eq(subscriptions.id, r.subscriptionId))).limit(1);
     if (!sub)

@@ -8,27 +8,12 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { appUrl } from '../lib/mailer.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
+import { credsFor, settingsFor } from '../lib/paymentSettings.js';
+import { assertBusinessAccess } from '../lib/access.js';
 import {
   buildCheckout, verifyItnSignature, validateItnWithServer, signature,
   type PayfastCreds,
 } from '../lib/payfast.js';
-
-/** Load and decrypt an account's PayFast credentials, or null if not usable. */
-async function loadCreds(accountId: number): Promise<PayfastCreds | null> {
-  const [row] = await db.select().from(paymentSettings)
-    .where(eq(paymentSettings.accountId, accountId)).limit(1);
-  if (!row || !row.enabled || !row.merchantId || !row.merchantKeyEnc) return null;
-  try {
-    return {
-      merchantId: row.merchantId,
-      merchantKey: decryptSecret(row.merchantKeyEnc),
-      passphrase: row.passphraseEnc ? decryptSecret(row.passphraseEnc) : null,
-      sandbox: row.sandbox,
-    };
-  } catch {
-    return null; // bad key / rotated PAYMENTS_SECRET: treat as not configured
-  }
-}
 
 /**
  * Should this checkout ask PayFast to store the card?
@@ -64,11 +49,16 @@ export async function paymentRoutes(app: FastifyInstance) {
     });
 
   // ---- Settings (owner/admin) ----------------------------------------------
-  // Status only. Secrets are never returned; the UI shows whether each is set.
-  app.get('/api/v1/account/payfast', { preHandler: app.requireAuth }, async (req) => {
-    const { accountId } = authOf(req);
+  // The same pair of handlers serves the workspace default and each business, so
+  // there is one code path deciding what may be saved rather than two that drift.
+  // Scope 0 is the workspace; any other value is that business's own gateway.
+  const readSettings = async (accountId: number, businessId: number) => {
     const [row] = await db.select().from(paymentSettings)
-      .where(eq(paymentSettings.accountId, accountId)).limit(1);
+      .where(and(eq(paymentSettings.accountId, accountId), eq(paymentSettings.businessId, businessId)))
+      .limit(1);
+    // What would actually be used if this business took a payment right now, which
+    // is not the same question as what is stored against it.
+    const effective = businessId ? await settingsFor(accountId, businessId) : row;
     return {
       configured: {
         merchantId: row?.merchantId ?? '',
@@ -80,15 +70,17 @@ export async function paymentRoutes(app: FastifyInstance) {
         autoDebitLive: row?.autoDebitLive ?? false,
         autoDebitMax: row?.autoDebitMax ?? '5000.00',
       },
-      // If this is false, the server cannot encrypt secrets and saving will fail.
+      // Where the money would go, spelled out, so nobody has to infer it.
+      source: businessId ? (row ? 'own' : (effective ? 'workspace' : 'none')) : (row ? 'own' : 'none'),
+      effectiveMerchantId: effective?.enabled ? (effective.merchantId ?? '') : '',
       serverReady: secretsAvailable(),
     };
-  });
+  };
 
-  app.patch('/api/v1/account/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
-    const { accountId, role } = authOf(req);
-    if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can change settings.' });
-
+  const writeSettings = async (
+    accountId: number, businessId: number, body: unknown,
+    reply: { code: (n: number) => { send: (o: unknown) => unknown } },
+  ) => {
     const parsed = z.object({
       merchantId: z.string().trim().max(40).optional(),
       // Blank string = leave unchanged; a real value = set/replace it.
@@ -99,30 +91,30 @@ export async function paymentRoutes(app: FastifyInstance) {
       autoDebitEnabled: z.boolean().optional(),
       autoDebitLive: z.boolean().optional(),
       autoDebitMax: z.number().positive().max(1000000).optional(),
-    }).safeParse(req.body);
+    }).safeParse(body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
 
     if ((d.merchantKey || d.passphrase) && !secretsAvailable()) {
       return reply.code(503).send({ error: 'The server cannot store payment secrets yet. Set PAYMENTS_SECRET in the app environment and restart.' });
     }
+
+    const scope = and(eq(paymentSettings.accountId, accountId), eq(paymentSettings.businessId, businessId));
+    const [existing] = await db.select().from(paymentSettings).where(scope).limit(1);
+
     // Turning it on without credentials present would be a footgun.
     if (d.enabled) {
-      const [existing] = await db.select().from(paymentSettings).where(eq(paymentSettings.accountId, accountId)).limit(1);
       const willHaveKey = d.merchantKey || existing?.merchantKeyEnc;
       const willHaveId = d.merchantId ?? existing?.merchantId;
       if (!willHaveId || !willHaveKey) {
         return reply.code(400).send({ error: 'Add your merchant ID and key before enabling PayFast.' });
       }
     }
-
     // Live charging is the one switch that can move money on its own, so it cannot
     // be reached without PayFast itself being on and auto-debit deliberately
     // enabled. Turning either of those off drops live charging with it, rather than
     // leaving it armed for whenever they come back on.
     if (d.autoDebitLive) {
-      const [existing] = await db.select().from(paymentSettings)
-        .where(eq(paymentSettings.accountId, accountId)).limit(1);
       const on = d.enabled ?? existing?.enabled;
       const auto = d.autoDebitEnabled ?? existing?.autoDebitEnabled;
       if (!on || !auto) {
@@ -144,13 +136,51 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (d.sandbox !== undefined) patch.sandbox = d.sandbox;
     if (d.enabled !== undefined) patch.enabled = d.enabled;
 
-    const [existing] = await db.select({ id: paymentSettings.id }).from(paymentSettings)
-      .where(eq(paymentSettings.accountId, accountId)).limit(1);
     if (existing) {
-      await db.update(paymentSettings).set(patch).where(eq(paymentSettings.accountId, accountId));
+      await db.update(paymentSettings).set(patch).where(scope);
     } else {
-      await db.insert(paymentSettings).values(withTenant(accountId, patch as never));
+      await db.insert(paymentSettings).values(withTenant(accountId, { ...patch, businessId } as never));
     }
+    return { ok: true };
+  };
+
+  app.get('/api/v1/account/payfast', { preHandler: app.requireAuth }, async (req) => {
+    const { accountId } = authOf(req);
+    return readSettings(accountId, 0);
+  });
+
+  app.patch('/api/v1/account/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can change settings.' });
+    return writeSettings(accountId, 0, req.body, reply);
+  });
+
+  // Each business can bank its own money. Guarded by access to that business, not
+  // just by being a workspace admin.
+  app.get('/api/v1/businesses/:id/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
+    return readSettings(accountId, id);
+  });
+
+  app.patch('/api/v1/businesses/:id/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
+    return writeSettings(accountId, id, req.body, reply);
+  });
+
+  // Stop using this business's own gateway and fall back to the workspace one.
+  app.delete('/api/v1/businesses/:id/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
+    await db.delete(paymentSettings)
+      .where(and(eq(paymentSettings.accountId, accountId), eq(paymentSettings.businessId, id)));
     return { ok: true };
   });
 
@@ -162,12 +192,13 @@ export async function paymentRoutes(app: FastifyInstance) {
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
 
-    const creds = await loadCreds(accountId);
-    if (!creds) return reply.code(400).send({ error: 'PayFast is not set up. Add and enable it in Settings > Payments.' });
-
     const [doc] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!doc) return reply.code(404).send({ error: 'Invoice not found.' });
+    // Resolved from the invoice's business, so each business is paid into its own
+    // merchant account rather than whichever one was set up first.
+    const creds = await credsFor(accountId, doc.businessId);
+    if (!creds) return reply.code(400).send({ error: 'PayFast is not set up for this business. Add it under the business, or set a workspace default in Settings > Payments.' });
     if (doc.type !== 'invoice') return reply.code(400).send({ error: 'Only invoices can be paid.' });
     if (doc.status === 'paid') return reply.code(400).send({ error: 'This invoice is already paid.' });
 
@@ -204,7 +235,7 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (!doc || doc.type !== 'invoice') return page('Not found', 'We could not find that invoice.');
     if (doc.status === 'paid') return page('Already paid', `Invoice ${doc.number} is already paid. Thank you.`);
 
-    const creds = await loadCreds(doc.accountId);
+    const creds = await credsFor(doc.accountId, doc.businessId);
     if (!creds) return page('Online payment unavailable', 'This invoice cannot be paid online right now.');
 
     const base = appUrl();
@@ -295,8 +326,9 @@ export async function paymentRoutes(app: FastifyInstance) {
       const [doc] = await db.select().from(documents).where(eq(documents.id, docId)).limit(1);
       if (!doc) return ok();
 
-      const [settings] = await db.select().from(paymentSettings)
-        .where(eq(paymentSettings.accountId, doc.accountId)).limit(1);
+      // The same resolver the checkout used, so the signature is checked against
+      // the passphrase of the merchant account that actually took the money.
+      const settings = await settingsFor(doc.accountId, doc.businessId);
       if (!settings || !settings.enabled) return ok();
       const passphrase = settings.passphraseEnc ? decryptSecret(settings.passphraseEnc) : null;
 

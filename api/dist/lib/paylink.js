@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings } from '../db/schema.js';
+import { documents } from '../db/schema.js';
+import { settingsFor } from './paymentSettings.js';
 import { appUrl } from './mailer.js';
 import { signPayToken } from './secretbox.js';
 /**
@@ -10,8 +11,12 @@ import { signPayToken } from './secretbox.js';
  * the automatic recurring-invoice email.
  */
 export async function payLinkFor(accountId, docId) {
-    const [settings] = await db.select({ enabled: paymentSettings.enabled }).from(paymentSettings)
-        .where(eq(paymentSettings.accountId, accountId)).limit(1);
+    // Resolved through the invoice's own business: a business with no gateway of its
+    // own gets the workspace one, and one that has switched payment off gets no link
+    // rather than a link that pays somebody else.
+    const [doc] = await db.select({ businessId: documents.businessId }).from(documents)
+        .where(eq(documents.id, docId)).limit(1);
+    const settings = await settingsFor(accountId, doc?.businessId ?? null);
     if (!settings?.enabled)
         return null;
     const token = signPayToken(docId);

@@ -725,6 +725,11 @@ export const offerings = mysqlTable('offerings', {
   stockQty: int('stock_qty'),                                   // mainly Products
   reorderPoint: int('reorder_point'),                           // mainly Products
   active: boolean('active').default(true).notNull(),
+  // What selling this should set up automatically. 'cpanel' means a paid invoice
+  // for this offering creates a hosting account on the WHM server, using the
+  // package named here. 'none' is everything else, which is most things.
+  provisioning: mysqlEnum('provisioning', ['none', 'cpanel']).default('none').notNull(),
+  whmPackage: varchar('whm_package', { length: 60 }),
   position: int('position', { unsigned: true }).default(0).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
@@ -780,6 +785,10 @@ export const subscriptions = mysqlTable('subscriptions', {
   // not the same as agreeing to be charged every month, and in South Africa a debit
   // arrangement needs the customer's mandate. Off until someone turns it on.
   autoDebit: boolean('auto_debit').default(false).notNull(),
+  // The domain this subscription is for, when it provisions hosting. A cPanel
+  // account cannot be created without one, so it is asked for when the
+  // subscription starts rather than guessed at provisioning time.
+  domain: varchar('domain', { length: 190 }),
   // How often this bills, in months: 1 monthly, 3 quarterly, 12 annually. Hosting
   // and domains are usually sold by the year, so monthly-only was a real gap.
   intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),
@@ -805,6 +814,21 @@ export const paymentSettings = mysqlTable('payment_settings', {
   id: pk(),
   accountId: int('account_id', { unsigned: true }).notNull()
     .references(() => accounts.id, { onDelete: 'cascade' }),
+  /**
+   * Which business these credentials belong to, or 0 for the whole workspace.
+   *
+   * Businesses are usually separate legal entities with separate bank accounts, so
+   * one gateway for the workspace would pay every business's invoices into
+   * whichever merchant account was set up first. That is the kind of mistake you
+   * find out about from your accountant months later.
+   *
+   * Zero rather than NULL on purpose: MySQL lets a unique index hold any number of
+   * NULLs, so a nullable column here would not actually stop two workspace-default
+   * rows existing, and "which of these two merchant accounts gets the money" is not
+   * a question anyone should have to answer. There is no foreign key for the same
+   * reason, since 0 is not a business.
+   */
+  businessId: int('business_id', { unsigned: true }).default(0).notNull(),
   provider: varchar('provider', { length: 20 }).default('payfast').notNull(),
   merchantId: varchar('merchant_id', { length: 40 }),
   // Encrypted blobs (iv:tag:ciphertext hex). Never plaintext at rest.
@@ -830,7 +854,69 @@ export const paymentSettings = mysqlTable('payment_settings', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
-  uniqueIndex('uniq_payment_settings_account').on(t.accountId),
+  uniqueIndex('uniq_payment_settings_scope').on(t.accountId, t.businessId),
+]);
+
+// ---- Hosting provisioning (WHM / cPanel) -----------------------------------
+/**
+ * Credentials and switches for the WHM server that hosting accounts are created
+ * on. One row per account. The API token is a SECRET with root-level power over a
+ * whole server, so it is encrypted at rest exactly like the PayFast keys and never
+ * returned to the browser.
+ *
+ * `live` is the same idea as auto-debit's: with it off the whole path runs and
+ * writes down what it would have created, without touching the server.
+ */
+export const hostingSettings = mysqlTable('hosting_settings', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  /** Scoped like payment settings: a business's own server, or 0 for the workspace. */
+  businessId: int('business_id', { unsigned: true }).default(0).notNull(),
+  whmHost: varchar('whm_host', { length: 190 }),
+  whmUser: varchar('whm_user', { length: 60 }).default('root'),
+  whmTokenEnc: text('whm_token_enc'),
+  // Many WHM boxes serve port 2087 with a self-signed certificate. Verifying is
+  // the default; this is the deliberate, per-account opt-out rather than a silent
+  // one buried in code.
+  allowSelfSigned: boolean('allow_self_signed').default(false).notNull(),
+  enabled: boolean('enabled').default(false).notNull(),
+  live: boolean('live').default(false).notNull(),
+  // Days past due before an account is suspended. Null means never, which is the
+  // default: cutting off a customer's website is not something to start doing by
+  // accident.
+  suspendAfterDays: int('suspend_after_days'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex('uniq_hosting_settings_scope').on(t.accountId, t.businessId),
+]);
+
+/**
+ * A hosting account Klippy has created, one per subscription.
+ *
+ * Unique on subscriptionId, which is what stops a second payment creating a second
+ * cPanel account for the same customer. Note there is no "delete" status: Klippy
+ * suspends and unsuspends, but terminating an account destroys the customer's site
+ * and mail, and nothing automatic should be able to do that.
+ */
+export const hostingAccounts = mysqlTable('hosting_accounts', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }),
+  subscriptionId: int('subscription_id', { unsigned: true }).notNull(),
+  domain: varchar('domain', { length: 190 }).notNull(),
+  username: varchar('username', { length: 32 }),
+  whmPackage: varchar('whm_package', { length: 60 }),
+  status: mysqlEnum('status', ['pending', 'active', 'suspended', 'failed', 'dry-run'])
+    .default('pending').notNull(),
+  detail: text('detail'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex('uniq_hosting_subscription').on(t.subscriptionId),
+  index('idx_hosting_account').on(t.accountId, t.status),
 ]);
 
 /**

@@ -35,7 +35,7 @@ import { PdfDesignPanel } from './PdfDesignPanel';
 
 type SectionId =
   | 'profile' | 'appearance'
-  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf'
+  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments'
   | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'automation'
   | 'labels' | 'tokens' | 'notes';
 
@@ -51,6 +51,7 @@ const BUSINESS: Item[] = [
   { id: 'biz:brand', label: 'Brand', icon: Building2, hint: 'Logo, display name and brand colour' },
   { id: 'biz:invoicing', label: 'Invoicing', icon: Receipt, hint: 'Address, VAT number, bank details and terms' },
   { id: 'biz:pdf', label: 'Document design', icon: FileText, hint: 'How your invoices and quotes look as a PDF' },
+  { id: 'biz:payments', label: 'Payments', icon: CreditCard, hint: 'The merchant account this business is paid into' },
   { id: 'biz:reminders', label: 'Payment reminders', icon: BellRing, hint: 'When unpaid invoices get chased' },
   { id: 'biz:email', label: 'Email', icon: Mail, hint: 'What this business sends from' },
   { id: 'biz:access', label: 'Access', icon: Shield, hint: 'Who can work in this business' },
@@ -147,6 +148,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     if (!business) return <p className="text-sm text-slate-500">Pick a business first.</p>;
     if (id === 'biz:modules') return <ModulesPanel business={business} />;
     if (id === 'biz:pdf') return <PdfDesignPanel business={business} />;
+    if (id === 'biz:payments') return <PaymentsPanel businessId={business.id} />;
     return <BusinessSettingsPanel business={business} only={id.slice(4) as BusinessSection} />;
   }
   switch (id) {

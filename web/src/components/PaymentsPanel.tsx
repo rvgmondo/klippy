@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPatch } from '../lib/api';
+import { apiGet, apiPatch, apiDelete } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 
 interface Configured {
@@ -8,16 +8,28 @@ interface Configured {
   sandbox: boolean; enabled: boolean;
   autoDebitEnabled: boolean; autoDebitLive: boolean; autoDebitMax: string;
 }
-interface Status { configured: Configured; serverReady: boolean }
+interface Status {
+  configured: Configured;
+  serverReady: boolean;
+  /** 'own' = this scope has its own gateway, 'workspace' = inherited, 'none' = nothing set. */
+  source: 'own' | 'workspace' | 'none';
+  /** The merchant account that would actually be paid right now. */
+  effectiveMerchantId: string;
+}
 
 /**
  * PayFast setup, so clients can pay invoices online. Deliberately blunt about the
  * fact that it should be tested in sandbox before it is trusted with real money.
  */
-export function PaymentsPanel() {
+export function PaymentsPanel({ businessId }: { businessId?: number } = {}) {
   const qc = useQueryClient();
+  // Businesses are usually separate legal entities banking into separate accounts,
+  // so each one can hold its own gateway. Without a businessId this is the
+  // workspace default that businesses fall back to.
+  const base = businessId ? `/businesses/${businessId}/payfast` : '/account/payfast';
+  const key = ['payfast', businessId ?? 0];
   const { data, error, refetch } = useQuery({
-    queryKey: ['payfast'], queryFn: () => apiGet<Status>('/account/payfast'), retry: false,
+    queryKey: key, queryFn: () => apiGet<Status>(base), retry: false,
   });
 
   const [merchantId, setMerchantId] = useState('');
@@ -38,7 +50,7 @@ export function PaymentsPanel() {
   }, [data, loaded]);
 
   const save = useMutation({
-    mutationFn: () => apiPatch('/account/payfast', {
+    mutationFn: () => apiPatch(base, {
       merchantId,
       // Only send secrets when the field was actually filled, so a blank leaves the
       // stored value untouched.
@@ -53,6 +65,11 @@ export function PaymentsPanel() {
     },
   });
 
+  const useWorkspace = useMutation({
+    mutationFn: () => apiDelete(base),
+    onSuccess: () => { setLoaded(false); qc.invalidateQueries({ queryKey: ['payfast'] }); },
+  });
+
   if (error) return <ErrorNote error={error} onRetry={() => refetch()} />;
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
 
@@ -64,7 +81,36 @@ export function PaymentsPanel() {
       <p className="text-xs text-slate-500">
         Let clients pay an invoice online with card or Instant EFT through PayFast. When they
         pay, the invoice marks itself paid.
+        {businessId
+          ? ' This business banks its own money, so these are its credentials, not the workspace ones.'
+          : ' This is the workspace default, used by any business that has not set up its own.'}
       </p>
+
+      {/* Which merchant account actually gets paid. Worth stating outright: money
+          arriving in the wrong business's account is the kind of mistake that
+          surfaces months later, at the accountant. */}
+      {businessId && (
+        <div className={`rounded-xl border p-3 text-xs ${
+          data.source === 'own' ? 'border-slate-700 bg-slate-800/40 text-slate-300'
+            : 'border-sky-500/30 bg-sky-500/10 text-sky-300'}`}>
+          {data.source === 'own' ? (
+            <>
+              Invoices for this business pay into merchant{' '}
+              <span className="num text-slate-100">{data.effectiveMerchantId || 'not enabled'}</span>.
+              <button onClick={() => useWorkspace.mutate()} disabled={useWorkspace.isPending}
+                className="ml-2 underline hover:text-slate-100 disabled:opacity-50">
+                Use the workspace gateway instead
+              </button>
+            </>
+          ) : data.source === 'workspace' ? (
+            <>Using the workspace gateway, merchant{' '}
+              <span className="num">{data.effectiveMerchantId || 'not enabled'}</span>.
+              Fill this in to give this business its own.</>
+          ) : (
+            <>No gateway anywhere yet. Invoices for this business cannot be paid online.</>
+          )}
+        </div>
+      )}
 
       {!data.serverReady && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-300">
@@ -112,8 +158,8 @@ export function PaymentsPanel() {
         {saved && <span className="text-sm text-violet-300">Saved</span>}
       </div>
 
-      <AutoDebitPanel configured={data.configured} />
-      <PayfastActivity />
+      <AutoDebitPanel configured={data.configured} base={base} businessId={businessId} />
+      {!businessId && <PayfastActivity />}
     </div>
   );
 }
@@ -127,13 +173,15 @@ export function PaymentsPanel() {
  * then let it charge. The copy says what each switch actually does instead of
  * leaving the reader to find out with a client's card.
  */
-function AutoDebitPanel({ configured }: { configured: Configured }) {
+function AutoDebitPanel(
+  { configured, base, businessId }: { configured: Configured; base: string; businessId?: number },
+) {
   const qc = useQueryClient();
   const [max, setMax] = useState(configured.autoDebitMax);
   const [saved, setSaved] = useState(false);
 
   const save = useMutation({
-    mutationFn: (patch: Record<string, unknown>) => apiPatch('/account/payfast', patch),
+    mutationFn: (patch: Record<string, unknown>) => apiPatch(base, patch),
     onSuccess: () => {
       setSaved(true); setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ queryKey: ['payfast'] });
@@ -205,7 +253,7 @@ function AutoDebitPanel({ configured }: { configured: Configured }) {
       )}
 
       {save.error && <ErrorNote error={save.error} />}
-      {on && <AutoDebitActivity />}
+      {on && !businessId && <AutoDebitActivity />}
     </section>
   );
 }

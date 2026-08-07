@@ -1,8 +1,9 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
-  autoDebitAttempts, documents, payments, paymentSettings, subscriptions, events,
+  autoDebitAttempts, documents, payments, subscriptions, events,
 } from '../db/schema.js';
+import { settingsFor } from './paymentSettings.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
 import { chargeToken, type PayfastCreds } from './payfast.js';
@@ -14,12 +15,12 @@ import { chargeToken, type PayfastCreds } from './payfast.js';
  * guards matter more than the feature. In order:
  *
  *  1. Three switches have to be on: PayFast enabled, auto-debit enabled for the
- *     account, and auto-debit agreed for that individual subscription. A client
+ *     business, and auto-debit agreed for that individual subscription. A client
  *     paying one invoice online has not agreed to a standing debit, and in South
  *     Africa that arrangement needs their mandate.
  *  2. There has to be a stored token, which only exists if they paid online at
  *     least once through a link that asked for one.
- *  3. The amount has to be at or under the account's cap. A wrong price or a
+ *  3. The amount has to be at or under the business's cap. A wrong price or a
  *     stray zero should stop here, not at the client's bank.
  *  4. An attempt row is written BEFORE PayFast is called, with a unique index on
  *     the invoice. A second run on the same invoice hits a duplicate key and
@@ -66,10 +67,11 @@ export async function attemptAutoDebit(r: DebitRequest): Promise<{ outcome: Debi
     return { outcome, detail };
   };
 
-  const [settings] = await db.select().from(paymentSettings)
-    .where(eq(paymentSettings.accountId, r.accountId)).limit(1);
-  if (!settings?.enabled) return { outcome: 'skipped', detail: 'PayFast is off for this account.' };
-  if (!settings.autoDebitEnabled) return { outcome: 'skipped', detail: 'Auto-debit is off for this account.' };
+  // Per business, so a subscription is charged through the merchant account that
+  // business actually banks into.
+  const settings = await settingsFor(r.accountId, r.businessId);
+  if (!settings?.enabled) return { outcome: 'skipped', detail: 'PayFast is not set up for this business.' };
+  if (!settings.autoDebitEnabled) return { outcome: 'skipped', detail: 'Auto-debit is off for this business.' };
 
   const [sub] = await db.select().from(subscriptions)
     .where(tenantWhere(subscriptions, r.accountId, eq(subscriptions.id, r.subscriptionId))).limit(1);
