@@ -60,6 +60,12 @@ function loadOpenGroups(): Record<string, boolean> {
   try { return JSON.parse(localStorage.getItem(NAV_OPEN_KEY) ?? '{}'); } catch { return {}; }
 }
 
+/** Which businesses are expanded in the tree, by id. */
+const BIZ_OPEN_KEY = 'klippy.openBusinesses';
+function loadOpenBiz(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(BIZ_OPEN_KEY) ?? '{}'); } catch { return {}; }
+}
+
 function NavButton({ nav, view, onNavigate, compact }: {
   nav: { key: string; label: string; icon: LucideIcon }; view: string;
   onNavigate: (v: string) => void; compact?: boolean;
@@ -195,8 +201,8 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         {shown.length === 0 && (
           <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
         )}
-        {shown.map((biz) => (
-          <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders}
+        {shown.map((biz, i) => (
+          <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders} defaultOpen={i === 0}
             folderLabelSingular={account?.folderLabelSingular} folderLabelPlural={account?.folderLabelPlural}
             selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
         ))}
@@ -206,8 +212,8 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
 }
 
 // One business's slice of the sidebar: its Delivery and Operations sections.
-function BusinessBlock({ business, all, showHeader, folderLabelSingular, folderLabelPlural, selectedBoardId, onSelectBoard }: {
-  business: Business; all: TFolder[]; showHeader: boolean;
+function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSingular, folderLabelPlural, selectedBoardId, onSelectBoard }: {
+  business: Business; all: TFolder[]; showHeader: boolean; defaultOpen?: boolean;
   folderLabelSingular?: string; folderLabelPlural?: string;
   selectedBoardId: number | null; onSelectBoard: (id: number) => void;
 }) {
@@ -227,30 +233,53 @@ function BusinessBlock({ business, all, showHeader, folderLabelSingular, folderL
     if (name?.trim()) createFolder.mutate({ name: name.trim(), parentId: null, businessId: business.id, pillar });
   }
 
+  // With several businesses the tree used to render all of them fully expanded,
+  // which is a wall of folders you have to scroll past to reach the one you want.
+  // Each business is now a disclosure, remembered per business.
+  // The first business starts open, so the tree is never a row of shut drawers.
+  const [open, setOpen] = useState(() => (showHeader ? loadOpenBiz()[business.id] ?? !!defaultOpen : true));
+  const toggle = () => setOpen((o) => {
+    const next = !o;
+    try {
+      const all = loadOpenBiz();
+      localStorage.setItem(BIZ_OPEN_KEY, JSON.stringify({ ...all, [business.id]: next }));
+    } catch { /* ignore */ }
+    return next;
+  });
+
+  const boardCount = all.filter((f) => f.businessId === business.id).length;
+
   return (
-    <div className={showHeader ? 'mb-2 mt-3 border-t border-slate-800/70 pt-2 first:mt-0 first:border-t-0' : ''}>
+    <div className={showHeader ? 'mb-1 border-t border-slate-800/70 pt-1 first:border-t-0' : ''}>
       {showHeader && (
-        <div className="flex items-center gap-2 px-2 pb-1">
+        <button onClick={toggle}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-slate-800/40">
+          {open ? <ChevronDown size={12} className="shrink-0 text-slate-500" /> : <ChevronRight size={12} className="shrink-0 text-slate-500" />}
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: business.color }} />
           <span className="truncate text-xs font-semibold text-slate-200">{business.name}</span>
-        </div>
+          {!open && <span className="ml-auto shrink-0 text-[10px] text-slate-600">{boardCount}</span>}
+        </button>
       )}
 
-      <SectionHeader label={`Delivery / ${folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
-      {deliveryRoots.length === 0 && (
-        <p className="px-2 py-2 text-center text-[11px] text-slate-500">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
-      )}
-      <FolderList folders={deliveryRoots} all={all} depth={0}
-        selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+      {open && (
+        <>
+          <SectionHeader label={`Delivery / ${folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
+          {deliveryRoots.length === 0 && (
+            <p className="px-2 py-2 text-center text-[11px] text-slate-500">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
+          )}
+          <FolderList folders={deliveryRoots} all={all} depth={0}
+            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
 
-      <div className="mt-4">
-        <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
-        {opsRoots.length === 0 && (
-          <p className="px-2 py-2 text-center text-[11px] text-slate-500">Admin, hiring, finance...</p>
-        )}
-        <FolderList folders={opsRoots} all={all} depth={0}
-          selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-      </div>
+          <div className="mt-3">
+            <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
+            {opsRoots.length === 0 && (
+              <p className="px-2 py-2 text-center text-[11px] text-slate-500">Admin, hiring, finance...</p>
+            )}
+            <FolderList folders={opsRoots} all={all} depth={0}
+              selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

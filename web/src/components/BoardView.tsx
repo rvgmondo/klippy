@@ -10,6 +10,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Plus, Flag, MoreHorizontal, GripVertical } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { BoardListView } from './BoardListView';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
@@ -36,6 +37,15 @@ export function BoardView({ boardId }: { boardId: number | null }) {
   const qc = useQueryClient();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
+  // Board or list. Remembered, because it is a preference about how someone
+  // thinks, not a per-board decision.
+  const [mode, setMode] = useState<'board' | 'list'>(
+    () => (localStorage.getItem('klippy.boardMode') === 'list' ? 'list' : 'board'),
+  );
+  const setModeSticky = (m: 'board' | 'list') => {
+    setMode(m);
+    try { localStorage.setItem('klippy.boardMode', m); } catch { /* ignore */ }
+  };
   const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
   const [activeId, setActiveId] = useState<string | null>(null);
   // Local container state so cards move smoothly during a drag.
@@ -171,8 +181,26 @@ export function BoardView({ boardId }: { boardId: number | null }) {
       <div className="border-b border-slate-800 px-6 py-3">
         <h2 className="font-display text-lg font-semibold text-slate-100">{data.board.name}</h2>
         {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
-        <div className="mt-2"><BoardFilters value={filters} onChange={setFilters} /></div>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <BoardFilters value={filters} onChange={setFilters} />
+          <div className="ml-auto flex shrink-0 gap-1 rounded-lg bg-slate-900 p-1">
+            {(['board', 'list'] as const).map((m) => (
+              <button key={m} onClick={() => setModeSticky(m)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize ${
+                  mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
+      {mode === 'list' ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <BoardListView boardId={boardId} columns={data.columns}
+            tasks={applyFilters(data.tasks, filters)}
+            labelsByTask={labelsByTask} userMap={userMap} onOpen={setOpenTaskId} />
+        </div>
+      ) : (
       <DndContext sensors={sensors} collisionDetection={closestCorners}
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
         onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
@@ -198,6 +226,7 @@ export function BoardView({ boardId }: { boardId: number | null }) {
           ) : null}
         </DragOverlay>
       </DndContext>
+      )}
 
       {openTaskId !== null && <CardDetail taskId={openTaskId} boardId={boardId} onClose={() => setOpenTaskId(null)} />}
     </div>
