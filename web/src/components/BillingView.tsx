@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard , Download } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
+import { ClientPicker } from './ClientPicker';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { loadFont } from '../lib/fonts';
 
@@ -19,6 +20,8 @@ type DiscountType = 'none' | 'percent' | 'amount';
 interface FullDoc {
   document: DocSummary & {
     clientEmail: string | null; clientAddress: string | null; clientVatNumber: string | null; taxRate: string;
+    /** The client this belongs to, so editing keeps the link rather than dropping it. */
+    folderId: number | null;
     discountType: DiscountType; discountValue: string; discountAmount: string;
     subtotal: string; taxAmount: string; notes: string | null;
   };
@@ -180,6 +183,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     queryFn: () => apiGet<FullDoc>(`/documents/${id}`),
   });
 
+  const [folderId, setFolderId] = useState<number | null>(null);
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientAddress, setClientAddress] = useState('');
@@ -241,6 +245,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   // Hydrate from the existing document once.
   if (!isNew && existing.data && !ready) {
     const d = existing.data.document;
+    setFolderId(d.folderId ?? null);
     setClientName(d.clientName); setClientEmail(d.clientEmail ?? ''); setClientAddress(d.clientAddress ?? '');
     setClientVat(d.clientVatNumber ?? '');
     setIssueDate(d.issueDate); setDueDate(d.dueDate ?? ''); setTaxRate(Number(d.taxRate));
@@ -259,7 +264,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   const save = useMutation({
     mutationFn: () => {
       const body = {
-        type, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
+        type, folderId, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
         issueDate, dueDate: dueDate || null,
         taxRate, discountType, discountValue: Number(discountValue) || 0, notes: notes.trim() || null,
@@ -283,7 +288,14 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <input className={field} placeholder="Client name" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+          <ClientPicker businessId={businessId} value={{
+            folderId, name: clientName, email: clientEmail, address: clientAddress, vatNumber: clientVat,
+          }} onChange={(v) => {
+            setFolderId(v.folderId); setClientName(v.name);
+            // Only overwrite details that came with the client, so a name typed by
+            // hand on a one-off is not wiped by choosing nothing.
+            if (v.folderId) { setClientEmail(v.email); setClientAddress(v.address); setClientVat(v.vatNumber); }
+          }} />
           <input className={field} placeholder="Client email (optional)" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
         </div>
         <textarea className={field + ' mt-3'} placeholder="Client address (optional)" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />

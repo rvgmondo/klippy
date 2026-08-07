@@ -38,10 +38,23 @@ export const PORTAL_LOCKOUT_SECONDS = 15 * 60;
 export const LINK_MIN_GAP_SECONDS = 60;
 
 export interface PortalTokenPayload {
-  pid: number;   // portal user id
+  pid: number;   // portal user id, or 0 for a staff preview
   aid: number;   // account id
   fid: number;   // folder (client) id
   bid: number;   // business id
+  /** 1 when this is a staff member looking, not the client. */
+  prv?: 1;
+}
+
+/**
+ * A staff preview expires quickly. It is a look at someone else's account, so it
+ * should not survive the sitting in which it was opened.
+ */
+const PREVIEW_TTL = '30m';
+
+export function signPreviewToken(p: Omit<PortalTokenPayload, 'pid' | 'prv'>): string {
+  return jwt.sign({ ...p, pid: 0, prv: 1 }, SECRET as string,
+    { expiresIn: PREVIEW_TTL, audience: PORTAL_AUDIENCE });
 }
 
 export function signPortalToken(p: PortalTokenPayload): string {
@@ -77,6 +90,16 @@ export interface PortalContext {
   user: typeof portalUsers.$inferSelect;
   client: typeof folders.$inferSelect;
   business: typeof businesses.$inferSelect;
+  /**
+   * True when a staff member is looking rather than the client.
+   *
+   * Everything readable stays readable, and everything that WRITES is refused. The
+   * reason is not tidiness: accepting a quote records a date and a name as evidence
+   * that the client agreed, and a staff member able to click that button can
+   * manufacture that evidence. Same for paying, and for editing the details the
+   * client maintains. A preview that can act is not a preview.
+   */
+  preview: boolean;
 }
 
 /**
@@ -88,11 +111,25 @@ export async function portalContext(token: string | undefined): Promise<PortalCo
   const payload = verifyPortalToken(token);
   if (!payload) return null;
 
-  const [user] = await db.select().from(portalUsers)
-    .where(eq(portalUsers.id, payload.pid)).limit(1);
-  if (!user || !user.isActive) return null;
-  // The token could be older than a change to the user's client. Trust the row.
-  if (user.accountId !== payload.aid) return null;
+  // A preview carries no portal user, on purpose: the point is to see what a client
+  // WOULD see, including one who has never been given a login.
+  const preview = payload.prv === 1;
+  let user: typeof portalUsers.$inferSelect;
+  if (preview) {
+    user = {
+      id: 0, accountId: payload.aid, businessId: payload.bid, folderId: payload.fid,
+      email: '', name: 'Preview', passwordHash: null, isActive: true,
+      lastLoginAt: null, failedAttempts: 0, lockedUntil: null, lastLinkAt: null,
+      createdAt: new Date(), updatedAt: new Date(),
+    };
+  } else {
+    const [row] = await db.select().from(portalUsers)
+      .where(eq(portalUsers.id, payload.pid)).limit(1);
+    if (!row || !row.isActive) return null;
+    // The token could be older than a change to the user's client. Trust the row.
+    if (row.accountId !== payload.aid) return null;
+    user = row;
+  }
 
   const [client] = await db.select().from(folders)
     .where(and(eq(folders.id, user.folderId), eq(folders.accountId, user.accountId))).limit(1);
@@ -102,7 +139,7 @@ export async function portalContext(token: string | undefined): Promise<PortalCo
     .where(and(eq(businesses.id, user.businessId), eq(businesses.accountId, user.accountId))).limit(1);
   if (!business) return null;
 
-  return { user, client, business };
+  return { user, client, business, preview };
 }
 
 /**

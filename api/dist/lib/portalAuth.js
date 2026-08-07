@@ -34,6 +34,14 @@ export const PORTAL_MAX_ATTEMPTS = 6;
 export const PORTAL_LOCKOUT_SECONDS = 15 * 60;
 /** Shortest gap between sign-in emails to one address. */
 export const LINK_MIN_GAP_SECONDS = 60;
+/**
+ * A staff preview expires quickly. It is a look at someone else's account, so it
+ * should not survive the sitting in which it was opened.
+ */
+const PREVIEW_TTL = '30m';
+export function signPreviewToken(p) {
+    return jwt.sign({ ...p, pid: 0, prv: 1 }, SECRET, { expiresIn: PREVIEW_TTL, audience: PORTAL_AUDIENCE });
+}
 export function signPortalToken(p) {
     return jwt.sign(p, SECRET, { expiresIn: TOKEN_TTL, audience: PORTAL_AUDIENCE });
 }
@@ -69,13 +77,28 @@ export async function portalContext(token) {
     const payload = verifyPortalToken(token);
     if (!payload)
         return null;
-    const [user] = await db.select().from(portalUsers)
-        .where(eq(portalUsers.id, payload.pid)).limit(1);
-    if (!user || !user.isActive)
-        return null;
-    // The token could be older than a change to the user's client. Trust the row.
-    if (user.accountId !== payload.aid)
-        return null;
+    // A preview carries no portal user, on purpose: the point is to see what a client
+    // WOULD see, including one who has never been given a login.
+    const preview = payload.prv === 1;
+    let user;
+    if (preview) {
+        user = {
+            id: 0, accountId: payload.aid, businessId: payload.bid, folderId: payload.fid,
+            email: '', name: 'Preview', passwordHash: null, isActive: true,
+            lastLoginAt: null, failedAttempts: 0, lockedUntil: null, lastLinkAt: null,
+            createdAt: new Date(), updatedAt: new Date(),
+        };
+    }
+    else {
+        const [row] = await db.select().from(portalUsers)
+            .where(eq(portalUsers.id, payload.pid)).limit(1);
+        if (!row || !row.isActive)
+            return null;
+        // The token could be older than a change to the user's client. Trust the row.
+        if (row.accountId !== payload.aid)
+            return null;
+        user = row;
+    }
     const [client] = await db.select().from(folders)
         .where(and(eq(folders.id, user.folderId), eq(folders.accountId, user.accountId))).limit(1);
     if (!client || client.isArchived)
@@ -84,7 +107,7 @@ export async function portalContext(token) {
         .where(and(eq(businesses.id, user.businessId), eq(businesses.accountId, user.accountId))).limit(1);
     if (!business)
         return null;
-    return { user, client, business };
+    return { user, client, business, preview };
 }
 /**
  * Issue a sign-in link. Returns the raw token, which is sent by email and never

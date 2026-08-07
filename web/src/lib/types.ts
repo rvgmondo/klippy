@@ -126,6 +126,9 @@ export interface Folder {
   hourlyRate?: string | null;
   /** Where this client's invoices and payment reminders are sent. */
   billingEmail?: string | null;
+  /** Billing details the client maintains themselves in their portal. */
+  billingVatNumber?: string | null;
+  billingAddress?: string | null;
   pillar?: 'delivery' | 'operations';
   isArchived: boolean;
   position: number;

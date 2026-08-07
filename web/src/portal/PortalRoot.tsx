@@ -5,6 +5,8 @@ import { PortalLogin } from './PortalLogin';
 import { PortalApp } from './PortalApp';
 
 export interface PortalMe {
+  /** True when a staff member is looking, not the client. Read-only. */
+  preview?: boolean;
   user: { name: string | null; email: string; hasPassword: boolean };
   client: { name: string; billingEmail: string | null; vatNumber: string | null; address: string | null };
   brand: {

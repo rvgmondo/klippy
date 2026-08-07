@@ -80,10 +80,17 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
           </div>
           <button onClick={() => logout.mutate()}
             className="ml-auto shrink-0 text-xs text-slate-500 underline hover:text-slate-800">
-            Sign out
+            {me.preview ? 'End preview' : 'Sign out'}
           </button>
         </div>
       </header>
+
+      {me.preview && (
+        <div className="bg-amber-100 px-4 py-2 text-center text-xs text-amber-900">
+          You are previewing this portal as staff. Nothing here can be changed, paid or accepted:
+          only the client can do that.
+        </div>
+      )}
 
       <main className="mx-auto max-w-3xl px-4 py-6">
         {paid && (
@@ -114,18 +121,23 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
 
         {tab === 'documents' && (
           <Documents docs={docs} onPay={(id) => pay.mutate(id)} paying={pay.isPending}
-            payError={pay.error instanceof Error ? pay.error.message : ''} accent={accent} />
+            payError={pay.error instanceof Error ? pay.error.message : ''} accent={accent}
+            readOnly={!!me.preview} />
         )}
         {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)} />}
-        {tab === 'details' && <Details me={me} accent={accent} />}
+        {tab === 'details' && (me.preview
+          ? <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+              The client edits their own details here. Hidden while previewing.
+            </p>
+          : <Details me={me} accent={accent} />)}
       </main>
     </div>
   );
 }
 
-function Documents({ docs, onPay, paying, payError, accent }: {
+function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
   docs: Doc[]; onPay: (id: number) => void; paying: boolean; payError: string;
-  accent: React.CSSProperties;
+  accent: React.CSSProperties; readOnly?: boolean;
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(0);
@@ -184,13 +196,13 @@ function Documents({ docs, onPay, paying, payError, accent }: {
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">
               Download PDF
             </a>
-            {d.type === 'invoice' && d.outstanding > 0 && d.status !== 'void' && (
+            {!readOnly && d.type === 'invoice' && d.outstanding > 0 && d.status !== 'void' && (
               <button onClick={() => onPay(d.id)} disabled={paying}
                 className="rounded-lg px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60" style={accent}>
                 {paying ? 'Opening...' : `Pay ${money(d.currency, d.outstanding)}`}
               </button>
             )}
-            {d.type === 'quote' && d.status === 'sent' && !d.decision && (
+            {!readOnly && d.type === 'quote' && d.status === 'sent' && !d.decision && (
               <>
                 <button
                   onClick={() => { setBusy(d.id); decide.mutate({ id: d.id, decision: 'accepted' }); }}

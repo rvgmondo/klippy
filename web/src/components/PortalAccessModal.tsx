@@ -59,6 +59,15 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
     onError: (e) => setErr(e instanceof Error ? e.message : 'Could not send that.'),
   });
 
+  // Read-only, short-lived, and recorded. Opens in a new tab so the app stays put.
+  const preview = useMutation({
+    mutationFn: () => apiPost<{ url: string }>(`/folders/${folderId}/portal-preview`),
+    // Open only AFTER the cookie is set. Opening first races the request and lands
+    // the new tab on the sign-in screen.
+    onSuccess: (r) => window.open(r.url || '/?portal=1', '_blank'),
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not start a preview.'),
+  });
+
   const rows = data?.portalUsers ?? [];
   const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-[var(--accent)]';
 
@@ -109,6 +118,13 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
             </div>
           ))}
         </div>
+
+        <button type="button"
+          onClick={() => preview.mutate()}
+          disabled={preview.isPending}
+          className="mb-4 w-full rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+          {preview.isPending ? 'Opening...' : 'See what this client sees'}
+        </button>
 
         <form className="space-y-2 border-t border-slate-800 pt-4"
           onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>

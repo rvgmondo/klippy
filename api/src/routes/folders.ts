@@ -15,6 +15,9 @@ const createSchema = z.object({
   color: z.string().trim().max(20).optional(),
   notes: z.string().max(5000).nullable().optional(),
   pillar: z.enum(['delivery','operations']).optional(),
+  // Set when a client is created inline from an invoice, so the very first invoice
+  // can already be emailed and chased without a second trip to settings.
+  billingEmail: z.string().email().max(150).nullable().optional(),
 });
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(150).optional(),
@@ -86,7 +89,9 @@ export async function folderRoutes(app: FastifyInstance) {
         : sql`account_id = ${accountId} AND parent_id = ${parentId}`);
 
     const ins = await db.insert(folders).values(withTenant(accountId, {
-      parentId, businessId, name, color: color ?? '#6366f1', notes: notes ?? null, pillar: parsed.data.pillar ?? 'delivery', position, createdBy: userId,
+      parentId, businessId, name, color: color ?? '#6366f1', notes: notes ?? null,
+      billingEmail: parsed.data.billingEmail ?? null,
+      pillar: parsed.data.pillar ?? 'delivery', position, createdBy: userId,
     }));
     const [created] = await db.select().from(folders)
       .where(tenantWhere(folders, accountId, eq(folders.id, Number(ins[0].insertId)))).limit(1);

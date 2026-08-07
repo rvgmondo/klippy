@@ -4,7 +4,7 @@ import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
   documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers,
-  memberships, users,
+  memberships, users, events,
 } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
@@ -15,11 +15,11 @@ import { hostingSettingsFor } from '../lib/hosting.js';
 import {
   PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin,
   portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword,
-  signPortalToken, normaliseEmail, type PortalContext,
+  signPortalToken, signPreviewToken, normaliseEmail, type PortalContext,
 } from '../lib/portalAuth.js';
 import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
-import { assertMaybeBusiness } from '../lib/access.js';
+import { assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
 
 /**
  * The client portal: the only part of Klippy a stranger can reach.
@@ -84,6 +84,21 @@ export async function portalRoutes(app: FastifyInstance) {
       return null;
     }
     return ctx;
+  };
+
+  /**
+   * Refuse a write while previewing. Returns true when the request was refused.
+   *
+   * Placed at the top of every mutating handler rather than relying on the UI to
+   * hide buttons, because the UI is not the boundary and a preview token is a
+   * perfectly ordinary cookie somebody can replay.
+   */
+  const blockedByPreview = async (c: Ctx, reply: FastifyReply): Promise<boolean> => {
+    if (!c.preview) return false;
+    await reply.code(403).send({
+      error: 'You are previewing this portal as staff. Only the client can do that.',
+    });
+    return true;
   };
 
   const startSession = (reply: FastifyReply, user: typeof portalUsers.$inferSelect) => {
@@ -159,6 +174,7 @@ export async function portalRoutes(app: FastifyInstance) {
     const c = await require(req, reply);
     if (!c) return;
     return {
+      preview: c.preview,
       user: { name: c.user.name, email: c.user.email, hasPassword: !!c.user.passwordHash },
       client: {
         name: c.client.name,
@@ -299,6 +315,7 @@ export async function portalRoutes(app: FastifyInstance) {
   app.post('/api/v1/portal/documents/:id/pay', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;
+    if (await blockedByPreview(c, reply)) return;
     const id = Number((req.params as { id: string }).id);
     const [doc] = await db.select().from(documents)
       .where(and(mine(c), eq(documents.id, id), eq(documents.type, 'invoice'), eq(documents.status, 'sent')))
@@ -338,6 +355,7 @@ export async function portalRoutes(app: FastifyInstance) {
   app.post('/api/v1/portal/quotes/:id/decision', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;
+    if (await blockedByPreview(c, reply)) return;
     const id = Number((req.params as { id: string }).id);
     const parsed = z.object({ decision: z.enum(['accepted', 'declined']) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Choose accept or decline.' });
@@ -433,6 +451,7 @@ export async function portalRoutes(app: FastifyInstance) {
   app.patch('/api/v1/portal/profile', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;
+    if (await blockedByPreview(c, reply)) return;
     const parsed = z.object({
       name: z.string().trim().max(150).optional(),
       billingEmail: z.string().email().max(150).nullable().optional(),
@@ -460,6 +479,7 @@ export async function portalRoutes(app: FastifyInstance) {
   app.post('/api/v1/portal/password', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;
+    if (await blockedByPreview(c, reply)) return;
     const parsed = z.object({ password: z.string().min(10).max(200).nullable() }).safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: 'A password needs to be at least 10 characters.' });
@@ -553,6 +573,41 @@ export async function portalAdminRoutes(app: FastifyInstance) {
       .where(and(eq(portalUsers.id, id), eq(portalUsers.accountId, accountId)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
     return { ok: true };
+  });
+
+
+  /**
+   * Start a preview of a client's portal, as staff.
+   *
+   * Sets the portal cookie to a short-lived read-only token. Restricted to admins
+   * of the business that client belongs to, and recorded, because looking at a
+   * customer's financial history is a thing that should leave a trace even when the
+   * person looking is entitled to.
+   */
+  app.post('/api/v1/folders/:id/portal-preview', { preHandler: app.requireAuth }, async (req, reply) => {
+    const { accountId, userId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only admins can preview a client portal.' });
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+
+    const [client] = await db.select().from(folders)
+      .where(and(eq(folders.id, id), eq(folders.accountId, accountId))).limit(1);
+    if (!client) return reply.code(404).send({ error: 'Client not found.' });
+    if (!client.businessId) {
+      return reply.code(400).send({ error: 'This client is not attached to a business, so it has no portal.' });
+    }
+    if (!(await assertBusinessAccess(req, reply, client.businessId, 'admin'))) return;
+
+    await db.insert(events).values({
+      accountId, businessId: client.businessId, name: 'portal.preview',
+      payload: { folderId: id, clientName: client.name, byUserId: userId },
+      results: [{ handler: 'portal.preview', outcome: `Previewed ${client.name}'s portal`, ok: true }],
+    }).catch(() => { /* the preview is not worth failing over a log write */ });
+
+    reply.setCookie(PORTAL_COOKIE, signPreviewToken({
+      aid: accountId, fid: id, bid: client.businessId,
+    }), portalCookieOptions());
+    return { ok: true, url: '/?portal=1' };
   });
 
   /** Send (or resend) a sign-in link. */
