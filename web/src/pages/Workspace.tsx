@@ -18,6 +18,7 @@ import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { SettingsView } from '../components/SettingsView';
+import { MobileTabBar } from '../components/MobileTabBar';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
@@ -118,7 +119,7 @@ export function Workspace() {
           <SearchBar />
         </div>
 
-        <main className="min-h-0 flex-1 overflow-hidden pb-safe pr-safe">
+        <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[52px] lg:pb-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
@@ -133,6 +134,9 @@ export function Workspace() {
           {view === 'settings' && <SettingsView businessId={businessId} />}
         </main>
       </div>
+
+      <MobileTabBar view={view} businessId={businessId}
+        onNavigate={(v) => setView(v as View)} onOpenMore={() => setNavOpen(true)} />
 
       {showTimer && <FocusTimer onClose={() => setShowTimer(false)} />}
     </div>

@@ -111,7 +111,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           </button>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-800">
+        <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
               <tr>

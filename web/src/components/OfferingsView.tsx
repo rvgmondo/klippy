@@ -106,7 +106,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           </div>
         )}
 
-        <div className="overflow-hidden rounded-xl border border-slate-800">
+        <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
               <tr>
@@ -166,7 +166,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
             </div>
             <p className="mb-4 text-xs text-slate-500">Bills a client automatically every month for a recurring offering. Invoices land as drafts for you to review before sending.</p>
 
-            <div className="overflow-hidden rounded-xl border border-slate-800">
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
               <table className="w-full text-sm">
                 <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
                   <tr>
