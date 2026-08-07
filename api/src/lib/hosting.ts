@@ -5,7 +5,7 @@ import {
 } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
-import { emailBrandFor, sendBusinessMail } from './mailer.js';
+import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import {
   accountExists, createAccount, generatePassword, suspendAccount, unsuspendAccount,
@@ -119,8 +119,16 @@ export async function provisionSubscription(
 
   const settings = await hostingSettingsFor(accountId, sub.businessId);
   if (!settings?.enabled) return done('skipped', 'Hosting provisioning is off for this business.');
+
+  // No domain is the NORMAL case at the point of sale, not an error. You sell
+  // hosting; the client is the only one who knows what it is for. Rather than
+  // shrugging and leaving a paid customer with nothing, ask them, and provision
+  // the moment they answer.
   if (!sub.domain) {
-    return done('skipped', 'No domain on this subscription, so there is nothing to create an account for. Add one and provision it by hand.');
+    const asked = await requestDomain(accountId, sub);
+    return done('skipped', asked
+      ? 'Waiting on the client for a domain. They have been emailed and can enter it themselves; it will set itself up as soon as they do.'
+      : 'No domain, and no billing email to ask for one. Add either and it will set itself up.');
   }
 
   // Claim the subscription before doing anything. Unique on subscriptionId, so a
@@ -371,6 +379,68 @@ async function restoreIfSuspended(accountId: number, subscriptionId: number): Pr
   // invoices does not restore the site.
   if ((await oldestOverdueDays(accountId, subscriptionId, today)) != null) return;
   await setSuspended(accountId, acct.id, false);
+}
+
+/**
+ * Ask the client what domain their hosting is for.
+ *
+ * Sent once per subscription, not on every payment, because a renewal should not
+ * re-ask a question already answered or already pending. Creating a portal login
+ * for them here is deliberate: they have just bought hosting, so they need the
+ * portal anyway, and a link that lands on a sign-in wall is a link nobody follows.
+ */
+async function requestDomain(
+  accountId: number, sub: typeof subscriptions.$inferSelect,
+): Promise<boolean> {
+  if (sub.domainRequestedAt) return true;   // already asked, still waiting
+
+  const email = await billingEmailFor(accountId, sub.folderId);
+  if (!email) return false;
+
+  const { ensurePortalUser, issueLoginToken } = await import('./portalAuth.js');
+  await ensurePortalUser(accountId, sub.businessId, sub.folderId, email);
+  const issued = await issueLoginToken(email);
+
+  const brand = await emailBrandFor(accountId, sub.businessId);
+  const link = issued
+    ? `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`
+    : `${appUrl()}/?portal=1`;
+  const content = {
+    heading: 'One thing before we set up your hosting',
+    body: [
+      `Hi ${await clientNameFor(accountId, sub.folderId)},`,
+      'Thank you, your hosting is paid for. We just need to know which domain it is for.',
+      'Tell us below and it will be set up straight away, usually within a minute.',
+    ],
+    button: { label: 'Enter your domain', url: link },
+    note: 'If you have not registered a domain yet, reply to this email and we will help.',
+  };
+  await sendBusinessMail({
+    accountId, businessId: sub.businessId, purpose: 'general', to: email,
+    subject: 'Which domain is your hosting for?',
+    text: renderEmailText(brand, content),
+    html: renderEmail(brand, content),
+  });
+
+  await db.update(subscriptions).set({ domainRequestedAt: new Date() })
+    .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, sub.id)));
+  return true;
+}
+
+/**
+ * A domain the client typed. Rejects the things people actually paste: a full URL,
+ * a path, an email address, a bare hostname with no dot.
+ */
+export function cleanDomain(raw: string): string | null {
+  const d = raw.trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/\.$/, '');
+  if (!d || d.includes('@') || d.includes(' ')) return null;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d)) return null;
+  if (d.length > 190) return null;
+  return d;
 }
 
 /** Suspend or restore one account by hand, from the hosting screen. */

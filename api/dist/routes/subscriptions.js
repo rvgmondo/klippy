@@ -75,7 +75,13 @@ export async function subscriptionRoutes(app) {
         }));
         const id = Number(ins[0].insertId);
         try {
-            await generateSubscriptionInvoice(accountId, { businessId, offeringId: d.offeringId, folderId: d.folderId, createdBy: userId, autoSend: d.autoSend ?? false });
+            // subscriptionId matters most on THIS invoice. It is the one paid at the
+            // point of sale, so it is the one that has to be able to set the service up;
+            // without the link it is just an invoice and nothing provisions.
+            await generateSubscriptionInvoice(accountId, {
+                businessId, offeringId: d.offeringId, folderId: d.folderId,
+                createdBy: userId, autoSend: d.autoSend ?? false, subscriptionId: id,
+            });
             await db.update(subscriptions).set({ lastBilledAt: new Date() })
                 .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
         }

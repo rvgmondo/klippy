@@ -225,6 +225,74 @@ function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
   );
 }
 
+/**
+ * The question only the client can answer.
+ *
+ * Klippy cannot know which domain someone bought hosting for. Rather than leaving a
+ * paying customer with nothing while somebody remembers to ask, the sale asks them,
+ * and this is where they answer. Sits above their existing hosting because it is
+ * the one thing on this page that needs doing.
+ */
+function AwaitingDomain() {
+  const qc = useQueryClient();
+  const [values, setValues] = useState<Record<number, string>>({});
+  const [done, setDone] = useState('');
+  const [err, setErr] = useState('');
+
+  const { data } = useQuery({
+    queryKey: ['portal-awaiting'],
+    queryFn: () => apiGet<{ awaiting: { id: number; offeringName: string }[] }>('/portal/hosting/awaiting'),
+  });
+  const submit = useMutation({
+    mutationFn: (v: { id: number; domain: string }) =>
+      apiPost<{ message: string }>(`/portal/hosting/${v.id}/domain`, { domain: v.domain }),
+    onSuccess: (r) => {
+      setErr(''); setDone(r.message);
+      qc.invalidateQueries({ queryKey: ['portal-awaiting'] });
+      qc.invalidateQueries({ queryKey: ['portal-hosting'] });
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not save that.'),
+  });
+
+  const rows = data?.awaiting ?? [];
+  if (done) {
+    return <div className="mb-3 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">{done}</div>;
+  }
+  if (!rows.length) return null;
+
+  return (
+    <div className="mb-3 space-y-3">
+      {rows.map((a) => (
+        <div key={a.id} className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="text-sm font-medium text-amber-900">
+            Which domain is your {a.offeringName} for?
+          </div>
+          <p className="mt-0.5 text-xs text-amber-800">
+            Enter it and your hosting is set up straight away, usually within a minute.
+          </p>
+          {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
+          <form className="mt-2 flex flex-wrap gap-2"
+            onSubmit={(e) => { e.preventDefault(); submit.mutate({ id: a.id, domain: values[a.id] ?? '' }); }}>
+            <input
+              className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500"
+              placeholder="yourbusiness.co.za"
+              value={values[a.id] ?? ''}
+              onChange={(e) => setValues({ ...values, [a.id]: e.target.value })} />
+            <button type="submit" disabled={submit.isPending || !(values[a.id] ?? '').trim()}
+              className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50">
+              {submit.isPending ? 'Setting up...' : 'Set up my hosting'}
+            </button>
+          </form>
+          <p className="mt-1.5 text-[11px] text-amber-800/80">
+            No http and no www, just the domain. If you have not registered one yet, reply to our email
+            and we will help.
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: number) => void }) {
   const { data } = useQuery({
     queryKey: ['portal-hosting'],
@@ -232,12 +300,18 @@ function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: n
   });
   const rows = data?.hosting ?? [];
   if (!rows.length) {
-    return <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
-      No hosting on your account.
-    </p>;
+    return (
+      <div>
+        <AwaitingDomain />
+        <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
+          No hosting on your account.
+        </p>
+      </div>
+    );
   }
   return (
     <div className="space-y-2">
+      <AwaitingDomain />
       {rows.map((h) => (
         <div key={h.id} className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">

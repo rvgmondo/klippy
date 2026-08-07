@@ -1,0 +1,1 @@
+ALTER TABLE `subscriptions` ADD `domain_requested_at` datetime;

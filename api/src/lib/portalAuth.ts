@@ -249,6 +249,25 @@ export async function clearPortalPassword(portalUserId: number): Promise<void> {
   await db.update(portalUsers).set({ passwordHash: null }).where(eq(portalUsers.id, portalUserId));
 }
 
+/**
+ * Make sure this client can sign in, without disturbing anyone who already can.
+ *
+ * Used when Klippy needs to ask a paying customer something. Someone who has just
+ * bought hosting needs the portal regardless, and emailing them a link that lands
+ * on a sign-in wall they have no account for is the same as not emailing them.
+ */
+export async function ensurePortalUser(
+  accountId: number, businessId: number | null, folderId: number, email: string,
+): Promise<void> {
+  if (!businessId) return;
+  const address = normaliseEmail(email);
+  const [existing] = await db.select({ id: portalUsers.id }).from(portalUsers)
+    .where(and(eq(portalUsers.folderId, folderId), eq(portalUsers.email, address))).limit(1);
+  if (existing) return;
+  await db.insert(portalUsers).values({ accountId, businessId, folderId, email: address })
+    .catch(() => { /* a concurrent insert already did it */ });
+}
+
 /** Housekeeping: drop spent and expired links so the table does not grow forever. */
 export async function pruneLoginTokens(): Promise<void> {
   await db.delete(portalLoginTokens)

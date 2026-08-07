@@ -761,10 +761,16 @@ export const subscriptions = mysqlTable('subscriptions', {
     // not the same as agreeing to be charged every month, and in South Africa a debit
     // arrangement needs the customer's mandate. Off until someone turns it on.
     autoDebit: boolean('auto_debit').default(false).notNull(),
-    // The domain this subscription is for, when it provisions hosting. A cPanel
-    // account cannot be created without one, so it is asked for when the
-    // subscription starts rather than guessed at provisioning time.
+    // The domain this subscription is for, when it provisions hosting.
+    //
+    // Usually blank at the point of sale, because the CLIENT is the only one who
+    // knows it. You sell hosting, they decide the domain, and often those are days
+    // apart. So this is filled in by whoever knows: typed here if you already have
+    // it, otherwise asked of the client and filled in by them.
     domain: varchar('domain', { length: 190 }),
+    // When we last asked the client for the domain, so the request is sent once
+    // rather than on every payment, and so an unanswered one is visible.
+    domainRequestedAt: datetime('domain_requested_at'),
     // How often this bills, in months: 1 monthly, 3 quarterly, 12 annually. Hosting
     // and domains are usually sold by the year, so monthly-only was a real gap.
     intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),

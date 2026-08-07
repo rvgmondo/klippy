@@ -1,13 +1,13 @@
 import { z } from 'zod';
-import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, } from '../db/schema.js';
+import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, offerings, } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { credsFor } from '../lib/paymentSettings.js';
 import { buildCheckout } from '../lib/payfast.js';
-import { hostingSettingsFor } from '../lib/hosting.js';
+import { hostingSettingsFor, provisionSubscription, cleanDomain } from '../lib/hosting.js';
 import { PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin, portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword, signPortalToken, signPreviewToken, normaliseEmail, } from '../lib/portalAuth.js';
 import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
@@ -405,6 +405,60 @@ export async function portalRoutes(app) {
             };
         }));
         return { hosting: withOwed, cpanelUrl: cpanel };
+    });
+    /**
+     * Tell us the domain. This is the other half of selling hosting.
+     *
+     * Klippy cannot know what domain a client bought hosting for, because only they
+     * know. So when hosting is paid for without one, they are asked, and this is
+     * where the answer lands. Provisioning runs immediately on a good answer rather
+     * than waiting for a nightly sweep, because they are watching the screen.
+     */
+    app.post('/api/v1/portal/hosting/:id/domain', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        if (await blockedByPreview(c, reply))
+            return;
+        const subscriptionId = Number(req.params.id);
+        const parsed = z.object({ domain: z.string().trim().min(3).max(200) }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Enter the domain you want hosted.' });
+        const clean = cleanDomain(parsed.data.domain);
+        if (!clean) {
+            return reply.code(400).send({ error: 'That does not look like a domain. Enter it like yourbusiness.co.za, with no http or www.' });
+        }
+        const [sub] = await db.select().from(subscriptions)
+            .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.id, subscriptionId), 
+        // Their own subscription, not any subscription with that id.
+        eq(subscriptions.folderId, c.user.folderId))).limit(1);
+        if (!sub)
+            return reply.code(404).send({ error: 'Not found.' });
+        if (sub.domain)
+            return reply.code(409).send({ error: 'A domain is already set. Get in touch if it needs changing.' });
+        await db.update(subscriptions).set({ domain: clean })
+            .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.id, subscriptionId)));
+        const res = await provisionSubscription(c.user.accountId, subscriptionId);
+        return {
+            ok: true, domain: clean,
+            // Said plainly, because they are waiting: either it is up, or somebody will
+            // finish it by hand. Never a raw outcome word.
+            message: res.outcome === 'created'
+                ? 'Your hosting is being set up now. Your login details are on their way by email.'
+                : 'Thank you. We have got your domain and will have your hosting ready shortly.',
+        };
+    });
+    /** Subscriptions of theirs that are paid for but waiting on a domain. */
+    app.get('/api/v1/portal/hosting/awaiting', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        const rows = await db.select({
+            id: subscriptions.id, offeringName: offerings.name,
+        }).from(subscriptions)
+            .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
+            .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.folderId, c.user.folderId), eq(subscriptions.status, 'active'), eq(offerings.provisioning, 'cpanel'), isNull(subscriptions.domain)));
+        return { awaiting: rows };
     });
     // ---- Their own details ----------------------------------------------------
     app.patch('/api/v1/portal/profile', async (req, reply) => {
