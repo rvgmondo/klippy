@@ -301,6 +301,11 @@ export const folders = mysqlTable('folders', {
     billingEmail: varchar('billing_email', { length: 150 }),
     // Billing rate for work logged under this client, in the workspace currency.
     hourlyRate: decimal('hourly_rate', { precision: 10, scale: 2 }),
+    // The client's own billing details, which they can correct in the portal. A
+    // wrong VAT number on a tax invoice is the client's problem to spot and ours to
+    // print, so letting them fix it is worth more than guarding it.
+    billingVatNumber: varchar('billing_vat_number', { length: 60 }),
+    billingAddress: text('billing_address'),
     // Which business pillar this top-level folder belongs to.
     pillar: mysqlEnum('pillar', ['delivery', 'operations']).default('delivery').notNull(),
     isArchived: boolean('is_archived').default(false).notNull(),
@@ -600,6 +605,13 @@ export const documents = mysqlTable('documents', {
     type: mysqlEnum('type', ['quote', 'invoice', 'credit_note']).notNull(),
     seq: int('seq', { unsigned: true }).notNull(), // per-business, per-type running number
     number: varchar('number', { length: 30 }).notNull(), // e.g. INV-0001
+    // A quote the client has accepted or declined in the portal, and who by. Kept
+    // on the document rather than in a side table because it IS a fact about the
+    // quote, and the date they agreed is the thing you need when the work is
+    // disputed months later.
+    decision: mysqlEnum('decision', ['accepted', 'declined']),
+    decisionAt: datetime('decision_at'),
+    decisionBy: varchar('decision_by', { length: 150 }),
     // For a credit note: the invoice it credits. Null for invoices/quotes.
     sourceDocumentId: int('source_document_id', { unsigned: true }),
     folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
@@ -818,6 +830,59 @@ export const paymentSettings = mysqlTable('payment_settings', {
     updatedAt: updatedAt(),
 }, (t) => [
     uniqueIndex('uniq_payment_settings_scope').on(t.accountId, t.businessId),
+]);
+// ---- Client portal ---------------------------------------------------------
+/**
+ * Someone at a client company who can sign in and see their own account.
+ *
+ * Tied to a folder, which is how Klippy models a client, and therefore to exactly
+ * one business. That is deliberate: businesses here are separate legal entities
+ * with separate invoices and separate merchant accounts, so a person who buys from
+ * two of them is two portal users seeing two sets of books. Merging them would mean
+ * one login showing invoices from two companies, which is wrong on every level.
+ *
+ * The password is optional. Signing in by emailed link is the default because it
+ * needs no password to store, reset or support; a password can be set afterwards by
+ * anyone who would rather have one, or whose email is slow.
+ */
+export const portalUsers = mysqlTable('portal_users', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }).notNull(),
+    folderId: int('folder_id', { unsigned: true }).notNull()
+        .references(() => folders.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 150 }).notNull(),
+    name: varchar('name', { length: 150 }),
+    passwordHash: varchar('password_hash', { length: 100 }),
+    isActive: boolean('is_active').default(true).notNull(),
+    lastLoginAt: datetime('last_login_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    // One login per person per client. The same address may appear against a
+    // different client of a different business, which is the case above.
+    uniqueIndex('uniq_portal_user').on(t.folderId, t.email),
+    index('idx_portal_user_email').on(t.email),
+]);
+/**
+ * A single-use sign-in link.
+ *
+ * Only the SHA-256 of the token is stored. A stolen database therefore yields no
+ * working links, which matters more here than for an ordinary password reset
+ * because this link is itself the credential.
+ */
+export const portalLoginTokens = mysqlTable('portal_login_tokens', {
+    id: pk(),
+    portalUserId: int('portal_user_id', { unsigned: true }).notNull()
+        .references(() => portalUsers.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: datetime('expires_at').notNull(),
+    usedAt: datetime('used_at'),
+    createdAt: createdAt(),
+}, (t) => [
+    uniqueIndex('uniq_portal_token').on(t.tokenHash),
+    index('idx_portal_token_user').on(t.portalUserId),
 ]);
 // ---- Hosting provisioning (WHM / cPanel) -----------------------------------
 /**

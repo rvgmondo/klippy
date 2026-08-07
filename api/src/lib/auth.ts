@@ -20,12 +20,26 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
   return bcrypt.compare(plain, hash);
 }
 
+/**
+ * Which kind of token this is. Staff tokens and client-portal tokens are signed
+ * with the same secret, so without this a portal token verifies perfectly well as a
+ * staff token: the claims it lacks (`uid`, `role`) simply read as undefined, and
+ * the account id it does carry is real. That is a client holding staff access to
+ * the whole workspace. The audience is what keeps the two apart.
+ */
+export const APP_AUDIENCE = 'klippy-app';
+
 export function signToken(payload: TokenPayload): string {
-  return jwt.sign(payload, SECRET as string, { expiresIn: TOKEN_TTL });
+  return jwt.sign(payload, SECRET as string, { expiresIn: TOKEN_TTL, audience: APP_AUDIENCE });
 }
 export function verifyToken(token: string): TokenPayload | null {
   try {
-    return jwt.verify(token, SECRET as string) as TokenPayload;
+    const p = jwt.verify(token, SECRET as string, { audience: APP_AUDIENCE }) as TokenPayload;
+    // Belt as well as braces: a token that verifies but names no user is not a
+    // staff token whatever its audience says, and letting it through would hand
+    // out an undefined userId with a real accountId beside it.
+    if (typeof p?.uid !== 'number' || typeof p?.aid !== 'number') return null;
+    return p;
   } catch {
     return null;
   }

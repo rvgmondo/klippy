@@ -281,6 +281,13 @@
       "when": 1786114351399,
       "tag": "0039_hosting_suspension",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "5",
+      "when": 1786114959228,
+      "tag": "0040_client_portal",
+      "breakpoints": true
     }
   ]
 }
