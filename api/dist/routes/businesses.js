@@ -12,6 +12,7 @@ import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules
 import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
 import { ALLOWED_FONTS, isAllowedFont } from '../lib/fonts.js';
 import { sanitiseTemplate, PLACEHOLDERS } from '../lib/template.js';
+import { nextNumberFor } from '../lib/numbering.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -43,6 +44,13 @@ const updateSchema = z.object({
     // client, since the family name is later interpolated into CSS.
     fontDisplay: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
     fontBody: z.string().max(60).nullable().optional().refine((v) => v == null || v === '' || isAllowedFont(v), 'That font is not on the list.'),
+    // Document numbering: prefix per type, and where the count starts.
+    prefixInvoice: nullableStr(12),
+    prefixQuote: nullableStr(12),
+    prefixCreditNote: nullableStr(12),
+    seqStartInvoice: z.number().int().min(1).max(9_999_999).nullable().optional(),
+    seqStartQuote: z.number().int().min(1).max(9_999_999).nullable().optional(),
+    seqStartCreditNote: z.number().int().min(1).max(9_999_999).nullable().optional(),
     // Custom document blocks. Accepted as typed, then sanitised below.
     invoiceHeaderHtml: z.string().max(20000).nullable().optional(),
     invoiceFooterHtml: z.string().max(20000).nullable().optional(),
@@ -188,6 +196,26 @@ export async function businessRoutes(app) {
             key: m.key, label: m.label, primitive: m.primitive, core: !!m.core, hint: m.hint,
         })),
     }));
+    /**
+     * Where this business's numbering stands: the prefix, the highest number already
+     * used, and what the next one will be. Shown in settings so changing a prefix or
+     * a starting number is not a guess.
+     */
+    app.get('/api/v1/businesses/:id/numbering', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertBusinessAccess(req, reply, id, 'admin')))
+            return;
+        const types = ['invoice', 'quote', 'credit_note'];
+        const out = {};
+        for (const t of types) {
+            const n = await nextNumberFor(accountId, id, t);
+            out[t] = { prefix: n.prefix, nextNumber: n.number, nextSeq: n.seq, highestUsed: n.highestUsed };
+        }
+        return { numbering: out };
+    });
     // ---- Access: who can see/work in this business, and at what role -----------
     // Managing access needs admin on the business (account owners/admins qualify).
     app.get('/api/v1/businesses/:id/members', async (req, reply) => {

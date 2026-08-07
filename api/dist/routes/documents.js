@@ -10,6 +10,7 @@ import { sendBusinessMail } from '../lib/mailer.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
+import { nextNumberFor } from '../lib/numbering.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
@@ -67,13 +68,9 @@ async function balanceOf(accountId, docId, total) {
     const round = (n) => Math.round(n * 100) / 100;
     return { paid: round(paid), credited: round(credited), outstanding: round(total - paid - credited) };
 }
-/** Next sequence number for a business + type (numbering is per business). */
-async function nextNumber(accountId, businessId, type) {
-    const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-        .where(tenantWhere(documents, accountId, eq(documents.type, type), businessId == null ? sql `business_id IS NULL` : eq(documents.businessId, businessId)));
-    const seq = Number(row?.m ?? 0) + 1;
-    return { seq, number: `${PREFIX[type]}${String(seq).padStart(4, '0')}` };
-}
+// Numbering (prefix + where the count is) lives in lib/numbering.ts so every path
+// that issues a document follows the same rule.
+const nextNumber = nextNumberFor;
 export async function documentRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
     // List (summary), optionally filtered by type.

@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { db } from './../db/client.js';
 import { deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses, memberships, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
+import { nextNumberFor } from './numbering.js';
 import { nextPosition } from './http.js';
 import { on } from './events.js';
 import { notify } from './push.js';
@@ -84,11 +85,8 @@ on('deal.won', 'draft-opening-invoice', async (p, ctx) => {
     due.setUTCDate(due.getUTCDate() + dueDays);
     const subtotal = p.value;
     const taxAmount = subtotal * (taxRate / 100);
-    // Numbering is per business + type, same rule as everywhere else.
-    const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-        .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), p.businessId == null ? sql `business_id IS NULL` : eq(documents.businessId, p.businessId)));
-    const seq = Number(row?.m ?? 0) + 1;
-    const number = `INV-${String(seq).padStart(4, '0')}`;
+    // Numbering honours this business's prefix and starting number.
+    const { seq, number } = await nextNumberFor(accountId, p.businessId, 'invoice');
     const docId = await db.transaction(async (tx) => {
         const ins = await tx.insert(documents).values(withTenant(accountId, {
             type: 'invoice', seq, number, businessId: p.businessId, folderId,

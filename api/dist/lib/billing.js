@@ -1,7 +1,8 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
+import { nextNumberFor } from './numbering.js';
 import { sendBusinessMail } from './mailer.js';
 import { payLinkFor } from './paylink.js';
 import { renderDocumentPdf } from './pdf.js';
@@ -72,11 +73,8 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     const price = Number(offering.price);
     const issueDate = new Date().toISOString().slice(0, 10);
     const dueDate = addDays(issueDate, 7);
-    // Numbering is per business + type (mirrors documents.ts nextNumber).
-    const [row] = await db.select({ m: sql `COALESCE(MAX(seq),0)` }).from(documents)
-        .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), sub.businessId == null ? sql `business_id IS NULL` : eq(documents.businessId, sub.businessId)));
-    const seq = Number(row?.m ?? 0) + 1;
-    const number = `INV-${String(seq).padStart(4, '0')}`;
+    // Numbering honours this business's prefix and starting number.
+    const { seq, number } = await nextNumberFor(accountId, sub.businessId, 'invoice');
     const docId = await db.transaction(async (tx) => {
         const ins = await tx.insert(documents).values(withTenant(accountId, {
             type: 'invoice', seq, number, businessId: sub.businessId, folderId: sub.folderId,

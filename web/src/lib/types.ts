@@ -88,6 +88,13 @@ export interface Business {
   /** Custom document blocks, in the restricted HTML subset. Sanitised on save. */
   invoiceHeaderHtml?: string | null;
   invoiceFooterHtml?: string | null;
+  /** Document numbering: prefix per type, and where the count starts. */
+  prefixInvoice?: string | null;
+  prefixQuote?: string | null;
+  prefixCreditNote?: string | null;
+  seqStartInvoice?: number | null;
+  seqStartQuote?: number | null;
+  seqStartCreditNote?: number | null;
   remindersEnabled?: boolean;
   reminderOffsets?: number[] | null;
   suspendAfterDays?: number | null;

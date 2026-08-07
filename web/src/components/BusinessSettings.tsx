@@ -61,6 +61,12 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     invoiceFooter: business.invoiceFooter ?? '',
     invoiceHeaderHtml: business.invoiceHeaderHtml ?? '',
     invoiceFooterHtml: business.invoiceFooterHtml ?? '',
+    prefixInvoice: business.prefixInvoice ?? '',
+    prefixQuote: business.prefixQuote ?? '',
+    prefixCreditNote: business.prefixCreditNote ?? '',
+    seqStartInvoice: business.seqStartInvoice != null ? String(business.seqStartInvoice) : '',
+    seqStartQuote: business.seqStartQuote != null ? String(business.seqStartQuote) : '',
+    seqStartCreditNote: business.seqStartCreditNote != null ? String(business.seqStartCreditNote) : '',
     invoiceAccent: business.invoiceAccent ?? '#6366f1',
     fontDisplay: business.fontDisplay ?? '',
     fontBody: business.fontBody ?? '',
@@ -86,6 +92,11 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
       bizRegNumber: form.bizRegNumber, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
       invoiceHeaderHtml: form.invoiceHeaderHtml || null,
       invoiceFooterHtml: form.invoiceFooterHtml || null,
+      prefixInvoice: form.prefixInvoice, prefixQuote: form.prefixQuote,
+      prefixCreditNote: form.prefixCreditNote,
+      seqStartInvoice: form.seqStartInvoice === '' ? null : Number(form.seqStartInvoice),
+      seqStartQuote: form.seqStartQuote === '' ? null : Number(form.seqStartQuote),
+      seqStartCreditNote: form.seqStartCreditNote === '' ? null : Number(form.seqStartCreditNote),
       invoiceAccent: form.invoiceAccent,
       fontDisplay: form.fontDisplay || null,
       fontBody: form.fontBody || null,
@@ -241,6 +252,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                   onChange={(e) => set('defaultDueDays', Number(e.target.value))} />
               </div>
             </div>
+
+            <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} />
 
             <TemplateEditor
               header={form.invoiceHeaderHtml} footer={form.invoiceFooterHtml}
@@ -525,6 +538,81 @@ function TemplateEditor({ header, footer, onHeader, onFooter }: {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Document numbering: the prefix and where the count is.
+ *
+ * Both matter when moving from another system. A lot of businesses have used the
+ * same prefix for years and their clients recognise it, and starting again at 0001
+ * next to invoices already numbered 1042 is a bookkeeping mess. The panel shows
+ * what the next number will actually be, so neither setting is a guess.
+ */
+function NumberingEditor({ businessId, form, set, field, label }: {
+  businessId: number;
+  // The parent's form holds mixed types; this panel only reads its string fields.
+  form: Record<string, unknown>;
+  set: (k: never, v: never) => void;
+  field: string; label: string;
+}) {
+  const { data } = useQuery({
+    queryKey: ['numbering', businessId],
+    queryFn: () => apiGet<{
+      numbering: Record<string, { prefix: string; nextNumber: string; highestUsed: number }>;
+    }>(`/businesses/${businessId}/numbering`),
+  });
+
+  const rows = [
+    { key: 'invoice', name: 'Invoices', prefixKey: 'prefixInvoice', startKey: 'seqStartInvoice', fallback: 'INV-' },
+    { key: 'quote', name: 'Quotes', prefixKey: 'prefixQuote', startKey: 'seqStartQuote', fallback: 'QUO-' },
+    { key: 'credit_note', name: 'Credit notes', prefixKey: 'prefixCreditNote', startKey: 'seqStartCreditNote', fallback: 'CN-' },
+  ];
+
+  return (
+    <div className="space-y-3 border-t border-slate-800 pt-4">
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Numbering</h4>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Your own prefix, and where the count starts. A start only ever moves the count forward:
+          it can never reuse a number a document already has.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {rows.map((r) => {
+          const state = data?.numbering[r.key];
+          return (
+            <div key={r.key} className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+              <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                <span className="text-sm text-slate-200">{r.name}</span>
+                {state && (
+                  <span className="text-[11px] text-slate-500">
+                    next: <span className="num text-[var(--accent)]">{state.nextNumber}</span>
+                    {state.highestUsed > 0 && <>, highest used {state.highestUsed}</>}
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={label}>Prefix</label>
+                  <input className={field} placeholder={r.fallback}
+                    value={String(form[r.prefixKey] ?? '')}
+                    onChange={(e) => set(r.prefixKey as never, e.target.value as never)} />
+                </div>
+                <div>
+                  <label className={label}>Start at</label>
+                  <input type="number" min={1} className={field} placeholder="1"
+                    value={String(form[r.startKey] ?? '')}
+                    onChange={(e) => set(r.startKey as never, e.target.value as never)} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-slate-500">Save to apply. The next number updates when you reopen this page.</p>
     </div>
   );
 }

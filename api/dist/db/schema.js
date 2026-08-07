@@ -122,6 +122,17 @@ export const businesses = mysqlTable('businesses', {
     // Sanitised on save; placeholders are filled at render time.
     invoiceHeaderHtml: text('invoice_header_html'),
     invoiceFooterHtml: text('invoice_footer_html'),
+    // ---- Document numbering ----------------------------------------------------
+    // The prefix on each document type, and the number to start counting from. The
+    // start matters when moving from another system: you continue at 1043 rather
+    // than restarting at 1, and the next number is always
+    // max(highest used + 1, start) so raising it can never collide.
+    prefixInvoice: varchar('prefix_invoice', { length: 12 }),
+    prefixQuote: varchar('prefix_quote', { length: 12 }),
+    prefixCreditNote: varchar('prefix_credit_note', { length: 12 }),
+    seqStartInvoice: int('seq_start_invoice', { unsigned: true }),
+    seqStartQuote: int('seq_start_quote', { unsigned: true }),
+    seqStartCreditNote: int('seq_start_credit_note', { unsigned: true }),
     color: varchar('color', { length: 20 }).default('#6366f1').notNull(),
     // Free-form notes for this business: strategy, logins to remember, whatever the
     // owner wants kept next to it. Separate from folder/client notes.
