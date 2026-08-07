@@ -5,7 +5,7 @@ import { apiGet, apiPatch } from '../lib/api';
 import type { Business } from '../lib/types';
 
 interface DesignInfo { key: string; label: string; blurb: string }
-interface Designs { templates: DesignInfo[]; typefaces: DesignInfo[] }
+interface Designs { templates: DesignInfo[]; typefaces: DesignInfo[]; placements: DesignInfo[] }
 
 /**
  * Choosing how this business's documents look.
@@ -25,10 +25,13 @@ export function PdfDesignPanel({ business }: { business: Business }) {
 
   const [template, setTemplate] = useState(business.pdfTemplate ?? 'modern');
   const [typeface, setTypeface] = useState(business.pdfTypeface ?? 'sans');
+  const [issuer, setIssuer] = useState(business.pdfIssuerPlacement ?? 'footer');
   const [saved, setSaved] = useState(false);
 
   const save = useMutation({
-    mutationFn: () => apiPatch(`/businesses/${business.id}`, { pdfTemplate: template, pdfTypeface: typeface }),
+    mutationFn: () => apiPatch(`/businesses/${business.id}`, {
+      pdfTemplate: template, pdfTypeface: typeface, pdfIssuerPlacement: issuer,
+    }),
     onSuccess: () => {
       setSaved(true); setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ queryKey: ['businesses'] });
@@ -36,8 +39,10 @@ export function PdfDesignPanel({ business }: { business: Business }) {
   });
 
   // The preview URL carries the pending choice, so it shows what Save would do.
-  const previewUrl = `/api/v1/businesses/${business.id}/pdf-preview?template=${template}&typeface=${typeface}`;
-  const dirty = template !== (business.pdfTemplate ?? 'modern') || typeface !== (business.pdfTypeface ?? 'sans');
+  const previewUrl = `/api/v1/businesses/${business.id}/pdf-preview?template=${template}&typeface=${typeface}&issuer=${issuer}`;
+  const dirty = template !== (business.pdfTemplate ?? 'modern')
+    || typeface !== (business.pdfTypeface ?? 'sans')
+    || issuer !== (business.pdfIssuerPlacement ?? 'footer');
 
   if (!data) return null;
 
@@ -77,6 +82,25 @@ export function PdfDesignPanel({ business }: { business: Business }) {
         <p className="mt-1.5 text-[11px] text-slate-500">
           A PDF can only use fonts it carries, so this is the print typeface rather than your web font.
           Serif reads more formal, mono lines figures up perfectly.
+        </p>
+      </div>
+
+      <div>
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Your address, registration and VAT number
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {data.placements.map((p) => (
+            <button key={p.key} onClick={() => setIssuer(p.key)}
+              className={`rounded-lg border p-2.5 text-left transition ${
+                issuer === p.key ? 'border-[var(--accent)] bg-[var(--accent-quiet)]' : 'border-slate-700 hover:border-slate-600'}`}>
+              <div className="text-sm text-slate-100">{p.label}</div>
+              <div className="mt-0.5 text-[10px] text-slate-400">{p.blurb}</div>
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Classic and Sidebar always place these themselves, since it is part of what those designs are.
         </p>
       </div>
 

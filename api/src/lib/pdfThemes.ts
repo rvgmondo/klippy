@@ -49,6 +49,23 @@ export const TYPEFACE_INFO: { key: PdfTypeface; label: string; blurb: string }[]
   { key: 'mono', label: 'Mono', blurb: 'Technical. Figures align perfectly.' },
 ];
 
+/**
+ * Where the issuer's address, registration and VAT number go.
+ *
+ * Beside the logo they crowd the top of the page and compete with the document
+ * title for the same band, which is the most common way a letterhead goes wrong.
+ * As a quiet strip at the foot they read the way legal fine print is meant to,
+ * and the header is left to do one job: say who this is from.
+ */
+export const ISSUER_PLACEMENTS = ['footer', 'header', 'beside'] as const;
+export type IssuerPlacement = (typeof ISSUER_PLACEMENTS)[number];
+
+export const PLACEMENT_INFO: { key: IssuerPlacement; label: string; blurb: string }[] = [
+  { key: 'footer', label: 'Fine print at the foot', blurb: 'Cleanest. The header just says who it is from.' },
+  { key: 'header', label: 'Under your name', blurb: 'Everything up top, the traditional letterhead.' },
+  { key: 'beside', label: 'With the dates', blurb: 'Tucked into the right column under the number.' },
+];
+
 interface FontSet { regular: string; bold: string; italic: string; boldItalic: string }
 const FONTS: Record<PdfTypeface, FontSet> = {
   sans: { regular: 'Helvetica', bold: 'Helvetica-Bold', italic: 'Helvetica-Oblique', boldItalic: 'Helvetica-BoldOblique' },
@@ -87,6 +104,7 @@ export interface ThemeOptions {
   template: PdfTemplate;
   typeface: PdfTypeface;
   accent: [number, number, number];
+  issuer?: IssuerPlacement;
 }
 
 type Doc = InstanceType<typeof PDFDocument>;
@@ -95,6 +113,7 @@ type Doc = InstanceType<typeof PDFDocument>;
 interface Ctx {
   pdf: Doc; d: DocData; f: FontSet; accent: string;
   W: number; H: number; M: number; right: number;
+  issuerAt: IssuerPlacement;
 }
 
 const rgb = ([r, g, b]: [number, number, number]) =>
@@ -285,32 +304,90 @@ function issuerLines(d: DocData): string[] {
   ].filter(Boolean);
 }
 
+/** The issuer details on ONE line, for the fine-print strip at the foot. */
+function issuerOneLine(d: DocData): string {
+  return [
+    (d.issuer.address ?? '').replace(/\s*\n\s*/g, ', '),
+    d.issuer.reg && `Reg ${d.issuer.reg}`,
+    d.issuer.vat && `VAT ${d.issuer.vat}`,
+  ].filter(Boolean).join('   |   ');
+}
+
+/**
+ * The fine-print strip: issuer details and terms, hairline-separated, sitting at
+ * the foot of the page where legal detail belongs. This is what frees the header
+ * to do one job, which was the whole problem with crowding them beside the logo.
+ */
+function drawIssuerStrip(c: Ctx, left = c.M, width = c.right - c.M): void {
+  const { pdf, d, f } = c;
+  const details = issuerOneLine(d);
+  const terms = d.issuer.footer;
+  if (!details && !terms) return;
+
+  // Measure first so the rule sits directly above whatever we are about to draw,
+  // rather than at a guessed offset that drifts with the amount of text.
+  pdf.font(f.regular).fontSize(7.5);
+  const dh = details ? pdf.heightOfString(details, { width, align: 'center' }) : 0;
+  const th = terms ? pdf.heightOfString(terms, { width, align: 'center' }) : 0;
+  const total = dh + th + (details && terms ? 4 : 0);
+  const top = c.H - 34 - total;
+
+  pdf.moveTo(left, top - 10).lineTo(left + width, top - 10)
+    .lineWidth(0.5).strokeColor(HAIRLINE).stroke();
+
+  let y = top;
+  if (details) {
+    pdf.font(f.regular).fontSize(7.5).fillColor(MUTED).text(details, left, y, { width, align: 'center' });
+    y = pdf.y + 4;
+  }
+  if (terms) {
+    pdf.font(f.regular).fontSize(7.5).fillColor(MUTED).text(terms, left, y, { width, align: 'center' });
+  }
+}
+
 // ---- The layouts ------------------------------------------------------------
 
 function layoutModern(c: Ctx): void {
   const { pdf, d, f } = c;
   pdf.rect(0, 0, c.W, 5).fill(c.accent);
-  let y = 46;
+
+  // The header does ONE job: who this is from, and what the document is. The logo
+  // and name sit on a baseline together with room to breathe; the legal details
+  // only join them when explicitly asked for, because squeezed into this band they
+  // crowd the logo and fight the title for the same horizontal space.
+  const top = 48;
   let tx = c.M;
   if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, c.M, y, { fit: [52, 52] }); tx = c.M + 66; } catch { /* skip */ }
+    try { pdf.image(d.issuer.logo, c.M, top, { fit: [56, 56] }); tx = c.M + 72; } catch { /* skip */ }
   }
-  pdf.font(f.bold).fontSize(15).fillColor(INK_STRONG).text(d.issuer.name, tx, y, { width: 280 });
-  let ly = pdf.y + 2;
-  for (const l of issuerLines(d)) {
-    pdf.font(f.regular).fontSize(8.5).fillColor(MUTED).text(l, tx, ly, { width: 250 });
-    ly = pdf.y;
+  pdf.font(f.bold).fontSize(17).fillColor(INK_STRONG).text(d.issuer.name, tx, top + 4, { width: 250 });
+  let ly = pdf.y;
+  if (c.issuerAt === 'header') {
+    ly += 5;
+    for (const l of issuerLines(d)) {
+      pdf.font(f.regular).fontSize(8.5).fillColor(MUTED).text(l, tx, ly, { width: 240 });
+      ly = pdf.y + 1;
+    }
   }
 
   pdf.font(f.bold).fontSize(24).fillColor(c.accent)
-    .text(d.label.toUpperCase(), c.right - 240, 44, { width: 240, align: 'right' });
-  const metaEnd = drawMeta(c, c.right - 240, pdf.y + 8, 240);
+    .text(d.label.toUpperCase(), c.right - 240, top - 4, { width: 240, align: 'right' });
+  let metaEnd = drawMeta(c, c.right - 240, pdf.y + 10, 240);
+  if (c.issuerAt === 'beside') {
+    metaEnd += 6;
+    for (const l of issuerLines(d)) {
+      pdf.font(f.regular).fontSize(8).fillColor(MUTED)
+        .text(l, c.right - 240, metaEnd, { width: 240, align: 'right' });
+      metaEnd = pdf.y + 1;
+    }
+  }
   if (d.paid) {
     pdf.font(f.bold).fontSize(9).fillColor(c.accent)
-      .text('PAID', c.right - 240, metaEnd + 2, { width: 240, align: 'right' });
+      .text('PAID', c.right - 240, metaEnd + 4, { width: 240, align: 'right' });
+    metaEnd = pdf.y;
   }
 
-  y = Math.max(ly, metaEnd) + 26;
+  let y = Math.max(ly, metaEnd, top + 62) + 30;
   const billEnd = drawBillTo(c, c.M, y, 260);
   y = billEnd + 24;
   if (d.headerHtml) y = drawRuns(c, htmlToPdfRuns(d.headerHtml), y, c.right - c.M) + 14;
@@ -318,7 +395,10 @@ function layoutModern(c: Ctx): void {
   y = drawTotals(c, y + 10, {});
   y = drawFooterBlocks(c, y + 12, c.right - c.M);
   if (d.footerHtml) drawRuns(c, htmlToPdfRuns(d.footerHtml), y + 6, c.right - c.M);
-  drawFinePrint(c);
+
+  // With the details at the foot the strip carries them AND the terms; otherwise
+  // only the terms need a home down here.
+  if (c.issuerAt === 'footer') drawIssuerStrip(c); else drawFinePrint(c);
 }
 
 function layoutClassic(c: Ctx): void {
@@ -380,10 +460,12 @@ function layoutBold(c: Ctx): void {
   let y = BAND + 30;
   const billEnd = drawBillTo(c, c.M, y, 250);
   let ry = y;
-  for (const l of issuerLines(d)) {
-    pdf.font(f.regular).fontSize(8.5).fillColor(MUTED)
-      .text(l, c.right - 220, ry, { width: 220, align: 'right' });
-    ry = pdf.y;
+  if (c.issuerAt !== 'footer') {
+    for (const l of issuerLines(d)) {
+      pdf.font(f.regular).fontSize(8.5).fillColor(MUTED)
+        .text(l, c.right - 220, ry, { width: 220, align: 'right' });
+      ry = pdf.y;
+    }
   }
   y = Math.max(billEnd, ry) + 24;
 
@@ -392,7 +474,7 @@ function layoutBold(c: Ctx): void {
   y = drawTotals(c, y + 12, { boxed: true });
   y = drawFooterBlocks(c, y + 14, c.right - c.M);
   if (d.footerHtml) drawRuns(c, htmlToPdfRuns(d.footerHtml), y + 6, c.right - c.M);
-  drawFinePrint(c);
+  if (c.issuerAt === 'footer') drawIssuerStrip(c); else drawFinePrint(c);
 }
 
 function layoutSidebar(c: Ctx): void {
@@ -452,7 +534,7 @@ function layoutCompact(c: Ctx): void {
     try { pdf.image(d.issuer.logo, c.M, y, { fit: [34, 34] }); tx = c.M + 44; } catch { /* skip */ }
   }
   pdf.font(f.bold).fontSize(12).fillColor(INK_STRONG).text(d.issuer.name, tx, y + 2, { width: 240 });
-  const issuerBits = issuerLines(d).join('  |  ');
+  const issuerBits = c.issuerAt === 'footer' ? '' : issuerLines(d).join('  |  ');
   if (issuerBits) {
     pdf.font(f.regular).fontSize(7.5).fillColor(MUTED).text(issuerBits, tx, pdf.y + 1, { width: 260 });
   }
@@ -479,7 +561,7 @@ function layoutCompact(c: Ctx): void {
   y = drawTotals(c, y + 8, { width: 210 });
   y = drawFooterBlocks(c, y + 10, c.right - c.M);
   if (d.footerHtml) drawRuns(c, htmlToPdfRuns(d.footerHtml), y + 6, c.right - c.M);
-  drawFinePrint(c);
+  if (c.issuerAt === 'footer') drawIssuerStrip(c); else drawFinePrint(c);
 }
 
 const LAYOUTS: Record<PdfTemplate, (c: Ctx) => void> = {
@@ -501,6 +583,8 @@ export function drawDocument(pdf: Doc, d: DocData, o: ThemeOptions): void {
     accent: rgb(o.accent),
     W: pdf.page.width, H: pdf.page.height,
     M, right: pdf.page.width - M,
+    issuerAt: ISSUER_PLACEMENTS.includes(o.issuer as IssuerPlacement)
+      ? (o.issuer as IssuerPlacement) : 'footer',
   };
   LAYOUTS[template](c);
 }

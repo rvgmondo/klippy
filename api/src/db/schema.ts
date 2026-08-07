@@ -140,6 +140,11 @@ export const businesses = mysqlTable('businesses', {
   // free; a real brand font would mean shipping and licensing a TTF.
   pdfTemplate: varchar('pdf_template', { length: 20 }),
   pdfTypeface: varchar('pdf_typeface', { length: 10 }),
+  // Where the company's own address, registration and VAT number sit on a
+  // document. Wedged beside the logo they crowd the header and compete with the
+  // document title; as fine print at the foot they read the way legal details
+  // should. Applies to the layouts where it is a genuine choice.
+  pdfIssuerPlacement: varchar('pdf_issuer_placement', { length: 12 }),
   prefixInvoice: varchar('prefix_invoice', { length: 12 }),
   prefixQuote: varchar('prefix_quote', { length: 12 }),
   prefixCreditNote: varchar('prefix_credit_note', { length: 12 }),

@@ -91,6 +91,7 @@ export interface Business {
   /** Which PDF design this business's documents use, and its print typeface. */
   pdfTemplate?: string | null;
   pdfTypeface?: string | null;
+  pdfIssuerPlacement?: string | null;
   /** Document numbering: prefix per type, and where the count starts. */
   prefixInvoice?: string | null;
   prefixQuote?: string | null;

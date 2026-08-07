@@ -7,7 +7,7 @@ import { documents, documentLines, accounts, businesses } from '../db/schema.js'
 import { tenantWhere } from './tenant.js';
 import { fillTemplate, templateDataFor } from './template.js';
 import { safeImage } from './imageGuard.js';
-import { drawDocument, PDF_TEMPLATES, PDF_TYPEFACES, } from './pdfThemes.js';
+import { drawDocument, PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS, } from './pdfThemes.js';
 /**
  * Renders a document to a real PDF, so an emailed invoice arrives as a file the
  * client can file or forward rather than a wall of text they have to trust.
@@ -31,6 +31,7 @@ function hexToRgb(hex) {
 const LABEL = { quote: 'Quotation', invoice: 'Invoice', credit_note: 'Credit note' };
 const isTemplate = (v) => PDF_TEMPLATES.includes(v);
 const isTypeface = (v) => PDF_TYPEFACES.includes(v);
+const isPlacement = (v) => ISSUER_PLACEMENTS.includes(v);
 /** Turn a pdfkit document into a buffer. */
 function toBuffer(pdf) {
     const chunks = [];
@@ -121,10 +122,12 @@ export async function renderDocumentPdf(accountId, docId, override) {
         : isTemplate(business?.pdfTemplate) ? business.pdfTemplate : 'modern';
     const typeface = isTypeface(override?.typeface) ? override.typeface
         : isTypeface(business?.pdfTypeface) ? business.pdfTypeface : 'sans';
+    const issuer = isPlacement(override?.issuer) ? override.issuer
+        : isPlacement(business?.pdfIssuerPlacement) ? business.pdfIssuerPlacement : 'footer';
     const pdf = new PDFDocument({ size: 'A4', margin: 0 });
     const done = toBuffer(pdf);
     drawDocument(pdf, data, {
-        template, typeface,
+        template, typeface, issuer,
         accent: hexToRgb(business?.invoiceAccent || account?.invoiceAccent || '#6366f1'),
     });
     pdf.end();
@@ -177,6 +180,7 @@ export async function renderSamplePdf(accountId, businessId, opts) {
     drawDocument(pdf, data, {
         template: isTemplate(opts.template) ? opts.template : 'modern',
         typeface: isTypeface(opts.typeface) ? opts.typeface : 'sans',
+        issuer: isPlacement(opts.issuer) ? opts.issuer : 'footer',
         accent: hexToRgb(business?.invoiceAccent || account?.invoiceAccent || '#6366f1'),
     });
     pdf.end();

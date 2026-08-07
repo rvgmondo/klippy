@@ -1,0 +1,1 @@
+ALTER TABLE `businesses` ADD `pdf_issuer_placement` varchar(12);

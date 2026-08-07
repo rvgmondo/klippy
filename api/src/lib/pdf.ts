@@ -8,8 +8,8 @@ import { tenantWhere } from './tenant.js';
 import { fillTemplate, templateDataFor } from './template.js';
 import { safeImage } from './imageGuard.js';
 import {
-  drawDocument, PDF_TEMPLATES, PDF_TYPEFACES,
-  type DocData, type PdfTemplate, type PdfTypeface,
+  drawDocument, PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS,
+  type DocData, type PdfTemplate, type PdfTypeface, type IssuerPlacement,
 } from './pdfThemes.js';
 
 /**
@@ -41,6 +41,7 @@ export interface RenderedDoc { filename: string; buffer: Buffer }
 
 const isTemplate = (v: unknown): v is PdfTemplate => PDF_TEMPLATES.includes(v as PdfTemplate);
 const isTypeface = (v: unknown): v is PdfTypeface => PDF_TYPEFACES.includes(v as PdfTypeface);
+const isPlacement = (v: unknown): v is IssuerPlacement => ISSUER_PLACEMENTS.includes(v as IssuerPlacement);
 
 /** Turn a pdfkit document into a buffer. */
 function toBuffer(pdf: InstanceType<typeof PDFDocument>): Promise<Buffer> {
@@ -58,7 +59,7 @@ function toBuffer(pdf: InstanceType<typeof PDFDocument>): Promise<Buffer> {
  */
 export async function renderDocumentPdf(
   accountId: number, docId: number,
-  override?: { template?: string; typeface?: string },
+  override?: { template?: string; typeface?: string; issuer?: string },
 ): Promise<RenderedDoc | null> {
   const [doc] = await db.select().from(documents)
     .where(tenantWhere(documents, accountId, eq(documents.id, docId))).limit(1);
@@ -148,10 +149,13 @@ export async function renderDocumentPdf(
   const typeface = isTypeface(override?.typeface) ? override!.typeface
     : isTypeface(business?.pdfTypeface) ? business!.pdfTypeface as PdfTypeface : 'sans';
 
+  const issuer = isPlacement(override?.issuer) ? override!.issuer
+    : isPlacement(business?.pdfIssuerPlacement) ? business!.pdfIssuerPlacement as IssuerPlacement : 'footer';
+
   const pdf = new PDFDocument({ size: 'A4', margin: 0 });
   const done = toBuffer(pdf);
   drawDocument(pdf, data, {
-    template, typeface,
+    template, typeface, issuer,
     accent: hexToRgb(business?.invoiceAccent || account?.invoiceAccent || '#6366f1'),
   });
   pdf.end();
@@ -165,7 +169,7 @@ export async function renderDocumentPdf(
  */
 export async function renderSamplePdf(
   accountId: number, businessId: number | null,
-  opts: { template?: string; typeface?: string },
+  opts: { template?: string; typeface?: string; issuer?: string },
 ): Promise<Buffer> {
   const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
   const [business] = businessId
@@ -212,6 +216,7 @@ export async function renderSamplePdf(
   drawDocument(pdf, data, {
     template: isTemplate(opts.template) ? opts.template : 'modern',
     typeface: isTypeface(opts.typeface) ? opts.typeface : 'sans',
+    issuer: isPlacement(opts.issuer) ? opts.issuer : 'footer',
     accent: hexToRgb(business?.invoiceAccent || account?.invoiceAccent || '#6366f1'),
   });
   pdf.end();

@@ -14,7 +14,7 @@ import { BLUEPRINTS, blueprint, provisionFrom } from '../lib/blueprints.js';
 import { ALLOWED_FONTS, isAllowedFont } from '../lib/fonts.js';
 import { sanitiseTemplate, PLACEHOLDERS } from '../lib/template.js';
 import { nextNumberFor } from '../lib/numbering.js';
-import { PDF_TEMPLATES, PDF_TYPEFACES, TEMPLATE_INFO, TYPEFACE_INFO } from '../lib/pdfThemes.js';
+import { PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS, TEMPLATE_INFO, TYPEFACE_INFO, PLACEMENT_INFO } from '../lib/pdfThemes.js';
 import { renderSamplePdf } from '../lib/pdf.js';
 
 const businessType = z.enum(['services', 'products', 'code', 'content']);
@@ -53,6 +53,7 @@ const updateSchema = z.object({
   // PDF design.
   pdfTemplate: z.enum(PDF_TEMPLATES).nullable().optional(),
   pdfTypeface: z.enum(PDF_TYPEFACES).nullable().optional(),
+  pdfIssuerPlacement: z.enum(ISSUER_PLACEMENTS).nullable().optional(),
   // Document numbering: prefix per type, and where the count starts.
   prefixInvoice: nullableStr(12),
   prefixQuote: nullableStr(12),
@@ -230,7 +231,7 @@ export async function businessRoutes(app: FastifyInstance) {
 
   /** The PDF designs on offer, so the picker and the renderer cannot drift. */
   app.get('/api/v1/pdf-designs', async () => ({
-    templates: TEMPLATE_INFO, typefaces: TYPEFACE_INFO,
+    templates: TEMPLATE_INFO, typefaces: TYPEFACE_INFO, placements: PLACEMENT_INFO,
   }));
 
   /**
@@ -243,8 +244,10 @@ export async function businessRoutes(app: FastifyInstance) {
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     if (!(await assertBusinessAccess(req, reply, id, 'admin'))) return;
-    const q = req.query as { template?: string; typeface?: string };
-    const buf = await renderSamplePdf(accountId, id, { template: q.template, typeface: q.typeface });
+    const q = req.query as { template?: string; typeface?: string; issuer?: string };
+    const buf = await renderSamplePdf(accountId, id, {
+      template: q.template, typeface: q.typeface, issuer: q.issuer,
+    });
     return reply
       .header('Content-Type', 'application/pdf')
       .header('Content-Disposition', 'inline; filename="preview.pdf"')
