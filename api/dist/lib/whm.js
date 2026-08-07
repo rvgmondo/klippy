@@ -79,25 +79,60 @@ export async function listPackages(creds) {
     return { ok: true, message: `${pkgs.length} packages`, data: pkgs.map((p) => ({ name: p.name })) };
 }
 /**
+ * Usernames cPanel refuses.
+ *
+ * Two kinds. Exact names that belong to the system, and PREFIXES that cPanel
+ * reserves wholesale: anything starting with "test" is rejected outright, which is
+ * how testrubs.co.za and testsampleclient.co.za both failed with "reserved
+ * username" on a real server. Worth encoding rather than discovering per customer.
+ *
+ * This list will never be complete, which is why the caller also recovers when the
+ * server refuses a name it did not know about. The server is the authority; this
+ * just avoids the round trip for the ones we can predict.
+ */
+const RESERVED_NAMES = new Set([
+    'root', 'admin', 'administrator', 'cpanel', 'whm', 'mysql', 'ftp', 'www', 'web',
+    'mail', 'email', 'nobody', 'bin', 'daemon', 'sys', 'operator', 'uucp', 'lp',
+    'sync', 'shutdown', 'halt', 'news', 'games', 'gopher', 'apache', 'nginx',
+    'postgres', 'exim', 'named', 'sshd', 'tomcat', 'test', 'temp', 'guest', 'user',
+    'default', 'system', 'server', 'host', 'main', 'public', 'support', 'info',
+]);
+const RESERVED_PREFIXES = ['test'];
+export function isReservedUsername(u) {
+    if (RESERVED_NAMES.has(u))
+        return true;
+    return RESERVED_PREFIXES.some((p) => u.startsWith(p));
+}
+/**
  * A cPanel username from a domain.
  *
  * cPanel's own rules, which are strict and worth getting right rather than letting
  * the server reject the account: letters and digits only, must not start with a
- * digit, and at most 16 characters on most builds. A short random tail keeps two
- * similar domains from colliding.
+ * digit, and at most 16 characters on most builds. A reserved name gets a letter in
+ * front rather than a number on the end, since a reserved PREFIX would survive a
+ * suffix and be refused all over again.
  */
 export function usernameFor(domain, taken = () => false) {
     const base = domain.toLowerCase().replace(/^www\./, '').split('.')[0]?.replace(/[^a-z0-9]/g, '') ?? '';
     let stem = (/^[0-9]/.test(base) ? `u${base}` : base).slice(0, 12) || 'site';
     if (!/^[a-z]/.test(stem))
         stem = `u${stem}`.slice(0, 12);
+    // Break the reserved prefix at the front, where it actually matters.
+    if (isReservedUsername(stem))
+        stem = `k${stem}`.slice(0, 12);
     let candidate = stem;
     let n = 0;
-    while (taken(candidate)) {
+    while (taken(candidate) || isReservedUsername(candidate)) {
         n += 1;
+        if (n > 50)
+            return `k${Math.random().toString(36).slice(2, 10)}`;
         candidate = `${stem.slice(0, 12 - String(n).length)}${n}`;
     }
     return candidate.slice(0, 16);
+}
+/** Did WHM refuse this name rather than fail for some other reason? */
+export function isReservedRejection(message) {
+    return /reserved username|username.*reserved|already exists|in use/i.test(message);
 }
 /** A password strong enough for cPanel's own strength check. */
 export function generatePassword() {

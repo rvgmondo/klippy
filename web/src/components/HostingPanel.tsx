@@ -253,7 +253,7 @@ export function HostingPanel({ businessId }: { businessId?: number } = {}) {
         </div>
       )}
 
-      {!businessId && <HostingAccounts />}
+      <HostingAccounts businessId={businessId} />
     </div>
   );
 }
@@ -261,17 +261,30 @@ export function HostingPanel({ businessId }: { businessId?: number } = {}) {
 interface HostingAccount {
   id: number; domain: string; username: string | null; whmPackage: string | null;
   status: string; detail: string | null; clientName: string | null; createdAt: string;
+  businessName?: string | null; subscriptionId?: number;
 }
 
-/** What has actually been provisioned, and the suspend control. */
-function HostingAccounts() {
+/**
+ * What has actually been provisioned, and the suspend control.
+ *
+ * Scoped to the business when viewed under one. Hosting set up against a business
+ * used to appear only on the workspace screen, which looks exactly like it went to
+ * the wrong place.
+ */
+function HostingAccounts({ businessId }: { businessId?: number }) {
   const qc = useQueryClient();
   const { data } = useQuery({
-    queryKey: ['hosting-accounts'],
-    queryFn: () => apiGet<{ accounts: HostingAccount[] }>('/hosting/accounts'),
+    queryKey: ['hosting-accounts', businessId ?? 0],
+    queryFn: () => apiGet<{ accounts: HostingAccount[] }>(
+      businessId ? `/hosting/accounts?businessId=${businessId}` : '/hosting/accounts'),
     retry: false,
   });
   const [err, setErr] = useState('');
+  const retry = useMutation({
+    mutationFn: (subscriptionId: number) => apiPost(`/subscriptions/${subscriptionId}/provision`),
+    onSuccess: () => { setErr(''); qc.invalidateQueries({ queryKey: ['hosting-accounts'] }); },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not try again.'),
+  });
   const suspend = useMutation({
     mutationFn: (v: { id: number; suspend: boolean }) =>
       apiPost(`/hosting/accounts/${v.id}/suspend`, { suspend: v.suspend }),
@@ -295,6 +308,7 @@ function HostingAccounts() {
               <tr>
                 <th className="px-3 py-2 font-medium">Domain</th>
                 <th className="px-3 py-2 font-medium">Client</th>
+                {!businessId && <th className="px-3 py-2 font-medium">Business</th>}
                 <th className="px-3 py-2 font-medium">cPanel user</th>
                 <th className="px-3 py-2 font-medium">Status</th>
                 <th className="px-3 py-2"></th>
@@ -305,6 +319,7 @@ function HostingAccounts() {
                 <tr key={a.id} className="border-t border-slate-800">
                   <td className="px-3 py-2 text-slate-200">{a.domain}</td>
                   <td className="px-3 py-2 text-slate-400">{a.clientName ?? '-'}</td>
+                  {!businessId && <td className="px-3 py-2 text-slate-400">{a.businessName ?? '-'}</td>}
                   <td className="px-3 py-2 num text-slate-400">{a.username ?? '-'}</td>
                   <td className="px-3 py-2">
                     <span className={`rounded-md px-2 py-0.5 text-[11px] ${
@@ -324,6 +339,12 @@ function HostingAccounts() {
                         {a.status === 'active' ? 'Suspend' : 'Restore'}
                       </button>
                     )}
+                    {(a.status === 'failed' || a.status === 'dry-run') && a.subscriptionId && (
+                      <button onClick={() => retry.mutate(a.subscriptionId!)} disabled={retry.isPending}
+                        className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                        {retry.isPending ? 'Trying...' : 'Try again'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -331,11 +352,11 @@ function HostingAccounts() {
           </table>
         </div>
       )}
-      {rows.some((a) => a.detail && a.status === 'failed') && (
-        <p className="mt-2 text-[11px] text-slate-500">
-          {rows.find((a) => a.status === 'failed')?.detail}
+      {rows.filter((a) => a.status === 'failed' && a.detail).map((a) => (
+        <p key={a.id} className="mt-2 rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">
+          <span className="text-red-200">{a.domain}</span>: {a.detail}
         </p>
-      )}
+      ))}
     </section>
   );
 }

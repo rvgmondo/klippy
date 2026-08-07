@@ -8,8 +8,8 @@ import { decryptSecret } from './secretbox.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import {
-  accountExists, createAccount, generatePassword, suspendAccount, unsuspendAccount,
-  usernameFor, type WhmCreds,
+  accountExists, createAccount, generatePassword, isReservedRejection, suspendAccount,
+  unsuspendAccount, usernameFor, type WhmCreds,
 } from './whm.js';
 
 /**
@@ -135,13 +135,29 @@ export async function provisionSubscription(
   // retried notification or an overlapping run loses the race instead of creating a
   // second hosting account for the same customer.
   const domain = sub.domain.trim().toLowerCase().replace(/^www\./, '');
-  try {
-    await db.insert(hostingAccounts).values(withTenant(accountId, {
-      businessId: sub.businessId, subscriptionId, domain,
-      whmPackage: offering.whmPackage ?? null, status: 'pending' as const,
-    }));
-  } catch {
+  const [prior] = await db.select().from(hostingAccounts)
+    .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)))
+    .limit(1);
+
+  if (prior && prior.status !== 'failed' && prior.status !== 'dry-run') {
     return { outcome: 'skipped', detail: 'This subscription already has a hosting account.' };
+  }
+  if (prior) {
+    // A previous attempt failed, or was a dry run and live is now on. Reuse the row
+    // rather than refusing: a stranded "failed" that can never be retried is worse
+    // than no record at all, because it looks like something was done.
+    await db.update(hostingAccounts).set({
+      status: 'pending', domain, whmPackage: offering.whmPackage ?? null, detail: null,
+    }).where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, prior.id)));
+  } else {
+    try {
+      await db.insert(hostingAccounts).values(withTenant(accountId, {
+        businessId: sub.businessId, subscriptionId, domain,
+        whmPackage: offering.whmPackage ?? null, status: 'pending' as const,
+      }));
+    } catch {
+      return { outcome: 'skipped', detail: 'This subscription already has a hosting account.' };
+    }
   }
 
   const finish = async (status: 'active' | 'failed' | 'dry-run', detail: string, username?: string) => {
@@ -176,9 +192,23 @@ export async function provisionSubscription(
 
   const email = await billingEmailFor(accountId, sub.folderId);
   const password = generatePassword();
-  const res = await createAccount(creds, {
+
+  // The reserved-name list here will never match a given server's exactly, and a
+  // customer should not be stranded because of a name we could have simply changed.
+  // So a refusal ON THE NAME is retried with a different one; anything else is a
+  // real failure and reported as it stands.
+  let res = await createAccount(creds, {
     username, domain, password, plan: offering.whmPackage, contactEmail: email,
   });
+  for (let attempt = 1; attempt <= 3 && !res.ok && isReservedRejection(res.message); attempt++) {
+    const rejected = username;
+    username = usernameFor(domain, (u) => u === rejected || u === username);
+    username = `k${attempt}${username}`.slice(0, 16);
+    res = await createAccount(creds, {
+      username, domain, password, plan: offering.whmPackage, contactEmail: email,
+    });
+  }
+
   if (!res.ok) {
     await finish('failed', res.message, username);
     return done('failed', res.message, { username });

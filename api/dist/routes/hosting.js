@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, desc, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { hostingAccounts, hostingSettings, subscriptions, folders, offerings, events } from '../db/schema.js';
+import { hostingAccounts, hostingSettings, subscriptions, folders, offerings, events, businesses } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -176,19 +176,31 @@ export async function hostingRoutes(app) {
         const pkgs = await listPackages(creds);
         return { ok: true, message: res.message, packages: pkgs.ok ? (pkgs.data ?? []).map((p) => p.name) : [] };
     });
-    /** Hosting accounts Klippy knows about, newest first. */
+    /**
+     * Hosting accounts, newest first.
+     *
+     * Scoped to a business when one is asked for. Without that, hosting created under
+     * one business showed up only on the workspace screen, which reads as though it
+     * landed somewhere it did not.
+     */
     app.get('/api/v1/hosting/accounts', async (req) => {
         const { accountId } = authOf(req);
+        const q = z.object({ businessId: z.coerce.number().int().positive().optional() })
+            .safeParse(req.query);
+        const bizFilter = q.success && q.data.businessId
+            ? eq(hostingAccounts.businessId, q.data.businessId) : undefined;
         const rows = await db.select({
             id: hostingAccounts.id, businessId: hostingAccounts.businessId,
             subscriptionId: hostingAccounts.subscriptionId, domain: hostingAccounts.domain,
             username: hostingAccounts.username, whmPackage: hostingAccounts.whmPackage,
             status: hostingAccounts.status, detail: hostingAccounts.detail,
             createdAt: hostingAccounts.createdAt, clientName: folders.name,
+            businessName: businesses.name,
         }).from(hostingAccounts)
             .leftJoin(subscriptions, eq(subscriptions.id, hostingAccounts.subscriptionId))
             .leftJoin(folders, eq(folders.id, subscriptions.folderId))
-            .where(eq(hostingAccounts.accountId, accountId))
+            .leftJoin(businesses, eq(businesses.id, hostingAccounts.businessId))
+            .where(and(eq(hostingAccounts.accountId, accountId), bizFilter))
             .orderBy(desc(hostingAccounts.id))
             .limit(100);
         return { accounts: rows };
