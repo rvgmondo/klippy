@@ -34,6 +34,11 @@ export interface Subscription {
   unit: string | null;
   folderId: number;
   clientName: string;
+  autoSend?: boolean;
+  /** Charge the saved card each cycle without the client present. */
+  autoDebit?: boolean;
+  /** Whether a card token is stored. Never the token itself. */
+  hasCard?: boolean;
 }
 export interface Offering {
   id: number;

@@ -6,6 +6,7 @@ import { ErrorNote } from './ErrorNote';
 interface Configured {
   merchantId: string; hasMerchantKey: boolean; hasPassphrase: boolean;
   sandbox: boolean; enabled: boolean;
+  autoDebitEnabled: boolean; autoDebitLive: boolean; autoDebitMax: string;
 }
 interface Status { configured: Configured; serverReady: boolean }
 
@@ -111,7 +112,148 @@ export function PaymentsPanel() {
         {saved && <span className="text-sm text-violet-300">Saved</span>}
       </div>
 
+      <AutoDebitPanel configured={data.configured} />
       <PayfastActivity />
+    </div>
+  );
+}
+
+/**
+ * Charging a saved card on a schedule.
+ *
+ * Presented as three deliberate steps rather than one switch, because this is the
+ * only part of Klippy that takes money with nobody watching. The order matters:
+ * turn it on, watch a dry run bill the right people for the right amounts, and only
+ * then let it charge. The copy says what each switch actually does instead of
+ * leaving the reader to find out with a client's card.
+ */
+function AutoDebitPanel({ configured }: { configured: Configured }) {
+  const qc = useQueryClient();
+  const [max, setMax] = useState(configured.autoDebitMax);
+  const [saved, setSaved] = useState(false);
+
+  const save = useMutation({
+    mutationFn: (patch: Record<string, unknown>) => apiPatch('/account/payfast', patch),
+    onSuccess: () => {
+      setSaved(true); setTimeout(() => setSaved(false), 2000);
+      qc.invalidateQueries({ queryKey: ['payfast'] });
+    },
+  });
+
+  const on = configured.autoDebitEnabled;
+  const live = configured.autoDebitLive;
+
+  return (
+    <section className="mt-6 space-y-3 border-t border-slate-800 pt-5">
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Auto-debit</h3>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Charge a client's saved card automatically when their subscription bills, instead of emailing
+          an invoice and waiting. A card is only saved after that client has paid one invoice online.
+        </p>
+      </div>
+
+      <label className="flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]"
+          checked={on} disabled={!configured.enabled || save.isPending}
+          onChange={(e) => save.mutate({ autoDebitEnabled: e.target.checked })} />
+        Allow auto-debit on this workspace
+      </label>
+      {!configured.enabled && (
+        <p className="text-[11px] text-slate-500">Switch PayFast on above first.</p>
+      )}
+
+      {on && (
+        <>
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            Auto-debit has never charged a card from this install. Leave dry run on until you have watched
+            one billing run list the right clients and the right amounts. In dry run nothing is taken:
+            each run writes down what it would have charged, and you can read it below.
+            <span className="mt-1.5 block text-amber-200/80">
+              A saved card is money you can move without the client present, so make sure they have agreed
+              to it. That agreement is between you and them, not something Klippy can give you.
+            </span>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]"
+              checked={live} disabled={save.isPending}
+              onChange={(e) => save.mutate({ autoDebitLive: e.target.checked })} />
+            <span className={live ? 'text-red-300' : ''}>
+              {live ? 'Live: real cards are charged' : 'Dry run: write down what it would charge, take nothing'}
+            </span>
+          </label>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-400">Most it may charge at once</label>
+            <div className="flex items-center gap-2">
+              <input inputMode="decimal" value={max} onChange={(e) => setMax(e.target.value)}
+                className="w-36 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm num text-slate-100 outline-none focus:border-[var(--accent)]" />
+              <button onClick={() => save.mutate({ autoDebitMax: Number(max) })}
+                disabled={save.isPending || !(Number(max) > 0)}
+                className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                Set limit
+              </button>
+              {saved && <span className="text-xs text-violet-300">Saved</span>}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Anything above this is refused and left as an unpaid invoice for you to look at. It is the
+              backstop against a wrong price debiting a client for a fortune.
+            </p>
+          </div>
+        </>
+      )}
+
+      {save.error && <ErrorNote error={save.error} />}
+      {on && <AutoDebitActivity />}
+    </section>
+  );
+}
+
+/** What auto-debit has done, including what it refused to do. */
+function AutoDebitActivity() {
+  const { data, refetch, isFetching } = useQuery({
+    queryKey: ['autodebit-activity'],
+    queryFn: () => apiGet<{
+      activity: { id: number; at: string; ok: boolean; outcome: string; detail: Record<string, unknown> }[];
+    }>('/account/autodebit/activity'),
+    retry: false,
+  });
+  const rows = data?.activity ?? [];
+
+  return (
+    <div className="mt-4">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Recent auto-debit runs</span>
+        <button onClick={() => refetch()} disabled={isFetching}
+          className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+          {isFetching ? 'Checking...' : 'Refresh'}
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-700 p-3 text-[11px] text-slate-400">
+          Nothing yet. Recurring billing runs each morning; whatever it charges or refuses shows up here.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map((r) => {
+            const outcome = String(r.detail.outcome ?? '');
+            const tone = outcome === 'charged' ? 'border-green-500/25 bg-green-500/5 text-green-300'
+              : outcome === 'dry-run' ? 'border-sky-500/25 bg-sky-500/5 text-sky-300'
+              : outcome === 'failed' ? 'border-red-500/25 bg-red-500/5 text-red-300'
+              : 'border-slate-700 bg-slate-800/40 text-slate-400';
+            return (
+              <div key={r.id} className={`rounded-lg border px-3 py-2 ${tone}`}>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-xs font-medium">{String(r.detail.number ?? '')} {outcome}</span>
+                  <span className="num text-[10px] opacity-70">{new Date(r.at).toLocaleString()}</span>
+                </div>
+                <p className="mt-0.5 text-[11px] text-slate-300">{r.outcome}</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

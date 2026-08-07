@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { desc, eq } from 'drizzle-orm';
+import { desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { subscriptions, offerings, folders } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -30,6 +30,10 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       lastBilledAt: subscriptions.lastBilledAt,
       offeringId: subscriptions.offeringId, offeringName: offerings.name, price: offerings.price, unit: offerings.unit,
       folderId: subscriptions.folderId, clientName: folders.name,
+      autoSend: subscriptions.autoSend,
+      autoDebit: subscriptions.autoDebit,
+      // Whether a card is stored, never the token itself.
+      hasCard: sql<boolean>`${subscriptions.payfastToken} is not null`,
     }).from(subscriptions)
       .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
       .innerJoin(folders, eq(folders.id, subscriptions.folderId))
@@ -90,7 +94,9 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
-    const parsed = z.object({ status: status.optional(), autoSend: z.boolean().optional() }).safeParse(req.body);
+    const parsed = z.object({
+      status: status.optional(), autoSend: z.boolean().optional(), autoDebit: z.boolean().optional(),
+    }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const [own] = await db.select({ businessId: subscriptions.businessId }).from(subscriptions)
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);

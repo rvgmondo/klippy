@@ -66,6 +66,8 @@ function addDays(dateStr: string, days: number): string {
 export async function generateSubscriptionInvoice(accountId: number, sub: {
   businessId: number; offeringId: number; folderId: number; createdBy: number | null;
   autoSend?: boolean;
+  /** Recorded on the invoice so auto-debit can find its way back to the card. */
+  subscriptionId?: number;
 }): Promise<number> {
   const [offering] = await db.select().from(offerings)
     .where(tenantWhere(offerings, accountId, eq(offerings.id, sub.offeringId))).limit(1);
@@ -89,6 +91,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   const docId = await db.transaction(async (tx) => {
     const ins = await tx.insert(documents).values(withTenant(accountId, {
       type: 'invoice' as const, seq, number, businessId: sub.businessId, folderId: sub.folderId,
+      subscriptionId: sub.subscriptionId ?? null,
       clientName: folder.name, clientEmail: folder.billingEmail ?? null, clientAddress: null,
       issueDate, dueDate, currency,
       taxRate: '0', subtotal: money(price), taxAmount: '0', total: money(price),

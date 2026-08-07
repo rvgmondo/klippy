@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings, documents, payments, events } from '../db/schema.js';
+import { paymentSettings, documents, payments, events, subscriptions } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -28,6 +28,21 @@ async function loadCreds(accountId: number): Promise<PayfastCreds | null> {
   } catch {
     return null; // bad key / rotated PAYMENTS_SECRET: treat as not configured
   }
+}
+
+/**
+ * Should this checkout ask PayFast to store the card?
+ *
+ * Only when the invoice came from a subscription that is set to auto-debit and has
+ * no card stored yet. Asking every time would change what the client agrees to at
+ * the PayFast page for one-off invoices, which is not ours to do quietly.
+ */
+async function shouldTokenize(doc: { subscriptionId: number | null; accountId: number }): Promise<boolean> {
+  if (!doc.subscriptionId) return false;
+  const [sub] = await db.select({ autoDebit: subscriptions.autoDebit, token: subscriptions.payfastToken })
+    .from(subscriptions)
+    .where(tenantWhere(subscriptions, doc.accountId, eq(subscriptions.id, doc.subscriptionId))).limit(1);
+  return !!sub?.autoDebit && !sub.token;
 }
 
 export async function paymentRoutes(app: FastifyInstance) {
@@ -61,6 +76,9 @@ export async function paymentRoutes(app: FastifyInstance) {
         hasPassphrase: !!row?.passphraseEnc,
         sandbox: row?.sandbox ?? true,
         enabled: row?.enabled ?? false,
+        autoDebitEnabled: row?.autoDebitEnabled ?? false,
+        autoDebitLive: row?.autoDebitLive ?? false,
+        autoDebitMax: row?.autoDebitMax ?? '5000.00',
       },
       // If this is false, the server cannot encrypt secrets and saving will fail.
       serverReady: secretsAvailable(),
@@ -78,6 +96,9 @@ export async function paymentRoutes(app: FastifyInstance) {
       passphrase: z.string().trim().max(120).nullable().optional(),
       sandbox: z.boolean().optional(),
       enabled: z.boolean().optional(),
+      autoDebitEnabled: z.boolean().optional(),
+      autoDebitLive: z.boolean().optional(),
+      autoDebitMax: z.number().positive().max(1000000).optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
@@ -95,7 +116,28 @@ export async function paymentRoutes(app: FastifyInstance) {
       }
     }
 
+    // Live charging is the one switch that can move money on its own, so it cannot
+    // be reached without PayFast itself being on and auto-debit deliberately
+    // enabled. Turning either of those off drops live charging with it, rather than
+    // leaving it armed for whenever they come back on.
+    if (d.autoDebitLive) {
+      const [existing] = await db.select().from(paymentSettings)
+        .where(eq(paymentSettings.accountId, accountId)).limit(1);
+      const on = d.enabled ?? existing?.enabled;
+      const auto = d.autoDebitEnabled ?? existing?.autoDebitEnabled;
+      if (!on || !auto) {
+        return reply.code(400).send({ error: 'Switch PayFast and auto-debit on before enabling live charging.' });
+      }
+    }
+
     const patch: Record<string, unknown> = {};
+    if (d.autoDebitEnabled !== undefined) {
+      patch.autoDebitEnabled = d.autoDebitEnabled;
+      if (!d.autoDebitEnabled) patch.autoDebitLive = false;
+    }
+    if (d.enabled === false) patch.autoDebitLive = false;
+    if (d.autoDebitLive !== undefined) patch.autoDebitLive = d.autoDebitLive;
+    if (d.autoDebitMax !== undefined) patch.autoDebitMax = d.autoDebitMax.toFixed(2);
     if (d.merchantId !== undefined) patch.merchantId = d.merchantId || null;
     if (d.merchantKey) patch.merchantKeyEnc = encryptSecret(d.merchantKey);
     if (d.passphrase !== undefined) patch.passphraseEnc = d.passphrase ? encryptSecret(d.passphrase) : null;
@@ -138,6 +180,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       cancelUrl: `${base}/?cancelled=${doc.number}`,
       notifyUrl: `${base}/api/v1/payfast/notify`,
       buyerEmail: doc.clientEmail,
+      tokenize: await shouldTokenize(doc),
     });
     return checkout;
   });
@@ -169,6 +212,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       amount: Number(doc.total), itemName: `Invoice ${doc.number}`, mPaymentId: `doc-${doc.id}`,
       returnUrl: `${base}/?paid=${doc.number}`, cancelUrl: `${base}/?cancelled=${doc.number}`,
       notifyUrl: `${base}/api/v1/payfast/notify`, buyerEmail: doc.clientEmail,
+      tokenize: await shouldTokenize(doc),
     });
     // Auto-submitting form: the client lands here and is taken straight to PayFast.
     const inputs = Object.entries(fields)
@@ -196,6 +240,32 @@ export async function paymentRoutes(app: FastifyInstance) {
       .where(and(eq(events.accountId, accountId), eq(events.name, 'payfast.itn')))
       .orderBy(desc(events.id))
       .limit(20);
+    return {
+      activity: rows.map((r) => ({
+        id: r.id, at: r.createdAt,
+        ok: r.results?.[0]?.ok ?? false,
+        outcome: r.results?.[0]?.outcome ?? '',
+        detail: r.payload ?? {},
+      })),
+    };
+  });
+
+  /**
+   * Every auto-debit attempt, newest first, including the ones that were refused.
+   *
+   * A skipped charge matters as much as a successful one here: "over the limit" or
+   * "no saved card" is the difference between a client who was billed and one who
+   * quietly was not, and that only shows up as an unpaid invoice weeks later.
+   */
+  app.get('/api/v1/account/autodebit/activity', { preHandler: app.requireAuth }, async (req) => {
+    const { accountId } = authOf(req);
+    const rows = await db.select({
+      id: events.id, createdAt: events.createdAt,
+      payload: events.payload, results: events.results,
+    }).from(events)
+      .where(and(eq(events.accountId, accountId), eq(events.name, 'payfast.autodebit')))
+      .orderBy(desc(events.id))
+      .limit(25);
     return {
       activity: rows.map((r) => ({
         id: r.id, at: r.createdAt,
@@ -307,8 +377,23 @@ export async function paymentRoutes(app: FastifyInstance) {
         await db.update(documents).set({ status: 'paid' })
           .where(tenantWhere(documents, doc.accountId, eq(documents.id, docId)));
       }
+      // If this checkout asked PayFast to store the card, the reusable token comes
+      // back on the ITN and this is the only place it is ever offered. Miss it and
+      // auto-debit has nothing to charge, so it is saved against the subscription
+      // straight away. Never overwritten: a token already stored is the one the
+      // client agreed to, and replacing it silently would be the wrong card.
+      const token = body.token || '';
+      if (token && doc.subscriptionId) {
+        await db.update(subscriptions).set({ payfastToken: token })
+          .where(and(
+            tenantWhere(subscriptions, doc.accountId, eq(subscriptions.id, doc.subscriptionId)),
+            isNull(subscriptions.payfastToken),
+          ))
+          .catch(() => { /* the payment itself must still be recorded */ });
+      }
+
       req.log.info({ docId, pfId }, 'payfast payment recorded');
-      await record(`Payment of ${body.amount_gross} recorded against ${doc.number}`, true);
+      await record(`Payment of ${body.amount_gross} recorded against ${doc.number}${token ? ' (card stored for auto-debit)' : ''}`, true);
       return ok();
     } catch (err) {
       req.log.error({ err }, 'payfast ITN handler error');

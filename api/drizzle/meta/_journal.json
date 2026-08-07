@@ -260,6 +260,13 @@
       "when": 1786100478655,
       "tag": "0036_magenta_captain_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "5",
+      "when": 1786105139164,
+      "tag": "0037_auto_debit",
+      "breakpoints": true
     }
   ]
 }

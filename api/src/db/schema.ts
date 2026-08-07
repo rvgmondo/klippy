@@ -634,6 +634,11 @@ export const documents = mysqlTable('documents', {
   // For a credit note: the invoice it credits. Null for invoices/quotes.
   sourceDocumentId: int('source_document_id', { unsigned: true }),
   folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+  // The subscription cycle that raised this invoice, if any. Without it there is no
+  // way back from an invoice to the subscription it came from, which auto-debit
+  // needs twice over: to ask PayFast for a reusable token when the client pays this
+  // one by hand, and to know which stored token to charge for the next cycle.
+  subscriptionId: int('subscription_id', { unsigned: true }),
   clientName: varchar('client_name', { length: 150 }).notNull(),
   clientEmail: varchar('client_email', { length: 150 }),
   clientAddress: text('client_address'),
@@ -770,6 +775,11 @@ export const subscriptions = mysqlTable('subscriptions', {
   // subscription online. With it, later cycles can be charged automatically
   // (auto-debit) instead of only emailing an invoice. Null until they pay once.
   payfastToken: varchar('payfast_token', { length: 100 }),
+  // Per-subscription consent to debit the stored card without the client present.
+  // Separate from having a token on purpose: a client paying one invoice online is
+  // not the same as agreeing to be charged every month, and in South Africa a debit
+  // arrangement needs the customer's mandate. Off until someone turns it on.
+  autoDebit: boolean('auto_debit').default(false).notNull(),
   // How often this bills, in months: 1 monthly, 3 quarterly, 12 annually. Hosting
   // and domains are usually sold by the year, so monthly-only was a real gap.
   intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),
@@ -804,10 +814,49 @@ export const paymentSettings = mysqlTable('payment_settings', {
   // until a real end-to-end payment has been seen to work.
   sandbox: boolean('sandbox').default(true).notNull(),
   enabled: boolean('enabled').default(false).notNull(),
+  // ---- Auto-debit (charging a stored card on a schedule) --------------------
+  // Three separate switches, because this is the one part of Klippy that moves
+  // money without anybody watching, and each guards a different mistake.
+  //
+  // `autoDebitEnabled` is the master. `autoDebitLive` decides whether the run
+  // actually calls PayFast or only writes down what it would have charged: a dry
+  // run proves the wiring, the amounts and the client list are right before a cent
+  // moves, which is the only safe way to test this. `autoDebitMax` refuses any
+  // single charge above it, so a bad price or a stray zero cannot debit a client
+  // for a fortune before anyone notices.
+  autoDebitEnabled: boolean('auto_debit_enabled').default(false).notNull(),
+  autoDebitLive: boolean('auto_debit_live').default(false).notNull(),
+  autoDebitMax: decimal('auto_debit_max', { precision: 12, scale: 2 }).default('5000.00').notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
   uniqueIndex('uniq_payment_settings_account').on(t.accountId),
+]);
+
+/**
+ * One row per attempt to debit a card for an invoice.
+ *
+ * The unique index on documentId is the safety mechanism, not bookkeeping. The row
+ * is written BEFORE PayFast is called, so a second attempt on the same invoice hits
+ * a duplicate key and stops. Without that, a job that runs twice (a retry, an
+ * overlapping cron, a deploy mid-run) charges the client twice, and taking money
+ * back is far harder than not taking it.
+ */
+export const autoDebitAttempts = mysqlTable('auto_debit_attempts', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  subscriptionId: int('subscription_id', { unsigned: true }).notNull(),
+  documentId: int('document_id', { unsigned: true }).notNull(),
+  status: mysqlEnum('status', ['pending', 'charged', 'failed', 'skipped', 'dry-run']).default('pending').notNull(),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  detail: text('detail'),
+  pfPaymentId: varchar('pf_payment_id', { length: 60 }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex('uniq_auto_debit_document').on(t.documentId),
+  index('idx_auto_debit_account').on(t.accountId, t.createdAt),
 ]);
 
 // ---- Deals (the Acquisition pillar: a sales pipeline) ---------------------

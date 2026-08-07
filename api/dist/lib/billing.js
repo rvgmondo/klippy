@@ -79,6 +79,7 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     const docId = await db.transaction(async (tx) => {
         const ins = await tx.insert(documents).values(withTenant(accountId, {
             type: 'invoice', seq, number, businessId: sub.businessId, folderId: sub.folderId,
+            subscriptionId: sub.subscriptionId ?? null,
             clientName: folder.name, clientEmail: folder.billingEmail ?? null, clientAddress: null,
             issueDate, dueDate, currency,
             taxRate: '0', subtotal: money(price), taxAmount: '0', total: money(price),

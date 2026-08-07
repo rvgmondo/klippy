@@ -67,6 +67,10 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     onSuccess: invalidateSubs,
   });
   const delSub = useMutation({ mutationFn: (id: number) => apiDelete(`/subscriptions/${id}`), onSuccess: invalidateSubs });
+  const setAutoDebit = useMutation({
+    mutationFn: (v: { id: number; autoDebit: boolean }) => apiPatch(`/subscriptions/${v.id}`, { autoDebit: v.autoDebit }),
+    onSuccess: invalidateSubs,
+  });
   const recurringOfferings = rows.filter((o) => o.recurring && o.active);
 
   return (
@@ -174,12 +178,13 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                     <th className="px-3 py-2 font-medium">Offering</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Next bill</th>
+                    <th className="px-3 py-2 font-medium">Auto-debit</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {subs.length === 0 && (
-                    <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-500">No subscriptions yet.</td></tr>
+                    <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">No subscriptions yet.</td></tr>
                   )}
                   {subs.map((s) => (
                     <tr key={s.id} className={`border-t border-slate-800 ${s.status === 'canceled' ? 'opacity-50' : ''}`}>
@@ -193,6 +198,24 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                         </span>
                       </td>
                       <td className="px-3 py-2 num text-slate-400">{s.status === 'active' ? s.nextBillDate : '-'}</td>
+                      {/* Two separate facts, deliberately shown separately: whether the
+                          client agreed to be debited, and whether there is actually a
+                          card to debit. Agreed-but-no-card is the state that silently
+                          bills nobody, so it has to be visible. */}
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--accent)]"
+                            checked={s.autoDebit ?? false}
+                            disabled={s.status === 'canceled' || setAutoDebit.isPending}
+                            onChange={(e) => setAutoDebit.mutate({ id: s.id, autoDebit: e.target.checked })}
+                            title="Charge the saved card automatically each cycle" />
+                          {s.autoDebit && (
+                            <span className={`text-[11px] ${s.hasCard ? 'text-green-300' : 'text-amber-300'}`}>
+                              {s.hasCard ? 'card saved' : 'no card yet'}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           {s.status === 'active' && (

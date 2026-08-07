@@ -5,6 +5,7 @@ import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
+import { attemptAutoDebit } from './autoDebit.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -90,12 +91,31 @@ export async function runSubscriptionBilling() {
         .where(and(eq(subscriptions.status, 'active'), lte(subscriptions.nextBillDate, today)));
     let billed = 0;
     let failed = 0;
+    let debited = 0;
     for (const sub of due) {
         try {
-            await generateSubscriptionInvoice(sub.accountId, {
+            const docId = await generateSubscriptionInvoice(sub.accountId, {
                 businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
-                createdBy: sub.createdBy, autoSend: sub.autoSend,
+                createdBy: sub.createdBy, autoSend: sub.autoSend, subscriptionId: sub.id,
             });
+            // Then try to take the money, if this subscription is set up for it. Every
+            // guard lives in attemptAutoDebit; it returns "skipped" for the ordinary case
+            // where auto-debit is off, and a failure to charge must never undo the
+            // invoice or stop the rest of the run.
+            try {
+                const [raised] = await db.select({ total: documents.total, number: documents.number })
+                    .from(documents).where(eq(documents.id, docId)).limit(1);
+                if (raised) {
+                    const res = await attemptAutoDebit({
+                        accountId: sub.accountId, businessId: sub.businessId, subscriptionId: sub.id,
+                        documentId: docId, amount: Number(raised.total),
+                        itemName: `Invoice ${raised.number}`, invoiceNumber: raised.number,
+                    });
+                    if (res.outcome === 'charged')
+                        debited++;
+                }
+            }
+            catch { /* the invoice stands; the charge can be retried by hand */ }
             await db.update(subscriptions).set({
                 // Advance by the subscription's own interval (monthly, quarterly, annual),
                 // anchored on the start day so month-end bills spring back rather than drift.
@@ -108,7 +128,7 @@ export async function runSubscriptionBilling() {
             failed++;
         }
     }
-    return `${billed} invoiced of ${due.length} due${failed ? `, ${failed} failed` : ''}`;
+    return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}`;
 }
 /** The reminder schedule to use when a business has not set its own. */
 export const DEFAULT_REMINDER_OFFSETS = [-3, 0, 7];
