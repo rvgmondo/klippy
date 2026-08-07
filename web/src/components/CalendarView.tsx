@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, CalendarPlus } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import type { CalendarTask, Priority } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { QuickAddTask } from './QuickAddTask';
+import { MeetingModal, type CalendarEvent } from './MeetingModal';
+import type { BusinessSelection } from './BusinessSwitcher';
 
 type View = 'day' | 'week' | 'month' | 'year';
 
@@ -19,11 +21,14 @@ const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.get
 const startOfWeek = (d: Date) => { const x = new Date(d); const day = (x.getDay() + 6) % 7; return addDays(x, -day); }; // Monday
 const sameDay = (a: Date, b: Date) => iso(a) === iso(b);
 
-export function CalendarView() {
+export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSelection }) {
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState(new Date());
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const [addDate, setAddDate] = useState<string | null>(null);
+  // Meetings live beside tasks: a task has a due date, a meeting has a time.
+  const [meetingDate, setMeetingDate] = useState<string | null>(null);
+  const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null);
 
   const range = useMemo(() => computeRange(view, cursor), [view, cursor]);
   const { data } = useQuery({
@@ -31,6 +36,21 @@ export function CalendarView() {
     queryFn: () => apiGet<{ tasks: CalendarTask[] }>(`/tasks/calendar?from=${range.from}&to=${range.to}`),
   });
   const tasks = data?.tasks ?? [];
+
+  const bizQ = businessId === 'all' ? '' : `&businessId=${businessId}`;
+  const eventsQ = useQuery({
+    queryKey: ['calendar-events', range.from, range.to, businessId],
+    queryFn: () => apiGet<{ events: CalendarEvent[] }>(`/calendar-events?from=${range.from}&to=${range.to}${bizQ}`),
+  });
+  const eventsByDay = useMemo(() => {
+    const m = new Map<string, CalendarEvent[]>();
+    for (const e of eventsQ.data?.events ?? []) {
+      // Group by LOCAL day, so a 9am meeting does not slide to the day before.
+      const k = iso(new Date(e.startAt));
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return m;
+  }, [eventsQ.data]);
   const byDay = useMemo(() => {
     const m = new Map<string, CalendarTask[]>();
     for (const t of tasks) { const k = t.dueDate; (m.get(k) ?? m.set(k, []).get(k)!).push(t); }
@@ -51,6 +71,10 @@ export function CalendarView() {
           <button onClick={() => shift(-1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronLeft size={16} /></button>
           <button onClick={() => shift(1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronRight size={16} /></button>
           <button onClick={() => setCursor(new Date())} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Today</button>
+          <button onClick={() => setMeetingDate(iso(new Date()))}
+            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90">
+            <CalendarPlus size={14} /> <span className="hidden sm:inline">Meeting</span>
+          </button>
           <h2 className="ml-2 font-display text-lg font-semibold text-slate-100">{titleFor(view, cursor)}</h2>
         </div>
         <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
@@ -62,14 +86,16 @@ export function CalendarView() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
-        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
-        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
-        {view === 'day' && <DayList cursor={cursor} byDay={byDay} onOpen={setOpenTask} onAdd={setAddDate} />}
+        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'year' && <YearGrid cursor={cursor} byDay={byDay} onPick={(d) => { setCursor(d); setView('month'); }} />}
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
       {addDate && <QuickAddTask dueDate={addDate} onClose={() => setAddDate(null)} />}
+      {meetingDate && <MeetingModal defaultDate={meetingDate} businessId={businessId} onClose={() => setMeetingDate(null)} />}
+      {openEvent && <MeetingModal existing={openEvent} businessId={businessId} onClose={() => setOpenEvent(null)} />}
     </div>
   );
 }
@@ -87,7 +113,20 @@ function TaskPill({ t, onOpen }: { t: CalendarTask; onOpen: OpenFn }) {
   );
 }
 
-function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
+/** An event reads as a time plus a title, which is how a diary entry is scanned. */
+function EventPill({ e, onOpen }: { e: CalendarEvent; onOpen: (e: CalendarEvent) => void }) {
+  const time = e.allDay ? 'all day' : new Date(e.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <button onClick={() => onOpen(e)}
+      className="flex w-full items-center gap-1.5 truncate rounded border-l-2 px-1.5 py-0.5 text-left text-[11px] hover:brightness-125"
+      style={{ borderColor: 'var(--accent)', background: 'var(--accent-quiet)', color: 'var(--accent)' }}>
+      <span className="num shrink-0 opacity-80">{time}</span>
+      <span className="truncate">{e.title}</span>
+    </button>
+  );
+}
+
+function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(first);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -102,7 +141,8 @@ function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<
       {days.map((d, i) => {
         const inMonth = d.getMonth() === cursor.getMonth();
         const list = byDay.get(iso(d)) ?? [];
-        const max = 3;
+        const evs = events.get(iso(d)) ?? [];
+        const max = Math.max(0, 3 - evs.length);
         return (
           <div key={i} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
             <div className="mb-1 flex items-center justify-between">
@@ -113,6 +153,7 @@ function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<
               <span className={`text-[11px] sm:text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : inMonth ? 'text-slate-400' : 'text-slate-500'}`}>{d.getDate()}</span>
             </div>
             <div className="space-y-1">
+              {evs.slice(0, 3).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
               {list.slice(0, max).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
               {list.length > max && <div className="px-1 text-[10px] text-slate-500">+{list.length - max} more</div>}
             </div>
@@ -123,7 +164,7 @@ function MonthGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<
   );
 }
 
-function WeekGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
+function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = new Date();
@@ -140,7 +181,10 @@ function WeekGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<s
                 <Plus size={12} />
               </button>
             </div>
-            <div className="space-y-1">{list.map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}</div>
+            <div className="space-y-1">
+              {(events.get(iso(d)) ?? []).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
+              {list.map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
+            </div>
           </div>
         );
       })}
@@ -148,15 +192,34 @@ function WeekGrid({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<s
   );
 }
 
-function DayList({ cursor, byDay, onOpen, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; onOpen: OpenFn; onAdd: (d: string) => void }) {
+function DayList({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const list = byDay.get(iso(cursor)) ?? [];
+  const evs = events.get(iso(cursor)) ?? [];
   return (
     <div className="mx-auto max-w-2xl space-y-2">
       <button onClick={() => onAdd(iso(cursor))}
         className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400 hover:border-slate-500 hover:text-slate-200">
         <Plus size={15} /> Add a card on this day
       </button>
-      {list.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing due this day.</p>}
+      {/* The diary first: a meeting at nine shapes the day more than a due date. */}
+      {evs.map((e) => (
+        <button key={e.id} onClick={() => onOpenEvent(e)}
+          className="flex w-full items-center gap-3 rounded-xl border p-3 text-left hover:brightness-110"
+          style={{ borderColor: 'var(--accent)', background: 'var(--accent-quiet)' }}>
+          <span className="num shrink-0 text-xs" style={{ color: 'var(--accent)' }}>
+            {e.allDay ? 'All day' : new Date(e.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-slate-100">{e.title}</span>
+            {(e.clientName || e.location) && (
+              <span className="block truncate text-[11px] text-slate-400">
+                {[e.clientName, e.location].filter(Boolean).join(', ')}
+              </span>
+            )}
+          </span>
+        </button>
+      ))}
+      {list.length === 0 && evs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing on this day.</p>}
       {list.map((t) => (
         <button key={t.id} onClick={() => onOpen({ id: t.id, boardId: t.boardId })}
           className="flex w-full items-center gap-3 rounded-xl border border-slate-800 p-3 text-left hover:bg-slate-900">

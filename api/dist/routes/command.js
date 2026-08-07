@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { eq, isNotNull, lt, lte, ne, sql, inArray } from 'drizzle-orm';
+import { eq, gte, isNotNull, lt, lte, ne, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, boards, folders, deals, documents, payments, subscriptions, } from '../db/schema.js';
+import { tasks, boards, folders, deals, documents, payments, subscriptions, calendarEvents, } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { businessScope } from '../lib/access.js';
@@ -73,6 +73,15 @@ export async function commandRoutes(app) {
             id: subscriptions.id, nextBillDate: subscriptions.nextBillDate,
         }).from(subscriptions)
             .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'), lte(subscriptions.nextBillDate, today), bizFilter(subscriptions.businessId), await businessScope(req, subscriptions.businessId)));
+        // ---- Today's diary ------------------------------------------------------
+        // Only what is still ahead: a meeting you have already had is not a to-do.
+        const now = new Date();
+        const meetings = await db.select({
+            id: calendarEvents.id, title: calendarEvents.title, startAt: calendarEvents.startAt,
+            allDay: calendarEvents.allDay, location: calendarEvents.location, clientName: folders.name,
+        }).from(calendarEvents)
+            .leftJoin(folders, eq(folders.id, calendarEvents.folderId))
+            .where(tenantWhere(calendarEvents, accountId, gte(calendarEvents.startAt, now), lte(calendarEvents.startAt, new Date(`${today}T23:59:59.999Z`)), bizFilter(calendarEvents.businessId), await businessScope(req, calendarEvents.businessId)));
         // ---- The feed -----------------------------------------------------------
         // Worst first, and capped, because a list of seventy is the thing we are
         // replacing. Everything here is something a person can act on today.
@@ -84,6 +93,15 @@ export async function commandRoutes(app) {
                 title: `${i.clientName} owes ${i.currency} ${i.outstanding.toFixed(2)}`,
                 detail: `${i.number}, ${i.days} day${i.days === 1 ? '' : 's'} overdue${i.suspendedAt ? ', flagged at risk' : ''}`,
                 view: 'collections', amount: i.outstanding, days: i.days,
+            });
+        }
+        for (const m of meetings.slice(0, 5)) {
+            feed.push({
+                kind: 'meeting_today', urgency: 'high',
+                title: m.title,
+                detail: [m.clientName, m.location].filter(Boolean).join(', '),
+                at: m.allDay ? undefined : m.startAt.toISOString(),
+                view: 'calendar',
             });
         }
         for (const t of overdueTasks.slice(0, 8)) {
@@ -163,6 +181,7 @@ export async function commandRoutes(app) {
             constraint,
             feed: feed.slice(0, 12),
             counts: {
+                meetingsToday: meetings.length,
                 overdueInvoices: owed.length,
                 owed: Math.round(owedTotal * 100) / 100,
                 overdueTasks: overdueTasks.length,

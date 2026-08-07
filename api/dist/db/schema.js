@@ -219,6 +219,35 @@ export const events = mysqlTable('events', {
 }, (t) => [
     index('idx_events_account').on(t.accountId, t.createdAt),
 ]);
+// ---- Calendar events (meetings, calls, anything with a time) ----------------
+// Deliberately NOT called `events`: that table above is the automation audit log.
+// A task has a due DATE and belongs to a board; a meeting has a start and end TIME
+// and belongs to a client, which is why it is its own thing rather than a flag on
+// tasks. Both land on the calendar together.
+export const calendarEvents = mysqlTable('calendar_events', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true })
+        .references(() => businesses.id, { onDelete: 'cascade' }),
+    // The client this is with, when it is with one. Null for internal events.
+    folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+    title: varchar('title', { length: 200 }).notNull(),
+    description: text('description'),
+    kind: mysqlEnum('kind', ['meeting', 'call', 'deadline', 'other']).default('meeting').notNull(),
+    startAt: datetime('start_at').notNull(),
+    endAt: datetime('end_at'),
+    // An all-day event has no meaningful time, so the UI shows it as a banner.
+    allDay: boolean('all_day').default(false).notNull(),
+    location: varchar('location', { length: 255 }),
+    // Free text rather than user ids: most attendees are clients, not team members.
+    attendees: text('attendees'),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_calendar_events_range').on(t.accountId, t.startAt),
+]);
 // ---- Folders (nestable tree; top level = a business's "Clients"/areas) ------
 // parentId NULL => top-level folder. Self-referencing for arbitrary depth.
 export const folders = mysqlTable('folders', {

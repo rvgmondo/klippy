@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, isNotNull, isNull, lt, lte, ne, or, sql, inArray } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lt, lte, ne, or, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
-  tasks, boards, folders, deals, documents, payments, subscriptions,
+  tasks, boards, folders, deals, documents, payments, subscriptions, calendarEvents,
 } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
@@ -28,7 +28,7 @@ import { businessScope } from '../lib/access.js';
 type Urgency = 'critical' | 'high' | 'normal';
 
 interface FeedItem {
-  kind: 'invoice_overdue' | 'invoice_suspended' | 'task_overdue' | 'task_today' | 'deal_stale' | 'subscription_due';
+  kind: 'invoice_overdue' | 'invoice_suspended' | 'task_overdue' | 'task_today' | 'deal_stale' | 'subscription_due' | 'meeting_today';
   urgency: Urgency;
   title: string;
   detail: string;
@@ -36,6 +36,9 @@ interface FeedItem {
   view: string;
   amount?: number;
   days?: number;
+  /** An ISO instant the CLIENT formats. Never format a time server-side: the
+   *  host runs in UTC and would show a South African user the wrong hour. */
+  at?: string;
 }
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -132,6 +135,21 @@ export async function commandRoutes(app: FastifyInstance) {
         await businessScope(req, subscriptions.businessId),
       ));
 
+    // ---- Today's diary ------------------------------------------------------
+    // Only what is still ahead: a meeting you have already had is not a to-do.
+    const now = new Date();
+    const meetings = await db.select({
+      id: calendarEvents.id, title: calendarEvents.title, startAt: calendarEvents.startAt,
+      allDay: calendarEvents.allDay, location: calendarEvents.location, clientName: folders.name,
+    }).from(calendarEvents)
+      .leftJoin(folders, eq(folders.id, calendarEvents.folderId))
+      .where(tenantWhere(calendarEvents, accountId,
+        gte(calendarEvents.startAt, now),
+        lte(calendarEvents.startAt, new Date(`${today}T23:59:59.999Z`)),
+        bizFilter(calendarEvents.businessId),
+        await businessScope(req, calendarEvents.businessId),
+      ));
+
     // ---- The feed -----------------------------------------------------------
     // Worst first, and capped, because a list of seventy is the thing we are
     // replacing. Everything here is something a person can act on today.
@@ -143,6 +161,15 @@ export async function commandRoutes(app: FastifyInstance) {
         title: `${i.clientName} owes ${i.currency} ${i.outstanding.toFixed(2)}`,
         detail: `${i.number}, ${i.days} day${i.days === 1 ? '' : 's'} overdue${i.suspendedAt ? ', flagged at risk' : ''}`,
         view: 'collections', amount: i.outstanding, days: i.days,
+      });
+    }
+    for (const m of meetings.slice(0, 5)) {
+      feed.push({
+        kind: 'meeting_today', urgency: 'high',
+        title: m.title,
+        detail: [m.clientName, m.location].filter(Boolean).join(', '),
+        at: m.allDay ? undefined : m.startAt.toISOString(),
+        view: 'calendar',
       });
     }
     for (const t of overdueTasks.slice(0, 8)) {
@@ -226,6 +253,7 @@ export async function commandRoutes(app: FastifyInstance) {
       constraint,
       feed: feed.slice(0, 12),
       counts: {
+        meetingsToday: meetings.length,
         overdueInvoices: owed.length,
         owed: Math.round(owedTotal * 100) / 100,
         overdueTasks: overdueTasks.length,

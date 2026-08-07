@@ -1,12 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Target, Receipt, CalendarCheck, Repeat, Flame } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Target, Receipt, CalendarCheck, Repeat, Flame, Users } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 
 type Urgency = 'critical' | 'high' | 'normal';
 interface FeedItem {
   kind: string; urgency: Urgency; title: string; detail: string;
-  view: string; amount?: number; days?: number;
+  view: string; amount?: number; days?: number; at?: string;
 }
 interface Constraint {
   key: string; title: string; detail: string; action: string; view: string; alternatives: string[];
@@ -23,7 +23,7 @@ interface Command {
 const KIND_ICON: Record<string, typeof Target> = {
   invoice_overdue: Receipt, invoice_suspended: AlertTriangle,
   task_overdue: CalendarCheck, task_today: CalendarCheck,
-  deal_stale: Target, subscription_due: Repeat,
+  deal_stale: Target, subscription_due: Repeat, meeting_today: Users,
 };
 
 const URGENCY_STYLE: Record<Urgency, string> = {
@@ -108,7 +108,15 @@ export function CommandCentre({ businessId, onNavigate }: {
                   <Icon size={15} className="mt-0.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm text-slate-100">{f.title}</div>
-                    <div className="truncate text-[11px] text-slate-500">{f.detail}</div>
+                    <div className="truncate text-[11px] text-slate-500">
+                      {/* Times are formatted here, in the viewer's timezone. */}
+                      {f.at && (
+                        <span className="num mr-1.5 text-[var(--accent)]">
+                          {new Date(f.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                      {f.detail}
+                    </div>
                   </div>
                 </button>
               );

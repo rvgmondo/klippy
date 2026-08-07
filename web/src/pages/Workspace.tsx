@@ -124,7 +124,7 @@ export function Workspace() {
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
           {view === 'board' && <BoardView boardId={boardId} />}
-          {view === 'calendar' && <CalendarView />}
+          {view === 'calendar' && <CalendarView businessId={businessId} />}
           {view === 'files' && <FilesView />}
           {view === 'offerings' && <OfferingsView businessId={businessId} />}
           {view === 'expenses' && <ExpensesView businessId={businessId} />}

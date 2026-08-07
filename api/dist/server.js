@@ -16,6 +16,7 @@ import { commentRoutes } from './routes/comments.js';
 import { timerRoutes } from './routes/timer.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { commandRoutes } from './routes/command.js';
+import { calendarEventRoutes } from './routes/calendarEvents.js';
 import { fileRoutes } from './routes/files.js';
 import { accountRoutes } from './routes/account.js';
 import { userRoutes } from './routes/users.js';
@@ -109,6 +110,7 @@ export function buildServer() {
     app.register(timerRoutes);
     app.register(dashboardRoutes);
     app.register(commandRoutes);
+    app.register(calendarEventRoutes);
     app.register(fileRoutes);
     app.register(accountRoutes);
     app.register(userRoutes);
