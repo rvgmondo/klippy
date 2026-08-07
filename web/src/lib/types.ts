@@ -39,6 +39,8 @@ export interface Subscription {
   autoDebit?: boolean;
   /** Whether a card token is stored. Never the token itself. */
   hasCard?: boolean;
+  /** The domain this subscription hosts, when it provisions hosting. */
+  domain?: string | null;
 }
 export interface Offering {
   id: number;
@@ -53,6 +55,9 @@ export interface Offering {
   stockQty: number | null;
   reorderPoint: number | null;
   active: boolean;
+  /** 'cpanel' means paying an invoice for this creates a hosting account. */
+  provisioning?: 'none' | 'cpanel';
+  whmPackage?: string | null;
   position: number;
 }
 export interface Expense {

@@ -39,6 +39,7 @@ import { teamRoutes } from './routes/teams.js';
 import { cronRoutes } from './routes/cron.js';
 import { labelRoutes } from './routes/labels.js';
 import { paymentRoutes } from './routes/payments.js';
+import { hostingRoutes } from './routes/hosting.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -139,6 +140,7 @@ export function buildServer() {
   app.register(cronRoutes);
   app.register(labelRoutes);
   app.register(paymentRoutes);
+  app.register(hostingRoutes);
 
   return app;
 }

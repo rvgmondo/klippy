@@ -21,6 +21,10 @@ const createSchema = z.object({
   recurring: z.boolean().optional(),
   stockQty: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
   reorderPoint: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+  // Selling this can set something up automatically. 'cpanel' creates a hosting
+  // account on the WHM server when an invoice for it is paid.
+  provisioning: z.enum(['none', 'cpanel']).optional(),
+  whmPackage: z.string().trim().max(60).nullable().optional(),
 });
 const updateSchema = createSchema.partial().extend({ active: z.boolean().optional() });
 
@@ -53,7 +57,9 @@ export async function offeringRoutes(app: FastifyInstance) {
     const ins = await db.insert(offerings).values(withTenant(accountId, {
       businessId, name: d.name, description: d.description ?? null, price: money(d.price),
       cost: d.cost != null ? money(d.cost) : null, unit: d.unit ?? null, recurring: d.recurring ?? false,
-      stockQty: d.stockQty ?? null, reorderPoint: d.reorderPoint ?? null, position, createdBy: userId,
+      stockQty: d.stockQty ?? null, reorderPoint: d.reorderPoint ?? null,
+      provisioning: d.provisioning ?? 'none', whmPackage: d.whmPackage ?? null,
+      position, createdBy: userId,
     }));
     const [created] = await db.select().from(offerings)
       .where(tenantWhere(offerings, accountId, eq(offerings.id, Number(ins[0].insertId)))).limit(1);

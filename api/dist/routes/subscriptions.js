@@ -28,6 +28,7 @@ export async function subscriptionRoutes(app) {
             folderId: subscriptions.folderId, clientName: folders.name,
             autoSend: subscriptions.autoSend,
             autoDebit: subscriptions.autoDebit,
+            domain: subscriptions.domain,
             // Whether a card is stored, never the token itself.
             hasCard: sql `${subscriptions.payfastToken} is not null`,
         }).from(subscriptions)
@@ -47,6 +48,7 @@ export async function subscriptionRoutes(app) {
             folderId: z.number().int().positive(),
             startedOn: dateStr.optional(),
             autoSend: z.boolean().optional(),
+            domain: z.string().trim().max(190).optional(),
             // 1 monthly, 3 quarterly, 6 half-yearly, 12 annually. Anything up to 5 years.
             intervalMonths: z.number().int().min(1).max(60).optional(),
         }).safeParse(req.body);
@@ -69,7 +71,7 @@ export async function subscriptionRoutes(app) {
         const ins = await db.insert(subscriptions).values(withTenant(accountId, {
             businessId, offeringId: d.offeringId, folderId: d.folderId, status: 'active',
             startedOn, nextBillDate: addMonths(startedOn, intervalMonths),
-            intervalMonths, autoSend: d.autoSend ?? false, createdBy: userId,
+            intervalMonths, autoSend: d.autoSend ?? false, domain: d.domain || null, createdBy: userId,
         }));
         const id = Number(ins[0].insertId);
         try {
@@ -91,6 +93,7 @@ export async function subscriptionRoutes(app) {
             return reply.code(400).send({ error: 'Bad id.' });
         const parsed = z.object({
             status: status.optional(), autoSend: z.boolean().optional(), autoDebit: z.boolean().optional(),
+            domain: z.string().trim().max(190).nullable().optional(),
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });

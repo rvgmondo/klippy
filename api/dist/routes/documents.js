@@ -9,6 +9,7 @@ import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
+import { onInvoicePaid } from '../lib/hosting.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor } from '../lib/numbering.js';
@@ -600,6 +601,7 @@ export async function documentRoutes(app) {
         if (settled && doc.status !== 'paid') {
             await db.update(documents).set({ status: 'paid' })
                 .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+            await onInvoicePaid(accountId, id);
         }
         else if (!settled && doc.status === 'paid') {
             await db.update(documents).set({ status: 'sent' })

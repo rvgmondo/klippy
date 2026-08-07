@@ -4,6 +4,7 @@ import {
   autoDebitAttempts, documents, payments, subscriptions, events,
 } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
+import { onInvoicePaid } from './hosting.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
 import { chargeToken, type PayfastCreds } from './payfast.js';
@@ -148,6 +149,7 @@ export async function attemptAutoDebit(r: DebitRequest): Promise<{ outcome: Debi
   if (doc && paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
     await db.update(documents).set({ status: 'paid' })
       .where(tenantWhere(documents, r.accountId, eq(documents.id, r.documentId)));
+    await onInvoicePaid(r.accountId, r.documentId);
   }
 
   await finish('charged', `Charged ${r.amount.toFixed(2)}.`, res.pfPaymentId);

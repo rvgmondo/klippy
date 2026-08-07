@@ -8,6 +8,7 @@ import { intId } from '../lib/http.js';
 import { appUrl } from '../lib/mailer.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
 import { credsFor, settingsFor } from '../lib/paymentSettings.js';
+import { onInvoicePaid } from '../lib/hosting.js';
 import { assertBusinessAccess } from '../lib/access.js';
 import { buildCheckout, verifyItnSignature, validateItnWithServer, signature, } from '../lib/payfast.js';
 /**
@@ -396,6 +397,8 @@ export async function paymentRoutes(app) {
             if (paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
                 await db.update(documents).set({ status: 'paid' })
                     .where(tenantWhere(documents, doc.accountId, eq(documents.id, docId)));
+                // Set up whatever was sold. Never allowed to fail the payment.
+                await onInvoicePaid(doc.accountId, docId);
             }
             // If this checkout asked PayFast to store the card, the reusable token comes
             // back on the ITN and this is the only place it is ever offered. Miss it and

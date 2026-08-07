@@ -269,6 +269,8 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   const [offeringId, setOfferingId] = useState<string>(recurringOfferings[0] ? String(recurringOfferings[0].id) : '');
   const [folderId, setFolderId] = useState('');
   const [intervalMonths, setIntervalMonths] = useState(1);
+  const [domain, setDomain] = useState('');
+  const chosen = recurringOfferings.find((o) => String(o.id) === offeringId);
   const [error, setError] = useState<string | null>(null);
 
   const foldersQ = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
@@ -278,6 +280,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   const start = useMutation({
     mutationFn: () => apiPost('/subscriptions', {
       offeringId: Number(offeringId), folderId: Number(folderId), businessId, intervalMonths,
+      ...(domain.trim() ? { domain: domain.trim() } : {}),
     }),
     onSuccess: onStarted,
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not start subscription.'),
@@ -314,6 +317,20 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
           <option value={12}>Year</option>
         </select>
 
+        {/* A cPanel account cannot be created without a domain, so it is asked for
+            here rather than guessed at provisioning time. */}
+        {chosen?.provisioning === 'cpanel' && (
+          <>
+            <label className="mb-1 block text-xs text-slate-400">Domain to host</label>
+            <input value={domain} onChange={(e) => setDomain(e.target.value)} placeholder="clientsite.co.za"
+              className="mb-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
+            <p className="mb-4 text-[11px] text-slate-500">
+              The hosting account is created when the first invoice is paid. Without a domain nothing is
+              set up and you will have to do it by hand.
+            </p>
+          </>
+        )}
+
         <p className="mb-4 text-[11px] text-slate-500">
           Bills the first {INTERVAL_WORD[intervalMonths] ?? 'cycle'} immediately as a draft invoice, then repeats automatically. A month-end
           date stays at month end rather than drifting earlier.
@@ -348,6 +365,8 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
 
   const showStock = activeTypes.includes('products') || stockQty !== '';
   const showRecurring = activeTypes.includes('code') || recurring;
+  const [provisioning, setProvisioning] = useState(offering?.provisioning ?? 'none');
+  const [whmPackage, setWhmPackage] = useState(offering?.whmPackage ?? '');
   const showCost = activeTypes.includes('products') || cost !== '';
 
   const save = useMutation({
@@ -355,6 +374,7 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
       const body = {
         name: name.trim(), price: Number(price) || 0, unit: unit.trim() || null,
         cost: cost.trim() ? Number(cost) : null, recurring,
+        provisioning, whmPackage: whmPackage.trim() || null,
         stockQty: stockQty.trim() ? Number(stockQty) : null,
         reorderPoint: reorderPoint.trim() ? Number(reorderPoint) : null,
         ...(isNew ? { businessId } : {}),
@@ -425,6 +445,32 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
           <button type="button" onClick={() => setRecurring(true)} className="mb-4 text-[11px] text-slate-500 hover:text-slate-300">
             + mark as recurring revenue
           </button>
+        )}
+
+        {/* Only offered for recurring things, because hosting that does not renew is
+            not hosting. The package name has to match one that exists on the server;
+            Settings > Hosting lists them after a successful connection test. */}
+        {recurring && (
+          <div className="mb-4 rounded-lg border border-slate-800 p-3">
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input type="checkbox" checked={provisioning === 'cpanel'}
+                onChange={(e) => setProvisioning(e.target.checked ? 'cpanel' : 'none')}
+                className="h-4 w-4 rounded border-slate-700 bg-slate-900 accent-violet-600" />
+              Selling this sets up cPanel hosting
+            </label>
+            {provisioning === 'cpanel' && (
+              <>
+                <label className="mb-1 mt-3 block text-xs text-slate-400">WHM package</label>
+                <input value={whmPackage} onChange={(e) => setWhmPackage(e.target.value)}
+                  placeholder="e.g. starter"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Must match a package on your WHM server. Settings &gt; Hosting lists them once the
+                  connection test passes. The client's domain goes on the subscription, not here.
+                </p>
+              </>
+            )}
+          </div>
         )}
 
         {error && <p className="mb-3 text-xs text-red-400">{error}</p>}

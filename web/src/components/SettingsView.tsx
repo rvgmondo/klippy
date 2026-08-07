@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User, Palette, Building2, Receipt, BellRing, Mail, Users, Building,
-  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, type LucideIcon,
+  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -19,6 +19,7 @@ import { TokensPanel } from './TokensPanel';
 import { NotesPanel } from './NotesPanel';
 import { AutomationPanel } from './AutomationPanel';
 import { PaymentsPanel } from './PaymentsPanel';
+import { HostingPanel } from './HostingPanel';
 import { AccountPanel } from './AccountPanel';
 import { ModulesPanel } from './ModulesPanel';
 import { PdfDesignPanel } from './PdfDesignPanel';
@@ -35,8 +36,8 @@ import { PdfDesignPanel } from './PdfDesignPanel';
 
 type SectionId =
   | 'profile' | 'appearance'
-  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments'
-  | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'automation'
+  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting'
+  | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'automation'
   | 'labels' | 'tokens' | 'notes';
 
 interface Item { id: SectionId; label: string; icon: LucideIcon; hint?: string }
@@ -52,6 +53,7 @@ const BUSINESS: Item[] = [
   { id: 'biz:invoicing', label: 'Invoicing', icon: Receipt, hint: 'Address, VAT number, bank details and terms' },
   { id: 'biz:pdf', label: 'Document design', icon: FileText, hint: 'How your invoices and quotes look as a PDF' },
   { id: 'biz:payments', label: 'Payments', icon: CreditCard, hint: 'The merchant account this business is paid into' },
+  { id: 'biz:hosting', label: 'Hosting', icon: Server, hint: 'The WHM server new hosting accounts are created on' },
   { id: 'biz:reminders', label: 'Payment reminders', icon: BellRing, hint: 'When unpaid invoices get chased' },
   { id: 'biz:email', label: 'Email', icon: Mail, hint: 'What this business sends from' },
   { id: 'biz:access', label: 'Access', icon: Shield, hint: 'Who can work in this business' },
@@ -63,6 +65,7 @@ const ACCOUNT: Item[] = [
   { id: 'people', label: 'People', icon: Users, hint: 'Who can sign in' },
   { id: 'teams', label: 'Teams', icon: Users, hint: 'Group people for assignment' },
   { id: 'payments', label: 'Payments', icon: CreditCard, hint: 'PayFast and online payment links' },
+  { id: 'hosting', label: 'Hosting', icon: Server, hint: 'Create cPanel accounts when hosting invoices are paid' },
   { id: 'automation', label: 'Automation', icon: Zap, hint: 'Scheduled jobs and when they last ran' },
   { id: 'labels', label: 'Labels', icon: Tag, hint: 'Card labels shared across boards' },
   { id: 'tokens', label: 'API tokens', icon: KeyRound, hint: 'For scripts and integrations' },
@@ -149,6 +152,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     if (id === 'biz:modules') return <ModulesPanel business={business} />;
     if (id === 'biz:pdf') return <PdfDesignPanel business={business} />;
     if (id === 'biz:payments') return <PaymentsPanel businessId={business.id} />;
+    if (id === 'biz:hosting') return <HostingPanel businessId={business.id} />;
     return <BusinessSettingsPanel business={business} only={id.slice(4) as BusinessSection} />;
   }
   switch (id) {
@@ -159,6 +163,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     case 'people': return <PeoplePanel />;
     case 'teams': return <TeamsPanel />;
     case 'payments': return <PaymentsPanel />;
+    case 'hosting': return <HostingPanel />;
     case 'automation': return <AutomationPanel />;
     case 'labels': return <LabelsPanel />;
     case 'tokens': return <TokensPanel />;
