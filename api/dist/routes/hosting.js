@@ -32,6 +32,8 @@ export async function hostingRoutes(app) {
                 allowSelfSigned: row?.allowSelfSigned ?? false,
                 enabled: row?.enabled ?? false,
                 live: row?.live ?? false,
+                suspendAfterDays: row?.suspendAfterDays ?? null,
+                warnBeforeDays: row?.warnBeforeDays ?? 3,
             },
             source: businessId ? (row ? 'own' : (effective ? 'workspace' : 'none')) : (row ? 'own' : 'none'),
             effectiveHost: effective?.enabled ? (effective.whmHost ?? '') : '',
@@ -46,6 +48,8 @@ export async function hostingRoutes(app) {
             allowSelfSigned: z.boolean().optional(),
             enabled: z.boolean().optional(),
             live: z.boolean().optional(),
+            suspendAfterDays: z.number().int().min(1).max(365).nullable().optional(),
+            warnBeforeDays: z.number().int().min(0).max(60).optional(),
         }).safeParse(body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -84,6 +88,10 @@ export async function hostingRoutes(app) {
         }
         if (d.live !== undefined)
             patch.live = d.live;
+        if (d.suspendAfterDays !== undefined)
+            patch.suspendAfterDays = d.suspendAfterDays;
+        if (d.warnBeforeDays !== undefined)
+            patch.warnBeforeDays = d.warnBeforeDays;
         if (existing)
             await db.update(hostingSettings).set(patch).where(scope);
         else

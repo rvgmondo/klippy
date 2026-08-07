@@ -6,6 +6,7 @@ import { ErrorNote } from './ErrorNote';
 interface Configured {
   whmHost: string; whmUser: string; hasToken: boolean;
   allowSelfSigned: boolean; enabled: boolean; live: boolean;
+  suspendAfterDays: number | null; warnBeforeDays: number;
 }
 interface Status {
   configured: Configured;
@@ -197,6 +198,60 @@ export function HostingPanel({ businessId }: { businessId?: number } = {}) {
           </>
         )}
       </div>
+
+      {c.enabled && (
+        <div className="space-y-3 border-t border-slate-800 pt-4">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Suspending unpaid hosting
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Only counts invoices from the subscription that owns the hosting, so an unpaid consulting
+              invoice never takes a website down. Off unless you set a number of days.
+            </p>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]"
+              checked={c.suspendAfterDays != null} disabled={save.isPending}
+              onChange={(e) => save.mutate({ suspendAfterDays: e.target.checked ? 14 : null })} />
+            Suspend hosting when an invoice goes unpaid
+          </label>
+
+          {c.suspendAfterDays != null && (
+            <div className="flex flex-wrap items-end gap-3">
+              <div>
+                <label className={label}>Days overdue before suspending</label>
+                <input inputMode="numeric" defaultValue={String(c.suspendAfterDays)}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v >= 1 && v <= 365 && v !== c.suspendAfterDays) save.mutate({ suspendAfterDays: v });
+                  }}
+                  className="w-24 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm num text-slate-100 outline-none focus:border-[var(--accent)]" />
+              </div>
+              <div>
+                <label className={label}>Warn this many days first</label>
+                <input inputMode="numeric" defaultValue={String(c.warnBeforeDays)}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v >= 0 && v <= 60 && v !== c.warnBeforeDays) save.mutate({ warnBeforeDays: v });
+                  }}
+                  className="w-24 rounded-lg border border-slate-700 bg-slate-900/70 px-3 py-2 text-sm num text-slate-100 outline-none focus:border-[var(--accent)]" />
+              </div>
+            </div>
+          )}
+
+          {c.suspendAfterDays != null && (
+            <p className="text-[11px] text-slate-500">
+              {c.warnBeforeDays > 0
+                ? `A warning email goes out at ${Math.max(0, c.suspendAfterDays - c.warnBeforeDays)} days overdue, and the site is switched off at ${c.suspendAfterDays}.`
+                : `The site is switched off at ${c.suspendAfterDays} days overdue with no warning email. Consider warning first: a site going dark unannounced reads as a fault, and the support call costs more than the invoice.`}
+              {' '}Paying restores it straight away, not the next morning.
+              {!c.live && ' While dry run is on, nothing is suspended: the run just lists who would be.'}
+            </p>
+          )}
+        </div>
+      )}
 
       {!businessId && <HostingAccounts />}
     </div>

@@ -848,6 +848,10 @@ export const hostingSettings = mysqlTable('hosting_settings', {
     // default: cutting off a customer's website is not something to start doing by
     // accident.
     suspendAfterDays: int('suspend_after_days'),
+    // Days before that to warn them. A website going dark with no notice reads as a
+    // fault rather than a consequence, and the support call costs more than the
+    // invoice. Null means no warning, but the UI defaults it to 3.
+    warnBeforeDays: int('warn_before_days').default(3),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [
@@ -873,6 +877,11 @@ export const hostingAccounts = mysqlTable('hosting_accounts', {
     status: mysqlEnum('status', ['pending', 'active', 'suspended', 'failed', 'dry-run'])
         .default('pending').notNull(),
     detail: text('detail'),
+    // When the "your site will be switched off" warning went out, so the daily job
+    // sends it once rather than every morning until the suspension lands. Cleared
+    // when the account is paid up, so a later lapse warns again.
+    warnedAt: datetime('warned_at'),
+    suspendedAt: datetime('suspended_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [

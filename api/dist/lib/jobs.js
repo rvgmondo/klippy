@@ -6,6 +6,7 @@ import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
+import { runHostingSuspensions } from './hosting.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -30,6 +31,14 @@ export const JOBS = [
         label: 'Morning digest',
         description: 'Emails you what is due today and what is overdue. Only to people who have it switched on, and only when there is something to say.',
         hour: 7,
+    },
+    {
+        name: 'hosting-suspensions',
+        label: 'Hosting suspensions',
+        // Last of the day, so an invoice paid this morning has already been counted and
+        // nobody is suspended over money that has arrived.
+        description: 'Warns clients whose hosting invoices are overdue, then suspends the account once it is past the limit. Off unless a number of days is set.',
+        hour: 9,
     },
     {
         name: 'invoice-reminders',
@@ -253,6 +262,7 @@ function addDaysStr(dateStr, n) {
 const RUNNERS = {
     'daily-digest': runDailyDigest,
     'bill-subscriptions': runSubscriptionBilling,
+    'hosting-suspensions': runHostingSuspensions,
     'invoice-reminders': runInvoiceReminders,
 };
 /** Run one job now and record the outcome, whatever it is. */

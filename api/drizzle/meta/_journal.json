@@ -274,6 +274,13 @@
       "when": 1786106019018,
       "tag": "0038_per_business_gateways",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "5",
+      "when": 1786114351399,
+      "tag": "0039_hosting_suspension",
+      "breakpoints": true
     }
   ]
 }

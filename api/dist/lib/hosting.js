@@ -60,6 +60,9 @@ export async function onInvoicePaid(accountId, documentId) {
         if (!doc?.subscriptionId)
             return;
         await provisionSubscription(accountId, doc.subscriptionId, doc.number);
+        // And if their site was switched off for non-payment, put it back now rather
+        // than at tomorrow's sweep.
+        await restoreIfSuspended(accountId, doc.subscriptionId);
     }
     catch {
         // Provisioning must never undo a payment. A failure is recorded by the code
@@ -183,6 +186,135 @@ async function sendWelcome(accountId, businessId, to, d) {
         html: renderEmail(brand, content),
     });
 }
+/**
+ * The daily sweep: warn, then suspend, hosting whose invoices have gone unpaid.
+ *
+ * Suspending a client's website is the most aggressive thing Klippy does, so it is
+ * off unless a number of days is actually set, it warns before it acts, and it only
+ * ever counts invoices raised BY the subscription that owns the hosting. An unpaid
+ * consulting invoice must never take a website down.
+ *
+ * Restoring is not handled here: that happens the moment an invoice is paid, in
+ * onInvoicePaid, because a client who has just paid should not wait for tomorrow's
+ * job to get their site back.
+ */
+export async function runHostingSuspensions() {
+    const today = new Date().toISOString().slice(0, 10);
+    const live = await db.select().from(hostingAccounts)
+        .where(eq(hostingAccounts.status, 'active'));
+    let warned = 0;
+    let suspended = 0;
+    let wouldSuspend = 0;
+    for (const acct of live) {
+        try {
+            const settings = await hostingSettingsFor(acct.accountId, acct.businessId);
+            // Null days means never. This is the default and the safe reading of "not
+            // configured": do nothing rather than guess a number.
+            if (!settings?.enabled || settings.suspendAfterDays == null)
+                continue;
+            const overdue = await oldestOverdueDays(acct.accountId, acct.subscriptionId, today);
+            if (overdue == null) {
+                // Paid up. Clear any warning so a later lapse warns again rather than
+                // suspending silently on the strength of a months-old notice.
+                if (acct.warnedAt) {
+                    await db.update(hostingAccounts).set({ warnedAt: null })
+                        .where(eq(hostingAccounts.id, acct.id));
+                }
+                continue;
+            }
+            if (overdue >= settings.suspendAfterDays) {
+                // In dry run this still has to say WHO would be cut off. A run that
+                // reported nothing would be indistinguishable from a run with nothing to
+                // do, and this is the list worth reading twice before going live.
+                if (!settings.live) {
+                    await note(acct.accountId, acct.businessId, 'dry-run', `Dry run: would have suspended ${acct.domain} (${overdue} days overdue). Nothing was changed.`, { subscriptionId: acct.subscriptionId, domain: acct.domain, overdue });
+                    wouldSuspend++;
+                    continue;
+                }
+                const res = await setSuspended(acct.accountId, acct.id, true, `Unpaid for ${overdue} days`);
+                if (res.ok)
+                    suspended++;
+                continue;
+            }
+            const warnAt = settings.suspendAfterDays - (settings.warnBeforeDays ?? 0);
+            if (settings.warnBeforeDays && overdue >= warnAt && !acct.warnedAt) {
+                const when = new Date(Date.now() + (settings.suspendAfterDays - overdue) * 86400000)
+                    .toISOString().slice(0, 10);
+                const sent = await sendSuspensionWarning(acct, when);
+                // Marked as warned either way. Retrying a failed send every morning would
+                // turn one undeliverable address into a daily loop.
+                await db.update(hostingAccounts).set({ warnedAt: new Date() })
+                    .where(eq(hostingAccounts.id, acct.id));
+                if (sent)
+                    warned++;
+            }
+        }
+        catch { /* one bad account must not stop the sweep */ }
+    }
+    return `${warned} warned, ${suspended} suspended${wouldSuspend ? `, ${wouldSuspend} would be suspended (dry run)` : ''} of ${live.length} active`;
+}
+/** Days past due on the oldest unpaid invoice for this subscription, or null if paid up. */
+async function oldestOverdueDays(accountId, subscriptionId, today) {
+    const rows = await db.select({ dueDate: documents.dueDate }).from(documents)
+        .where(and(tenantWhere(documents, accountId, eq(documents.subscriptionId, subscriptionId)), eq(documents.type, 'invoice'), eq(documents.status, 'sent')));
+    let worst = null;
+    for (const r of rows) {
+        if (!r.dueDate)
+            continue;
+        const days = Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${r.dueDate}T00:00:00Z`)) / 86400000);
+        if (days > 0 && (worst == null || days > worst))
+            worst = days;
+    }
+    return worst;
+}
+async function sendSuspensionWarning(acct, when) {
+    const [sub] = await db.select({ folderId: subscriptions.folderId }).from(subscriptions)
+        .where(eq(subscriptions.id, acct.subscriptionId)).limit(1);
+    const to = await billingEmailFor(acct.accountId, sub?.folderId ?? null);
+    if (!to)
+        return false;
+    const brand = await emailBrandFor(acct.accountId, acct.businessId);
+    const content = {
+        heading: `Action needed for ${acct.domain}`,
+        body: [
+            `Hi ${await clientNameFor(acct.accountId, sub?.folderId ?? null)},`,
+            `We have not received payment for your hosting, so ${acct.domain} is due to be switched off on ${when}.`,
+            'Settling the outstanding invoice will stop that happening. If you have already paid in the last day or two, please ignore this.',
+        ],
+        note: 'If something is wrong with the invoice, reply to this email and we will sort it out rather than switch anything off.',
+    };
+    await sendBusinessMail({
+        accountId: acct.accountId, businessId: acct.businessId, purpose: 'invoice', to,
+        subject: `${acct.domain}: hosting due to be suspended on ${when}`,
+        text: renderEmailText(brand, content),
+        html: renderEmail(brand, content),
+    });
+    return true;
+}
+/**
+ * They have paid. Put the site back immediately, and clear the warning.
+ *
+ * Called from onInvoicePaid rather than from the daily job on purpose: somebody who
+ * has just paid should not have to wait until tomorrow morning for their website.
+ */
+async function restoreIfSuspended(accountId, subscriptionId) {
+    const [acct] = await db.select().from(hostingAccounts)
+        .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)))
+        .limit(1);
+    if (!acct)
+        return;
+    if (acct.warnedAt) {
+        await db.update(hostingAccounts).set({ warnedAt: null }).where(eq(hostingAccounts.id, acct.id));
+    }
+    if (acct.status !== 'suspended')
+        return;
+    const today = new Date().toISOString().slice(0, 10);
+    // Only if nothing else is still outstanding, so paying one of three overdue
+    // invoices does not restore the site.
+    if ((await oldestOverdueDays(accountId, subscriptionId, today)) != null)
+        return;
+    await setSuspended(accountId, acct.id, false);
+}
 /** Suspend or restore one account by hand, from the hosting screen. */
 export async function setSuspended(accountId, hostingAccountId, suspend, reason = 'Unpaid') {
     const [row] = await db.select().from(hostingAccounts)
@@ -204,8 +336,13 @@ export async function setSuspended(accountId, hostingAccountId, suspend, reason 
         ? await suspendAccount(creds, row.username, reason)
         : await unsuspendAccount(creds, row.username);
     if (res.ok) {
-        await db.update(hostingAccounts).set({ status: suspend ? 'suspended' : 'active', detail: res.message })
-            .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, hostingAccountId)));
+        await db.update(hostingAccounts).set({
+            status: suspend ? 'suspended' : 'active', detail: res.message,
+            suspendedAt: suspend ? new Date() : null,
+            // Clearing the warning on restore means a later lapse warns again instead of
+            // going straight to a dark website.
+            ...(suspend ? {} : { warnedAt: null }),
+        }).where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, hostingAccountId)));
         await note(accountId, row.businessId, 'created', `${suspend ? 'Suspended' : 'Restored'} ${row.username} (${row.domain}).`, { subscriptionId: row.subscriptionId });
     }
     return { ok: res.ok, message: res.message };
