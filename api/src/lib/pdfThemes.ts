@@ -374,6 +374,76 @@ function drawIssuerStrip(c: Ctx, left = c.M, width = c.right - c.M): void {
   }
 }
 
+/**
+ * Draw the logo and report the space it actually took.
+ *
+ * A square fit box is wrong for the logo most businesses have. A wordmark is
+ * typically four or five times wider than it is tall, so a 56pt square caps it on
+ * width and renders it about 11pt high: the mark comes out tiny, pinned to the top
+ * of a box that is mostly empty, with whatever sits beside it stranded against
+ * nothing. Given a wide box a wordmark fills the width, and a square icon still
+ * fits inside it unchanged. Measuring the result rather than assuming the box is
+ * what lets the name below sit at a constant distance from the mark for any shape
+ * of logo.
+ */
+function placeLogo(c: Ctx, x: number, y: number, maxW: number, maxH: number, centreIn?: number)
+  : { w: number; h: number; bottom: number } | null {
+  const { pdf, d } = c;
+  if (!d.issuer.logo) return null;
+  try {
+    // pdfkit has exposed openImage since 0.11 but its type definitions never listed
+    // it. Reading the intrinsic size is the whole point here, so it is worth the cast.
+    const img = (pdf as unknown as {
+      openImage(b: Buffer): { width: number; height: number };
+    }).openImage(d.issuer.logo);
+    const s = Math.min(maxW / img.width, maxH / img.height);
+    const w = img.width * s;
+    const h = img.height * s;
+    const lx = centreIn ? x + (centreIn - w) / 2 : x;
+    pdf.image(d.issuer.logo, lx, y, { width: w, height: h });
+    return { w, h, bottom: y + h };
+  } catch { return null; }
+}
+
+/**
+ * Who this document is from. Returns the y it ended at.
+ *
+ * When there is a logo, the logo IS the identity. Setting the name beside it at
+ * headline size gives the page two mastheads, and since the document title has to
+ * be loud as well, the eye arrives at three things all claiming to be the most
+ * important. It also says the same thing twice: the mark usually spells the brand
+ * out already. So the name is demoted to a quiet line under the mark. It stays,
+ * because a tax invoice has to carry the registered name and that is often longer
+ * than the brand, but it reads as identification rather than as a headline.
+ *
+ * With no logo the name is the only identity the page has, so it takes the
+ * headline and the hierarchy still works.
+ */
+function drawIdentity(c: Ctx, x: number, y: number, width: number, o: {
+  logoBox: [number, number];
+  nameSize: number;
+  align?: 'left' | 'center';
+  color?: string;
+  quiet?: string;
+  upper?: boolean;
+  tracking?: number;
+}): number {
+  const { pdf, d, f } = c;
+  const centred = o.align === 'center';
+  const align = centred ? 'center' as const : 'left' as const;
+  const logo = placeLogo(c, x, y, o.logoBox[0], o.logoBox[1], centred ? width : undefined);
+
+  const name = o.upper ? d.issuer.name.toUpperCase() : d.issuer.name;
+  if (logo) {
+    pdf.font(f.regular).fontSize(9).fillColor(o.quiet ?? MUTED)
+      .text(name, x, logo.bottom + 9, { width, align, characterSpacing: o.tracking ? 0.6 : 0 });
+  } else {
+    pdf.font(f.bold).fontSize(o.nameSize).fillColor(o.color ?? INK_STRONG)
+      .text(name, x, y + 2, { width, align, characterSpacing: o.tracking ?? 0 });
+  }
+  return pdf.y;
+}
+
 // ---- The layouts ------------------------------------------------------------
 
 function layoutModern(c: Ctx): void {
@@ -385,16 +455,11 @@ function layoutModern(c: Ctx): void {
   // only join them when explicitly asked for, because squeezed into this band they
   // crowd the logo and fight the title for the same horizontal space.
   const top = 48;
-  let tx = c.M;
-  if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, c.M, top, { fit: [56, 56] }); tx = c.M + 72; } catch { /* skip */ }
-  }
-  pdf.font(f.bold).fontSize(17).fillColor(INK_STRONG).text(d.issuer.name, tx, top + 4, { width: 250 });
-  let ly = pdf.y;
+  let ly = drawIdentity(c, c.M, top, 260, { logoBox: [150, 46], nameSize: 17 });
   if (c.issuerAt === 'header') {
     ly += 5;
     for (const l of issuerLines(d)) {
-      pdf.font(f.regular).fontSize(8.5).fillColor(MUTED).text(l, tx, ly, { width: 240 });
+      pdf.font(f.regular).fontSize(8.5).fillColor(MUTED).text(l, c.M, ly, { width: 240 });
       ly = pdf.y + 1;
     }
   }
@@ -432,13 +497,9 @@ function layoutModern(c: Ctx): void {
 
 function layoutClassic(c: Ctx): void {
   const { pdf, d, f } = c;
-  let y = 54;
-  if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, (c.W - 46) / 2, y, { fit: [46, 46] }); y += 54; } catch { /* skip */ }
-  }
-  pdf.font(f.bold).fontSize(15).fillColor(INK_STRONG)
-    .text(d.issuer.name.toUpperCase(), c.M, y, { width: c.right - c.M, align: 'center', characterSpacing: 1.2 });
-  y = pdf.y + 3;
+  let y = drawIdentity(c, c.M, 54, c.right - c.M, {
+    logoBox: [180, 48], nameSize: 15, align: 'center', upper: true, tracking: 1.2,
+  }) + 3;
   for (const l of issuerLines(d)) {
     pdf.font(f.regular).fontSize(8.5).fillColor(MUTED)
       .text(l, c.M, y, { width: c.right - c.M, align: 'center' });
@@ -474,11 +535,9 @@ function layoutBold(c: Ctx): void {
   const BAND = 132;
   pdf.rect(0, 0, c.W, BAND).fill(c.accent);
 
-  let tx = c.M;
-  if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, c.M, 30, { fit: [44, 44] }); tx = c.M + 58; } catch { /* skip */ }
-  }
-  pdf.font(f.bold).fontSize(13).fillColor(ink).text(d.issuer.name, tx, 40, { width: 300 });
+  // On the colour band the quiet grey used elsewhere would disappear, so the
+  // demoted name keeps the band's own ink and separates by size alone.
+  drawIdentity(c, c.M, 26, 300, { logoBox: [140, 34], nameSize: 13, color: ink, quiet: ink });
   pdf.font(f.bold).fontSize(30).fillColor(ink).text(d.label.toUpperCase(), c.M, 82, { width: 320 });
   pdf.font(f.regular).fontSize(11).fillColor(ink)
     .text(d.number, c.right - 220, 86, { width: 220, align: 'right' });
@@ -517,12 +576,8 @@ function layoutSidebar(c: Ctx): void {
   pdf.rect(0, 0, 6, c.H).fill(c.accent);
 
   const sx = 22;
-  let sy = 46;
-  if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, sx, sy, { fit: [44, 44] }); sy += 54; } catch { /* skip */ }
-  }
-  pdf.font(f.bold).fontSize(12).fillColor(INK_STRONG).text(d.issuer.name, sx, sy, { width: SIDE - sx - 16 });
-  sy = pdf.y + 8;
+  const col = SIDE - sx - 16;
+  let sy = drawIdentity(c, sx, 46, col, { logoBox: [col, 42], nameSize: 12 }) + 8;
   for (const l of issuerLines(d)) {
     pdf.font(f.regular).fontSize(8).fillColor(MUTED).text(l, sx, sy, { width: SIDE - sx - 16 });
     sy = pdf.y + 4;
@@ -558,14 +613,10 @@ function layoutSidebar(c: Ctx): void {
 function layoutCompact(c: Ctx): void {
   const { pdf, d, f } = c;
   let y = c.M;
-  let tx = c.M;
-  if (d.issuer.logo) {
-    try { pdf.image(d.issuer.logo, c.M, y, { fit: [34, 34] }); tx = c.M + 44; } catch { /* skip */ }
-  }
-  pdf.font(f.bold).fontSize(12).fillColor(INK_STRONG).text(d.issuer.name, tx, y + 2, { width: 240 });
+  drawIdentity(c, c.M, y, 250, { logoBox: [120, 32], nameSize: 12 });
   const issuerBits = c.issuerAt === 'footer' ? '' : issuerLines(d).join('  |  ');
   if (issuerBits) {
-    pdf.font(f.regular).fontSize(7.5).fillColor(MUTED).text(issuerBits, tx, pdf.y + 1, { width: 260 });
+    pdf.font(f.regular).fontSize(7.5).fillColor(MUTED).text(issuerBits, c.M, pdf.y + 1, { width: 260 });
   }
   pdf.font(f.bold).fontSize(15).fillColor(c.accent)
     .text(`${d.label.toUpperCase()}  ${d.number}`, c.right - 260, y, { width: 260, align: 'right' });
