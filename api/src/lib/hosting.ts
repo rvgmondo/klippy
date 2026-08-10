@@ -8,8 +8,8 @@ import { decryptSecret } from './secretbox.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import {
-  accountExists, createAccount, generatePassword, isReservedRejection, suspendAccount,
-  unsuspendAccount, usernameFor, type WhmCreds,
+  accountExists, changePrimaryDomain, createAccount, generatePassword, isReservedRejection,
+  suspendAccount, tempDomainFor, unsuspendAccount, usernameFor, type WhmCreds,
 } from './whm.js';
 
 /**
@@ -120,21 +120,43 @@ export async function provisionSubscription(
   const settings = await hostingSettingsFor(accountId, sub.businessId);
   if (!settings?.enabled) return done('skipped', 'Hosting provisioning is off for this business.');
 
-  // No domain is the NORMAL case at the point of sale, not an error. You sell
-  // hosting; the client is the only one who knows what it is for. Rather than
-  // shrugging and leaving a paid customer with nothing, ask them, and provision
-  // the moment they answer.
-  if (!sub.domain) {
+  /**
+   * What do we build this account on?
+   *
+   * No domain is the NORMAL case at the point of sale. People buy hosting and then
+   * go and buy a domain, often days later. Three ways that can go:
+   *
+   *  - They gave us a domain. Use it.
+   *  - They did not, but a holding address is configured. Build it NOW on an
+   *    address we own, so somebody who has paid can log in this minute and start
+   *    working, and ask them for the real one in parallel.
+   *  - They did not and there is no holding address. Fall back to the old
+   *    behaviour: ask, and wait. Nothing is created.
+   */
+  const clientName = await clientNameFor(accountId, sub.folderId);
+  const realDomain = sub.domain ? sub.domain.trim().toLowerCase().replace(/^www\./, '') : null;
+
+  // The username has to come from somewhere even when there is no domain yet, so
+  // it falls back to the client's name. It is permanent once cPanel has it, and
+  // renaming a cPanel user later is not something to do casually.
+  let username = usernameFor(realDomain ?? clientName);
+  const holding = !realDomain && settings.tempDomainPattern
+    ? tempDomainFor(settings.tempDomainPattern, username)
+    : null;
+
+  if (!realDomain && !holding) {
     const asked = await requestDomain(accountId, sub);
     return done('skipped', asked
-      ? 'Waiting on the client for a domain. They have been emailed and can enter it themselves; it will set itself up as soon as they do.'
-      : 'No domain, and no billing email to ask for one. Add either and it will set itself up.');
+      ? 'Waiting on the client for a domain. They have been emailed and can enter it themselves; it will set itself up as soon as they do. Set a holding address in Settings > Hosting to give them a working account straight away instead.'
+      : 'No domain, and no billing email to ask for one. Add either, or set a holding address, and it will set itself up.');
   }
+
+  const domain = (realDomain ?? holding) as string;
+  const isTemporary = !realDomain;
 
   // Claim the subscription before doing anything. Unique on subscriptionId, so a
   // retried notification or an overlapping run loses the race instead of creating a
   // second hosting account for the same customer.
-  const domain = sub.domain.trim().toLowerCase().replace(/^www\./, '');
   const [prior] = await db.select().from(hostingAccounts)
     .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)))
     .limit(1);
@@ -148,12 +170,14 @@ export async function provisionSubscription(
     // than no record at all, because it looks like something was done.
     await db.update(hostingAccounts).set({
       status: 'pending', domain, whmPackage: offering.whmPackage ?? null, detail: null,
+      isTemporary, tempDomain: holding ?? prior.tempDomain,
     }).where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, prior.id)));
   } else {
     try {
       await db.insert(hostingAccounts).values(withTenant(accountId, {
         businessId: sub.businessId, subscriptionId, domain,
         whmPackage: offering.whmPackage ?? null, status: 'pending' as const,
+        isTemporary, tempDomain: holding,
       }));
     } catch {
       return { outcome: 'skipped', detail: 'This subscription already has a hosting account.' };
@@ -165,16 +189,15 @@ export async function provisionSubscription(
       .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)));
   };
 
-  let username = usernameFor(domain);
-
   // A dry run never contacts the server, so it must not need working credentials to
   // be useful. This is the check people run BEFORE the setup is finished, to see
   // which clients and domains would be picked up.
   if (!settings.live) {
-    await finish('dry-run', `Would have created ${username} for ${domain}${offering.whmPackage ? ` on package ${offering.whmPackage}` : ''}.`, username);
+    const where = isTemporary ? `${domain} (holding address, their own domain comes later)` : domain;
+    await finish('dry-run', `Would have created ${username} for ${where}${offering.whmPackage ? ` on package ${offering.whmPackage}` : ''}.`, username);
     return done('dry-run',
-      `Dry run: would have created cPanel account ${username} for ${domain}. Nothing was created. Switch on live provisioning when this looks right.`,
-      { username });
+      `Dry run: would have created cPanel account ${username} for ${where}. Nothing was created. Switch on live provisioning when this looks right.`,
+      { username, isTemporary });
   }
 
   const creds = credsOf(settings);
@@ -216,11 +239,16 @@ export async function provisionSubscription(
 
   await finish('active', `Created ${username} for ${domain}.`, username);
 
+  // A holding address is a start, not the end. They still need their own domain,
+  // so the request goes out alongside the welcome rather than waiting for somebody
+  // to remember. Their hosting works in the meantime, which is the whole point.
+  if (isTemporary) await requestDomain(accountId, sub).catch(() => false);
+
   // The password exists only in this message. If it does not arrive, WHM resets it;
   // that is a better trade than keeping every client's hosting password recoverable.
   if (email) {
     await sendWelcome(accountId, sub.businessId, email, {
-      domain, username, password, host: creds.host, clientName: await clientNameFor(accountId, sub.folderId),
+      domain, username, password, host: creds.host, clientName, isTemporary,
     }).catch(() => { /* the account exists either way, and the failure is recorded below */ });
   }
   return done('created',
@@ -242,29 +270,62 @@ async function clientNameFor(accountId: number, folderId: number | null): Promis
   return f?.name ?? 'there';
 }
 
+/**
+ * The email that lets them actually start.
+ *
+ * Two versions, because the situations are genuinely different. With their own
+ * domain it is "here is your login and your site is at yourdomain.co.za". On a
+ * holding address it is "here is your login, your site is at this temporary
+ * address, and here is what happens when you have your own domain". Sending the
+ * first version for the second case is how you get a support call an hour later
+ * asking why their domain does not work.
+ */
 async function sendWelcome(
   accountId: number, businessId: number | null, to: string,
-  d: { domain: string; username: string; password: string; host: string; clientName: string },
+  d: {
+    domain: string; username: string; password: string; host: string;
+    clientName: string; isTemporary?: boolean;
+  },
 ): Promise<void> {
   const brand = await emailBrandFor(accountId, businessId);
-  const content = {
-    heading: `Your hosting for ${d.domain} is ready`,
-    body: [
-      `Hi ${d.clientName},`,
-      'Your hosting account is set up and ready to use. Your login details are below.',
-      'Please change the password after you first sign in, and keep this email somewhere safe until you have.',
-    ],
-    facts: [
-      ['Domain', d.domain] as [string, string],
-      ['Username', d.username] as [string, string],
-      ['Password', d.password] as [string, string],
-      ['Control panel', `https://${d.host}:2083`] as [string, string],
-    ],
-    note: 'If your domain is not pointing at us yet, the site will only appear once its nameservers have been updated.',
-  };
+  const cpanel = `https://${d.host}:2083`;
+
+  const content = d.isTemporary
+    ? {
+      heading: 'Your hosting is ready',
+      body: [
+        `Hi ${d.clientName},`,
+        'Your hosting is set up and you can start building right now, using the temporary address below. You do not have to wait for a domain.',
+        'When you have your own domain, tell us and we will move your site onto it. Nothing you build in the meantime is lost.',
+        'Please change the password after you first sign in.',
+      ],
+      facts: [
+        ['Temporary address', `http://${d.domain}`] as [string, string],
+        ['Username', d.username] as [string, string],
+        ['Password', d.password] as [string, string],
+        ['Control panel', cpanel] as [string, string],
+      ],
+      note: 'The temporary address is ours, not yours, so use it for building rather than giving it to customers. It stops working once your own domain is live.',
+    }
+    : {
+      heading: `Your hosting for ${d.domain} is ready`,
+      body: [
+        `Hi ${d.clientName},`,
+        'Your hosting account is set up and ready to use. Your login details are below.',
+        'Please change the password after you first sign in, and keep this email somewhere safe until you have.',
+      ],
+      facts: [
+        ['Domain', d.domain] as [string, string],
+        ['Username', d.username] as [string, string],
+        ['Password', d.password] as [string, string],
+        ['Control panel', cpanel] as [string, string],
+      ],
+      note: 'If your domain is not pointing at us yet, the site will only appear once its nameservers have been updated.',
+    };
+
   await sendBusinessMail({
     accountId, businessId, purpose: 'general', to,
-    subject: `Hosting for ${d.domain} is ready`,
+    subject: d.isTemporary ? 'Your hosting is ready to use' : `Hosting for ${d.domain} is ready`,
     text: renderEmailText(brand, content),
     html: renderEmail(brand, content),
   });
@@ -471,6 +532,71 @@ export function cleanDomain(raw: string): string | null {
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(d)) return null;
   if (d.length > 190) return null;
   return d;
+}
+
+/**
+ * Move an account from its holding address onto the customer's own domain.
+ *
+ * Called when a client who was set up on a holding address finally tells us their
+ * real domain. Deliberately separate from provisioning: nothing is created, an
+ * existing account is renamed, and the two failure modes are nothing alike.
+ *
+ * Honest about its limits. If WHM refuses, the record says so and says a person has
+ * to finish it, rather than flipping to "done" and leaving a customer whose site
+ * quietly still answers on the old address. And it never pretends the customer's
+ * site content followed: a WordPress install still has the old address baked into
+ * its settings, which is a real thing somebody has to fix.
+ */
+export async function switchToRealDomain(
+  accountId: number, subscriptionId: number, realDomain: string,
+): Promise<{ ok: boolean; message: string }> {
+  const [acct] = await db.select().from(hostingAccounts)
+    .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)))
+    .limit(1);
+  if (!acct) return { ok: false, message: 'No hosting account for this subscription yet.' };
+  if (!acct.username) return { ok: false, message: 'That account has no cPanel username yet.' };
+  if (!acct.isTemporary) {
+    return { ok: false, message: 'That account is already on its own domain.' };
+  }
+
+  const settings = await hostingSettingsFor(accountId, acct.businessId);
+  if (!settings?.enabled) return { ok: false, message: 'Hosting is off for this business.' };
+
+  const record = async (ok: boolean, detail: string, patch: Record<string, unknown> = {}) => {
+    await db.update(hostingAccounts).set({ detail, ...patch })
+      .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, acct.id)));
+    await note(accountId, acct.businessId, ok ? 'created' : 'failed', detail, {
+      subscriptionId, username: acct.username, from: acct.tempDomain, to: realDomain,
+    });
+  };
+
+  // In dry run nothing on the server changes, but the intent is still written down,
+  // because "who is waiting to be moved across" is a list worth reading.
+  if (!settings.live) {
+    await record(true,
+      `Dry run: would have moved ${acct.username} from ${acct.domain} to ${realDomain}. Nothing was changed.`);
+    return { ok: true, message: 'Noted. Your domain will be set up shortly.' };
+  }
+
+  const creds = credsOf(settings);
+  if (!creds) {
+    await record(false, 'WHM credentials are incomplete, so the domain could not be changed.');
+    return { ok: false, message: 'We have your domain and will finish setting it up shortly.' };
+  }
+
+  const res = await changePrimaryDomain(creds, acct.username, realDomain);
+  if (!res.ok) {
+    // The customer must not be told it worked. Equally they should not be shown a
+    // cPanel error, so the message they see differs from the one recorded.
+    await record(false,
+      `Could not move ${acct.username} onto ${realDomain}: ${res.message}. The account is still on ${acct.domain}. Change the primary domain in WHM and mark it here.`);
+    return { ok: false, message: 'We have your domain. Someone is finishing the setup and will be in touch.' };
+  }
+
+  await record(true, `Moved ${acct.username} from ${acct.domain} to ${realDomain}.`, {
+    domain: realDomain, isTemporary: false, domainSwitchedAt: new Date(), status: 'active',
+  });
+  return { ok: true, message: 'Your domain is set up. It can take a few hours for it to work everywhere.' };
 }
 
 /** Suspend or restore one account by hand, from the hosting screen. */

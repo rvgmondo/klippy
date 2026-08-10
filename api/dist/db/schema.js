@@ -930,6 +930,19 @@ export const hostingSettings = mysqlTable('hosting_settings', {
     // fault rather than a consequence, and the support call costs more than the
     // invoice. Null means no warning, but the UI defaults it to 3.
     warnBeforeDays: int('warn_before_days').default(3),
+    /**
+     * How to name a holding domain for a customer who has not bought theirs yet.
+     *
+     * At the point of sale the client usually has no domain, and refusing to set
+     * anything up means somebody has paid and cannot even log in. cPanel is happy to
+     * create the account on a domain the HOST controls, so hosting starts working
+     * immediately and the real domain is attached later.
+     *
+     * A pattern rather than a fixed value, because the username has to be in it:
+     * "{username}.clients.example.co.za". Null means the feature is off and the old
+     * behaviour applies, which is to wait for the client to supply a domain.
+     */
+    tempDomainPattern: varchar('temp_domain_pattern', { length: 190 }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [
@@ -952,6 +965,17 @@ export const hostingAccounts = mysqlTable('hosting_accounts', {
     domain: varchar('domain', { length: 190 }).notNull(),
     username: varchar('username', { length: 32 }),
     whmPackage: varchar('whm_package', { length: 60 }),
+    /**
+     * True while the account is living on a holding domain we own rather than the
+     * customer's own. Kept as its own flag rather than inferred from the domain
+     * string, because the pattern can be changed in settings afterwards and an
+     * inference would then quietly start lying about existing accounts.
+     */
+    isTemporary: boolean('is_temporary').default(false).notNull(),
+    /** The holding domain, kept after the switch so support can still find the account. */
+    tempDomain: varchar('temp_domain', { length: 190 }),
+    /** When the account was moved onto the customer's real domain. */
+    domainSwitchedAt: datetime('domain_switched_at'),
     status: mysqlEnum('status', ['pending', 'active', 'suspended', 'failed', 'dry-run'])
         .default('pending').notNull(),
     detail: text('detail'),

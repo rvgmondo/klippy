@@ -241,7 +241,12 @@ function AwaitingDomain() {
 
   const { data } = useQuery({
     queryKey: ['portal-awaiting'],
-    queryFn: () => apiGet<{ awaiting: { id: number; offeringName: string }[] }>('/portal/hosting/awaiting'),
+    queryFn: () => apiGet<{
+      awaiting: {
+        id: number; offeringName: string;
+        onHoldingAddress: boolean; holdingDomain: string | null;
+      }[];
+    }>('/portal/hosting/awaiting'),
   });
   const submit = useMutation({
     mutationFn: (v: { id: number; domain: string }) =>
@@ -263,29 +268,40 @@ function AwaitingDomain() {
   return (
     <div className="mb-3 space-y-3">
       {rows.map((a) => (
-        <div key={a.id} className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <div className="text-sm font-medium text-amber-900">
-            Which domain is your {a.offeringName} for?
+        <div key={a.id} className={`rounded-xl border p-4 ${
+          a.onHoldingAddress ? 'border-sky-200 bg-sky-50' : 'border-amber-200 bg-amber-50'}`}>
+          <div className={`text-sm font-medium ${a.onHoldingAddress ? 'text-sky-900' : 'text-amber-900'}`}>
+            {a.onHoldingAddress
+              ? 'Ready to use your own domain?'
+              : `Which domain is your ${a.offeringName} for?`}
           </div>
-          <p className="mt-0.5 text-xs text-amber-800">
-            Enter it and your hosting is set up straight away, usually within a minute.
+          <p className={`mt-0.5 text-xs ${a.onHoldingAddress ? 'text-sky-800' : 'text-amber-800'}`}>
+            {a.onHoldingAddress
+              ? `Your hosting is already running on ${a.holdingDomain}. When you have your own domain, enter it here and we will move your site across. Nothing you have built is lost.`
+              : 'Enter it and your hosting is set up straight away, usually within a minute.'}
           </p>
           {err && <p className="mt-2 text-xs text-red-700">{err}</p>}
           <form className="mt-2 flex flex-wrap gap-2"
             onSubmit={(e) => { e.preventDefault(); submit.mutate({ id: a.id, domain: values[a.id] ?? '' }); }}>
             <input
-              className="min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500"
+              className={`min-w-0 flex-1 rounded-lg border bg-white px-3 py-2 text-sm outline-none ${
+                a.onHoldingAddress ? 'border-sky-300 focus:border-sky-500' : 'border-amber-300 focus:border-amber-500'}`}
               placeholder="yourbusiness.co.za"
               value={values[a.id] ?? ''}
               onChange={(e) => setValues({ ...values, [a.id]: e.target.value })} />
             <button type="submit" disabled={submit.isPending || !(values[a.id] ?? '').trim()}
-              className="rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50">
-              {submit.isPending ? 'Setting up...' : 'Set up my hosting'}
+              className={`rounded-lg px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
+                a.onHoldingAddress ? 'bg-sky-700 hover:bg-sky-800' : 'bg-amber-700 hover:bg-amber-800'}`}>
+              {submit.isPending
+                ? (a.onHoldingAddress ? 'Moving...' : 'Setting up...')
+                : (a.onHoldingAddress ? 'Use this domain' : 'Set up my hosting')}
             </button>
           </form>
-          <p className="mt-1.5 text-[11px] text-amber-800/80">
-            No http and no www, just the domain. If you have not registered one yet, reply to our email
-            and we will help.
+          <p className={`mt-1.5 text-[11px] ${a.onHoldingAddress ? 'text-sky-800/80' : 'text-amber-800/80'}`}>
+            No http and no www, just the domain.
+            {a.onHoldingAddress
+              ? ' Point your domain at us first, or it will not load once we move it. If you built a site on the temporary address, some links may still point at the old one and need updating.'
+              : ' If you have not registered one yet, reply to our email and we will help.'}
           </p>
         </div>
       ))}

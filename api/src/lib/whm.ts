@@ -168,6 +168,30 @@ export function usernameFor(domain: string, taken: (u: string) => boolean = () =
   return candidate.slice(0, 16);
 }
 
+/**
+ * Turn a holding-domain pattern into an actual domain for one account.
+ *
+ * "{username}.clients.example.co.za" with username ktestrubs becomes
+ * ktestrubs.clients.example.co.za. Returns null when the result is not a usable
+ * hostname, so a mistyped pattern in settings fails here rather than at cPanel with
+ * an error nobody can read.
+ */
+export function tempDomainFor(pattern: string, username: string): string | null {
+  if (!pattern || !username) return null;
+  const filled = pattern.trim().toLowerCase()
+    .replace(/\{username\}/g, username)
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .replace(/[/?#].*$/, '')
+    .replace(/\.$/, '');
+  // A holding domain must still be a real hostname with at least two labels, and
+  // must actually vary per account or every customer collides on the same one.
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(filled)) return null;
+  if (filled.length > 190) return null;
+  if (!pattern.includes('{username}')) return null;
+  return filled;
+}
+
 /** Did WHM refuse this name rather than fail for some other reason? */
 export function isReservedRejection(message: string): boolean {
   return /reserved username|username.*reserved|already exists|in use/i.test(message);
@@ -200,6 +224,23 @@ export async function createAccount(creds: WhmCreds, opts: {
     ...(opts.plan ? { plan: opts.plan } : {}),
     ...(opts.contactEmail ? { contactemail: opts.contactEmail } : {}),
   });
+}
+
+/**
+ * Move an account onto a different primary domain.
+ *
+ * The customer built their site on a holding address; now they have their own
+ * domain and it has to become the real one. WHM's modifyacct takes the existing
+ * username and the new domain.
+ *
+ * NOT VERIFIED against a real server from here. It follows WHM's documented
+ * modifyacct call, but nobody has watched it run, so the caller treats a failure as
+ * "a person needs to finish this in WHM" rather than pretending it worked.
+ */
+export async function changePrimaryDomain(
+  creds: WhmCreds, username: string, newDomain: string,
+): Promise<WhmResult> {
+  return call(creds, 'modifyacct', { user: username, domain: newDomain });
 }
 
 export async function suspendAccount(creds: WhmCreds, username: string, reason: string): Promise<WhmResult> {

@@ -8,7 +8,7 @@ import { intId } from '../lib/http.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { assertBusinessAccess } from '../lib/access.js';
 import { hostingSettingsFor, credsOf, provisionSubscription, setSuspended } from '../lib/hosting.js';
-import { cleanHost, listPackages, testConnection } from '../lib/whm.js';
+import { cleanHost, listPackages, tempDomainFor, testConnection } from '../lib/whm.js';
 /**
  * Hosting provisioning: connecting Klippy to the WHM server that actually creates
  * cPanel accounts.
@@ -34,6 +34,7 @@ export async function hostingRoutes(app) {
                 live: row?.live ?? false,
                 suspendAfterDays: row?.suspendAfterDays ?? null,
                 warnBeforeDays: row?.warnBeforeDays ?? 3,
+                tempDomainPattern: row?.tempDomainPattern ?? '',
             },
             source: businessId ? (row ? 'own' : (effective ? 'workspace' : 'none')) : (row ? 'own' : 'none'),
             effectiveHost: effective?.enabled ? (effective.whmHost ?? '') : '',
@@ -50,6 +51,7 @@ export async function hostingRoutes(app) {
             live: z.boolean().optional(),
             suspendAfterDays: z.number().int().min(1).max(365).nullable().optional(),
             warnBeforeDays: z.number().int().min(0).max(60).optional(),
+            tempDomainPattern: z.string().trim().max(190).nullable().optional(),
         }).safeParse(body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
@@ -72,6 +74,16 @@ export async function hostingRoutes(app) {
             if (!on)
                 return reply.code(400).send({ error: 'Switch hosting on before enabling live provisioning.' });
         }
+        // Checked here, where the person who typed it is looking, rather than weeks
+        // later against a customer who has just paid.
+        if (d.tempDomainPattern) {
+            if (!d.tempDomainPattern.includes('{username}')) {
+                return reply.code(400).send({ error: 'The pattern has to contain {username}, or every client would land on the same address.' });
+            }
+            if (!tempDomainFor(d.tempDomainPattern, 'sampleuser')) {
+                return reply.code(400).send({ error: 'That is not a usable address. Use something like {username}.clients.yourdomain.co.za' });
+            }
+        }
         const patch = {};
         if (d.whmHost !== undefined)
             patch.whmHost = cleanHost(d.whmHost) || null;
@@ -92,6 +104,8 @@ export async function hostingRoutes(app) {
             patch.suspendAfterDays = d.suspendAfterDays;
         if (d.warnBeforeDays !== undefined)
             patch.warnBeforeDays = d.warnBeforeDays;
+        if (d.tempDomainPattern !== undefined)
+            patch.tempDomainPattern = d.tempDomainPattern || null;
         if (existing)
             await db.update(hostingSettings).set(patch).where(scope);
         else

@@ -7,6 +7,7 @@ interface Configured {
   whmHost: string; whmUser: string; hasToken: boolean;
   allowSelfSigned: boolean; enabled: boolean; live: boolean;
   suspendAfterDays: number | null; warnBeforeDays: number;
+  tempDomainPattern: string;
 }
 interface Status {
   configured: Configured;
@@ -202,6 +203,37 @@ export function HostingPanel({ businessId }: { businessId?: number } = {}) {
       {c.enabled && (
         <div className="space-y-3 border-t border-slate-800 pt-4">
           <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Clients with no domain yet
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Most people buy hosting before they buy a domain. With a holding address set, their
+              account is created straight away on an address you own, so they can log in and start
+              building. When they have their own domain they enter it and Klippy moves the account
+              across.
+            </p>
+          </div>
+
+          <div>
+            <label className={label}>Holding address pattern</label>
+            <input className={field} defaultValue={c.tempDomainPattern}
+              placeholder="{username}.clients.yourdomain.co.za"
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== c.tempDomainPattern) save.mutate({ tempDomainPattern: v || null });
+              }} />
+            <p className="mt-1 text-[11px] text-slate-500">
+              Must contain <span className="text-slate-300">{'{username}'}</span>, or every client
+              would land on the same address. Leave blank to keep the old behaviour, which is to wait
+              for the client to give you a domain before anything is set up.
+            </p>
+            <p className="mt-1 text-[11px] text-amber-400/80">
+              For this to work you need a wildcard DNS record pointing at your server, so anything
+              ending in that address resolves. Your host sets this up once.
+            </p>
+          </div>
+
+          <div className="border-t border-slate-800 pt-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Suspending unpaid hosting
             </div>

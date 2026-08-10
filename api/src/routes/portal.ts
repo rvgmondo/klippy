@@ -11,7 +11,7 @@ import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { credsFor } from '../lib/paymentSettings.js';
 import { buildCheckout } from '../lib/payfast.js';
-import { hostingSettingsFor, provisionSubscription, cleanDomain } from '../lib/hosting.js';
+import { hostingSettingsFor, provisionSubscription, switchToRealDomain, cleanDomain } from '../lib/hosting.js';
 import {
   PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin,
   portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword,
@@ -482,6 +482,21 @@ export async function portalRoutes(app: FastifyInstance) {
     await db.update(subscriptions).set({ domain: clean })
       .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.id, subscriptionId)));
 
+    // Two different jobs depending on where they are. Somebody already building on
+    // a holding address needs their account MOVED; somebody with nothing yet needs
+    // it created. Doing the wrong one either strands them or makes a second account.
+    const [existing] = await db.select({ isTemporary: hostingAccounts.isTemporary })
+      .from(hostingAccounts)
+      .where(and(
+        eq(hostingAccounts.accountId, c.user.accountId),
+        eq(hostingAccounts.subscriptionId, subscriptionId),
+      )).limit(1);
+
+    if (existing?.isTemporary) {
+      const moved = await switchToRealDomain(c.user.accountId, subscriptionId, clean);
+      return { ok: moved.ok, domain: clean, message: moved.message };
+    }
+
     const res = await provisionSubscription(c.user.accountId, subscriptionId);
     return {
       ok: true, domain: clean,
@@ -508,7 +523,18 @@ export async function portalRoutes(app: FastifyInstance) {
         eq(offerings.provisioning, 'cpanel'),
         isNull(subscriptions.domain),
       ));
-    return { awaiting: rows };
+    // Whether they are already up on a holding address changes what we say to them:
+    // "we cannot set you up yet" is wrong for somebody whose site is already live.
+    const withState = await Promise.all(rows.map(async (r) => {
+      const [h] = await db.select({ domain: hostingAccounts.domain, isTemporary: hostingAccounts.isTemporary })
+        .from(hostingAccounts)
+        .where(and(
+          eq(hostingAccounts.accountId, c.user.accountId),
+          eq(hostingAccounts.subscriptionId, r.id),
+        )).limit(1);
+      return { ...r, onHoldingAddress: !!h?.isTemporary, holdingDomain: h?.isTemporary ? h.domain : null };
+    }));
+    return { awaiting: withState };
   });
 
   // ---- Their own details ----------------------------------------------------
