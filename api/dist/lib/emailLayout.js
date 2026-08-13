@@ -15,8 +15,12 @@ export function renderEmail(brand, content) {
     const accent = /^#?[0-9a-f]{6}$/i.test(brand.accent.trim()) ? brand.accent.trim() : '#6366f1';
     const ink = inkOn(accent);
     const body = fontStack(brand.fontBody);
+    // A square is only right for a square mark. A wordmark keeps its proportions and
+    // the cell widens to suit, rather than the mark being crushed to fit the cell.
+    const lw = brand.logoWidth || 44;
+    const lh = brand.logoHeight || 44;
     const logo = brand.logoUrl
-        ? `<img src="${esc(brand.logoUrl)}" width="44" height="44" alt="${esc(brand.name)}" style="display:block;border:0;border-radius:8px;">`
+        ? `<img src="${esc(brand.logoUrl)}" width="${lw}" height="${lh}" alt="${esc(brand.name)}" style="display:block;border:0;max-width:100%;height:auto;">`
         : `<div style="width:44px;height:44px;border-radius:8px;background:${accent};color:${ink};font:700 20px/44px ${body};text-align:center;">${esc(brand.name.charAt(0).toUpperCase())}</div>`;
     const facts = (content.facts ?? []).map(([k, v]) => `
         <tr>
@@ -38,7 +42,7 @@ export function renderEmail(brand, content) {
       <tr><td style="height:5px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>
       <tr><td style="padding:24px 28px 8px;">
         <table role="presentation" cellpadding="0" cellspacing="0"><tr>
-          <td width="44" style="vertical-align:middle;">${logo}</td>
+          <td width="${brand.logoUrl ? lw : 44}" style="vertical-align:middle;">${logo}</td>
           <td style="padding-left:12px;vertical-align:middle;font:700 16px/1.2 ${body};color:#0f172a;">${esc(brand.name)}</td>
         </tr></table>
       </td></tr>

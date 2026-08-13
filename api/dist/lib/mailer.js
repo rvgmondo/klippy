@@ -122,6 +122,41 @@ export function appUrl() {
  * The logo has to be an absolute URL: an email is read outside the app, so a
  * relative path resolves against the mail client and shows nothing.
  */
+/**
+ * How big to draw a logo in an email, from the file's real proportions.
+ *
+ * Targets a 40px height, which sits comfortably beside the business name, and caps
+ * the width at 190px so a very wide wordmark cannot push the header card out of
+ * shape. Falls back to a square when the file is missing or unreadable, which is
+ * the same size the letter-placeholder uses, so the layout does not jump.
+ */
+async function logoDisplaySize(storedName) {
+    const FALLBACK = { width: 44, height: 44 };
+    if (!storedName)
+        return FALLBACK;
+    try {
+        const { readFile } = await import('node:fs/promises');
+        const path = await import('node:path');
+        const { checkImage } = await import('./imageGuard.js');
+        const dir = process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), '../data/uploads');
+        const bytes = await readFile(path.join(dir, storedName));
+        const info = checkImage(bytes);
+        if (!info.ok || !info.width || !info.height)
+            return FALLBACK;
+        const TARGET_H = 40;
+        const MAX_W = 190;
+        let h = TARGET_H;
+        let w = Math.round((info.width / info.height) * h);
+        if (w > MAX_W) {
+            w = MAX_W;
+            h = Math.round((info.height / info.width) * w);
+        }
+        return { width: Math.max(1, w), height: Math.max(1, h) };
+    }
+    catch {
+        return FALLBACK;
+    }
+}
 export async function emailBrandFor(accountId, businessId) {
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
     const [business] = businessId
@@ -137,10 +172,18 @@ export async function emailBrandFor(accountId, businessId) {
         : account?.logoPath && accToken
             ? `${base}/api/v1/public/logo/account/${account.id}?t=${accToken}`
             : null;
+    // Measure the actual file so the email can state honest dimensions. A logo that
+    // is not there, or unreadable, falls back to the square placeholder rather than
+    // blocking the send.
+    // Whichever logo the url above actually points at.
+    const logoPath = business?.logoPath ?? account?.logoPath ?? null;
+    const { width: logoWidth, height: logoHeight } = await logoDisplaySize(logoPath);
     return {
         name: business?.brandName || business?.name || account?.brandName || 'Klippy',
         accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
         logoUrl,
+        logoWidth,
+        logoHeight,
         fontBody: business?.fontBody ?? null,
         address: business?.bizAddress ?? account?.bizAddress ?? null,
         footerNote: business?.invoiceFooter ?? account?.invoiceFooter ?? null,
