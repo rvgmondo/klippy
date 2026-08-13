@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { PortalAccessModal } from './PortalAccessModal';
+import { NewClientModal } from './NewClientModal';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
 import { BusinessSwitcher, type BusinessSelection } from './BusinessSwitcher';
@@ -228,9 +229,14 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
   const deliveryRoots = roots.filter((f) => (f.pillar ?? 'delivery') !== 'operations');
   const opsRoots = roots.filter((f) => f.pillar === 'operations');
 
+  // A client gets the full form, because the details asked for there are the ones
+  // that make invoicing and the portal work and are a nuisance to add later. An
+  // internal area is just a folder, so it stays a one-line prompt.
+  const [addingClient, setAddingClient] = useState<'delivery' | 'operations' | null>(null);
+
   function addTop(pillar: 'delivery' | 'operations') {
-    const what = pillar === 'operations' ? 'internal area' : (folderLabelSingular ?? 'folder');
-    const name = window.prompt(`New ${what} name in ${business.name}`);
+    if (pillar === 'delivery') { setAddingClient('delivery'); return; }
+    const name = window.prompt(`New internal area name in ${business.name}`);
     if (name?.trim()) createFolder.mutate({ name: name.trim(), parentId: null, businessId: business.id, pillar });
   }
 
@@ -280,6 +286,17 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
               selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
           </div>
         </>
+      )}
+
+      {addingClient && (
+        <NewClientModal
+          businessId={business.id}
+          businessName={business.name}
+          pillar={addingClient}
+          label={folderLabelSingular ?? 'Client'}
+          onClose={() => setAddingClient(null)}
+          onCreated={() => setAddingClient(null)}
+        />
       )}
     </div>
   );

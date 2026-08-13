@@ -609,6 +609,15 @@ export const documents = mysqlTable('documents', {
     // on the document rather than in a side table because it IS a fact about the
     // quote, and the date they agreed is the thing you need when the work is
     // disputed months later.
+    /**
+     * When this invoice's recurring lines were turned into subscriptions.
+     *
+     * The idempotency guard, and it lives here rather than on the lines because
+     * editing a document DELETES and re-inserts every line. A marker on the line
+     * would be wiped by an ordinary edit, and the next payment would start a second
+     * set of subscriptions for the same sale.
+     */
+    subscriptionsStartedAt: datetime('subscriptions_started_at'),
     decision: mysqlEnum('decision', ['accepted', 'declined']),
     decisionAt: datetime('decision_at'),
     decisionBy: varchar('decision_by', { length: 150 }),
@@ -664,6 +673,31 @@ export const documentLines = mysqlTable('document_lines', {
     quantity: decimal('quantity', { precision: 10, scale: 2 }).default('1').notNull(),
     unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).default('0').notNull(),
     amount: decimal('amount', { precision: 12, scale: 2 }).default('0').notNull(),
+    /**
+     * The offering this line is selling, when it is one.
+     *
+     * Free text was fine while an invoice was only a bill. It is not fine now that
+     * selling something can START something: a line reading "Monthly hosting" told
+     * Klippy nothing, so adding hosting to an invoice billed the client once and set
+     * up no subscription, no renewal and no cPanel account.
+     */
+    offeringId: int('offering_id', { unsigned: true }),
+    /**
+     * Bill this again every N months, so a recurring thing sold on an invoice
+     * actually recurs. Null is a one-off line, which is most of them. Copied from
+     * the offering when it is picked, but overridable, because the same hosting
+     * package gets sold monthly to one client and annually to another.
+     */
+    recurringMonths: int('recurring_months', { unsigned: true }),
+    /**
+     * The subscription this line started once the invoice was paid.
+     *
+     * The idempotency marker, and the reason it lives on the LINE rather than being
+     * inferred from client plus offering: a hosting client can legitimately buy the
+     * same package twice for two different sites, and a rule of "they already have
+     * one of these" would silently refuse the second sale.
+     */
+    startedSubscriptionId: int('started_subscription_id', { unsigned: true }),
     position: int('position', { unsigned: true }).default(0).notNull(),
 }, (t) => [
     index('idx_doclines_account_doc').on(t.accountId, t.documentId, t.position),

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard , Download } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
+import { Modal } from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { loadFont } from '../lib/fonts';
 
@@ -15,7 +16,13 @@ interface DocSummary {
   id: number; type: DocType; number: string; clientName: string;
   issueDate: string; dueDate: string | null; status: Status; currency: string; total: string;
 }
-interface Line { description: string; quantity: number; unitPrice: number }
+interface Line {
+  description: string; quantity: number; unitPrice: number;
+  /** What is being sold, when it comes from the catalogue. */
+  offeringId?: number | null;
+  /** Bills again every N months. Null or absent is a one-off. */
+  recurringMonths?: number | null;
+}
 type DiscountType = 'none' | 'percent' | 'amount';
 interface FullDoc {
   document: DocSummary & {
@@ -195,6 +202,12 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   const [discountValue, setDiscountValue] = useState(0);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, unitPrice: 0 }]);
+  const offeringsQ = useQuery({
+    queryKey: ['offerings', businessId],
+    queryFn: () => apiGet<{ offerings: { id: number; name: string; price: string; recurring: boolean; active: boolean }[] }>(
+      businessId ? `/offerings?businessId=${businessId}` : '/offerings'),
+  });
+  const offeringList = (offeringsQ.data?.offerings ?? []).filter((o) => o.active);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(isNew);
 
@@ -251,7 +264,10 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     setIssueDate(d.issueDate); setDueDate(d.dueDate ?? ''); setTaxRate(Number(d.taxRate));
     setDiscountType(d.discountType ?? 'none'); setDiscountValue(Number(d.discountValue ?? 0));
     setNotes(d.notes ?? '');
-    setLines(existing.data.lines.map((l) => ({ description: l.description, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice) })));
+    setLines(existing.data.lines.map((l) => ({
+      description: l.description, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice),
+      offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
+    })));
     setReady(true);
   }
 
@@ -269,7 +285,13 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         issueDate, dueDate: dueDate || null,
         taxRate, discountType, discountValue: Number(discountValue) || 0, notes: notes.trim() || null,
         ...(isNew && businessId ? { businessId } : {}),
-        lines: lines.filter((l) => l.description.trim()).map((l) => ({ description: l.description.trim(), quantity: Number(l.quantity) || 0, unitPrice: Number(l.unitPrice) || 0 })),
+        lines: lines.filter((l) => l.description.trim()).map((l) => ({
+          description: l.description.trim(),
+          quantity: Number(l.quantity) || 0,
+          unitPrice: Number(l.unitPrice) || 0,
+          offeringId: l.offeringId ?? null,
+          recurringMonths: l.offeringId ? (l.recurringMonths ?? null) : null,
+        })),
       };
       return isNew ? apiPost('/documents', body) : apiPut(`/documents/${id}`, body);
     },
@@ -279,12 +301,29 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
 
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
 
+  /**
+   * Has anything been typed that would be lost?
+   *
+   * Ruben lost a whole invoice to one click outside the dialog. A confirm on every
+   * close would be nagging, and no confirm at all costs somebody ten minutes of
+   * work, so it asks only when there is something to lose.
+   */
+  const hasContent = Boolean(
+    clientName.trim() || clientEmail.trim() || clientAddress.trim() || clientVat.trim()
+    || notes.trim() || folderId
+    || lines.some((l) => l.description.trim() || Number(l.quantity) !== 1 || Number(l.unitPrice) !== 0),
+  );
+  const confirmClose = () => {
+    if (!hasContent) return true;
+    return window.confirm('Close without saving? Anything you have entered on this document will be lost.');
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-center overflow-y-auto bg-black/60 p-4" onClick={onClose}>
-      <div className="my-auto w-full max-w-2xl rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} size="lg" confirmClose={confirmClose} labelledBy="doc-editor-title">
+      <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
+          <h2 id="doc-editor-title" className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
+          <button onClick={() => { if (confirmClose()) onClose(); }} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -363,17 +402,66 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
             <span className="col-span-6">Description</span><span className="col-span-2 text-right">Qty</span>
             <span className="col-span-3 text-right">Unit price</span><span className="col-span-1"></span>
           </div>
-          {lines.map((l, i) => (
-            <div key={i} className="mb-2 grid grid-cols-12 gap-2">
-              <input className={field + ' col-span-6'} placeholder="Item or service" value={l.description}
-                onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, description: e.target.value } : x))} />
-              <input type="number" className={field + ' col-span-2 text-right'} value={l.quantity}
-                onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, quantity: Number(e.target.value) } : x))} />
-              <input type="number" className={field + ' col-span-3 text-right'} value={l.unitPrice}
-                onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, unitPrice: Number(e.target.value) } : x))} />
-              <button onClick={() => setLines(lines.filter((_, j) => j !== i))} className="col-span-1 grid place-items-center text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
-            </div>
-          ))}
+          {lines.map((l, i) => {
+            const set = (patch: Partial<Line>) =>
+              setLines(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+            return (
+              <div key={i} className="mb-2">
+                <div className="grid grid-cols-12 gap-2">
+                  <input className={field + ' col-span-6'} placeholder="Item or service" value={l.description}
+                    onChange={(e) => set({ description: e.target.value })} />
+                  <input type="number" className={field + ' col-span-2 text-right'} value={l.quantity}
+                    onChange={(e) => set({ quantity: Number(e.target.value) })} />
+                  <input type="number" className={field + ' col-span-3 text-right'} value={l.unitPrice}
+                    onChange={(e) => set({ unitPrice: Number(e.target.value) })} />
+                  <button onClick={() => setLines(lines.filter((_, j) => j !== i))} className="col-span-1 grid place-items-center text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                </div>
+
+                {/* Pick from the catalogue instead of typing, and the line knows what
+                    it is selling. That is what lets a recurring thing on an invoice
+                    actually start a subscription when the invoice is paid. */}
+                <div className="mt-1 grid grid-cols-12 gap-2">
+                  <select className={field + ' col-span-6 text-xs'} value={l.offeringId ?? ''}
+                    onChange={(e) => {
+                      const id = e.target.value ? Number(e.target.value) : null;
+                      const o = offeringList.find((x) => x.id === id);
+                      if (!o) { set({ offeringId: null, recurringMonths: null }); return; }
+                      set({
+                        offeringId: o.id,
+                        description: l.description.trim() || o.name,
+                        unitPrice: Number(o.price) || l.unitPrice,
+                        // Recurring offerings default to monthly, which is the common
+                        // case; anything sold by the year is changed on the next control.
+                        recurringMonths: o.recurring ? (l.recurringMonths ?? 1) : null,
+                      });
+                    }}>
+                    <option value="">Not from the catalogue</option>
+                    {offeringList.map((o) => (
+                      <option key={o.id} value={o.id}>{o.name}{o.recurring ? ' (recurring)' : ''}</option>
+                    ))}
+                  </select>
+
+                  <select className={field + ' col-span-5 text-xs'}
+                    value={l.recurringMonths ?? ''}
+                    disabled={!l.offeringId}
+                    onChange={(e) => set({ recurringMonths: e.target.value ? Number(e.target.value) : null })}>
+                    <option value="">One-off, does not repeat</option>
+                    <option value={1}>Bills every month</option>
+                    <option value={3}>Bills every quarter</option>
+                    <option value={6}>Bills every 6 months</option>
+                    <option value={12}>Bills every year</option>
+                  </select>
+                </div>
+
+                {l.recurringMonths ? (
+                  <p className="mt-1 text-[11px] text-violet-300">
+                    Paying this invoice starts a subscription. The next bill goes out in{' '}
+                    {l.recurringMonths === 1 ? 'a month' : `${l.recurringMonths} months`}, not today.
+                  </p>
+                ) : null}
+              </div>
+            );
+          })}
           <button onClick={() => setLines([...lines, { description: '', quantity: 1, unitPrice: 0 }])}
             className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
             <Plus size={13} /> Add line
@@ -396,10 +484,11 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
-          <button onClick={onClose} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+          <button onClick={() => { if (confirmClose()) onClose(); }}
+            className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -437,10 +526,10 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
   const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} size="sm" labelledBy="payments-title">
+      <div className="p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-slate-100">Payments for {doc.number}</h2>
+          <h2 id="payments-title" className="font-display text-lg font-semibold text-slate-100">Payments for {doc.number}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
@@ -497,7 +586,7 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
         )}
         {credit.error && <p className="mt-2 text-[11px] text-red-400">{(credit.error as Error).message}</p>}
       </div>
-    </div>
+    </Modal>
   );
 }
 

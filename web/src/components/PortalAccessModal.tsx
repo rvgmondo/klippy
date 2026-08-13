@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api';
+import { Modal } from './Modal';
 
 interface PortalUser {
   id: number; email: string; name: string | null;
@@ -72,10 +73,10 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
   const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-[var(--accent)]';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-xl border border-slate-800 bg-slate-900 p-5" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} size="md" labelledBy="portal-access-title">
+      <div className="p-5">
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-100">Portal access</h2>
+          <h2 id="portal-access-title" className="text-base font-semibold text-slate-100">Portal access</h2>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300"><X size={16} /></button>
         </div>
         <p className="mb-4 text-xs text-slate-500">
@@ -140,6 +141,6 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
           </button>
         </form>
       </div>
-    </div>
+    </Modal>
   );
 }

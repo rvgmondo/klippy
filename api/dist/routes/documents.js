@@ -18,6 +18,10 @@ const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
     quantity: z.number().nonnegative().max(1_000_000),
     unitPrice: z.number().max(100_000_000).min(-100_000_000),
+    // What is being sold, and whether it repeats. Both optional: most lines are a
+    // one-off bit of text and stay that way.
+    offeringId: z.number().int().positive().nullable().optional(),
+    recurringMonths: z.number().int().min(1).max(60).nullable().optional(),
 });
 const docType = z.enum(['quote', 'invoice']);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -338,6 +342,7 @@ export async function documentRoutes(app) {
                 await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
                     documentId: newId, description: l.description, quantity: money(l.quantity),
                     unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+                    offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
                 })));
             }
             return newId;
@@ -380,6 +385,7 @@ export async function documentRoutes(app) {
                 await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
                     documentId: id, description: l.description, quantity: money(l.quantity),
                     unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+                    offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
                 })));
             }
         });

@@ -27,6 +27,10 @@ const updateSchema = z.object({
   isArchived: z.boolean().optional(),
   hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
   billingEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
+  // The client's own billing details. Editable here as well as by the client in
+  // their portal, since whoever knows the right answer should be able to fix it.
+  billingVatNumber: z.string().trim().max(60).nullable().optional(),
+  billingAddress: z.string().trim().max(500).nullable().optional(),
   pillar: z.enum(['delivery','operations']).optional(),
 });
 

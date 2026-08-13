@@ -2,7 +2,7 @@ import nodemailer from 'nodemailer';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { businessEmail, businesses, accounts } from '../db/schema.js';
-import { decryptSecret } from './secretbox.js';
+import { decryptSecret, signLogoToken } from './secretbox.js';
 import type { EmailBrand } from './emailLayout.js';
 
 /**
@@ -150,9 +150,15 @@ export async function emailBrandFor(accountId: number, businessId: number | null
     ? await db.select().from(businesses).where(eq(businesses.id, businessId)).limit(1)
     : [undefined];
   const base = appUrl();
-  const logoUrl = business?.logoPath
-    ? `${base}/api/v1/businesses/${business.id}/logo`
-    : account?.logoPath ? `${base}/api/v1/account/logo` : null;
+  // A signed PUBLIC url. The authenticated one returns 401 to a mail client, which
+  // is why every branded email showed a broken image instead of a letterhead.
+  const bizToken = business?.logoPath ? signLogoToken('business', business.id) : null;
+  const accToken = !business?.logoPath && account?.logoPath ? signLogoToken('account', account.id) : null;
+  const logoUrl = business?.logoPath && bizToken
+    ? `${base}/api/v1/public/logo/business/${business.id}?t=${bizToken}`
+    : account?.logoPath && accToken
+      ? `${base}/api/v1/public/logo/account/${account.id}?t=${accToken}`
+      : null;
   return {
     name: business?.brandName || business?.name || account?.brandName || 'Klippy',
     accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',

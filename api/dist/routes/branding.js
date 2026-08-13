@@ -11,6 +11,7 @@ import { tenantWhere } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { assertBusinessAccess, canSeeBusiness } from '../lib/access.js';
 import { checkImage } from '../lib/imageGuard.js';
+import { verifyLogoToken } from '../lib/secretbox.js';
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB is plenty for a logo
 const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/svg+xml']);
 const uploadDir = () => process.env.UPLOAD_DIR ?? path.resolve(process.cwd(), '../data/uploads');
@@ -77,6 +78,32 @@ async function sendImage(reply, stored) {
     reply.header('Content-Type', type);
     reply.header('Cache-Control', 'private, max-age=300');
     return reply.send(createReadStream(full));
+}
+/**
+ * The one branding route that cannot sit behind a session: the logo an email
+ * client fetches. Registered as its own plugin so the auth hook below cannot
+ * accidentally cover it, which is exactly how it ended up returning 401 to Gmail
+ * and showing every recipient a broken image.
+ */
+export async function publicBrandingRoutes(app) {
+    app.get('/api/v1/public/logo/:kind/:id', async (req, reply) => {
+        const { kind, id } = req.params;
+        const token = req.query.t ?? '';
+        const numId = Number(id);
+        if ((kind !== 'business' && kind !== 'account') || !numId) {
+            return reply.code(404).send({ error: 'Not found.' });
+        }
+        if (!verifyLogoToken(kind, numId, token))
+            return reply.code(404).send({ error: 'Not found.' });
+        const stored = kind === 'business'
+            ? (await db.select({ p: businesses.logoPath }).from(businesses)
+                .where(eq(businesses.id, numId)).limit(1))[0]?.p
+            : (await db.select({ p: accounts.logoPath }).from(accounts)
+                .where(eq(accounts.id, numId)).limit(1))[0]?.p;
+        // Cached hard: a logo in an email is fetched by every recipient's mail proxy.
+        reply.header('Cache-Control', 'public, max-age=86400');
+        return sendImage(reply, stored ?? null);
+    });
 }
 export async function brandingRoutes(app) {
     app.addHook('preHandler', app.requireAuth);

@@ -1,7 +1,8 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, events, folders, hostingAccounts, hostingSettings, offerings, subscriptions, } from '../db/schema.js';
+import { documents, documentLines, events, folders, hostingAccounts, hostingSettings, offerings, subscriptions, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
+import { addMonths } from './billing.js';
 import { decryptSecret } from './secretbox.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
@@ -55,18 +56,84 @@ export async function onInvoicePaid(accountId, documentId) {
             id: documents.id, businessId: documents.businessId, number: documents.number,
             subscriptionId: documents.subscriptionId, clientEmail: documents.clientEmail,
             clientName: documents.clientName, folderId: documents.folderId,
+            subscriptionsStartedAt: documents.subscriptionsStartedAt,
         }).from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, documentId))).limit(1);
-        if (!doc?.subscriptionId)
+        if (!doc)
             return;
-        await provisionSubscription(accountId, doc.subscriptionId, doc.number);
-        // And if their site was switched off for non-payment, put it back now rather
-        // than at tomorrow's sweep.
-        await restoreIfSuspended(accountId, doc.subscriptionId);
+        // An invoice raised BY a subscription: carry on with that one.
+        if (doc.subscriptionId) {
+            await provisionSubscription(accountId, doc.subscriptionId, doc.number);
+            // And if their site was switched off for non-payment, put it back now rather
+            // than at tomorrow's sweep.
+            await restoreIfSuspended(accountId, doc.subscriptionId);
+            return;
+        }
+        // An ordinary invoice that happens to sell something recurring. Selling a
+        // monthly hosting package on a normal invoice used to bill once and start
+        // nothing: no renewal, no cPanel account, no record that the client is on a
+        // plan. Paying it now starts the thing that was sold.
+        await startSubscriptionsFromLines(accountId, doc);
     }
     catch {
         // Provisioning must never undo a payment. A failure is recorded by the code
         // below; anything escaping that is swallowed here on purpose.
+    }
+}
+/**
+ * Turn the recurring lines of a paid invoice into subscriptions.
+ *
+ * Guarded once per document rather than once per line, because editing a document
+ * deletes and re-inserts its lines; a per-line marker would be wiped by an ordinary
+ * edit and the next payment would start everything a second time.
+ *
+ * A failure on one line must not stop the others: three things sold on one invoice
+ * should not all fail because the middle one has a bad offering.
+ */
+async function startSubscriptionsFromLines(accountId, doc) {
+    if (!doc.folderId || !doc.businessId)
+        return;
+    const lines = await db.select({
+        id: documentLines.id, offeringId: documentLines.offeringId,
+        recurringMonths: documentLines.recurringMonths, description: documentLines.description,
+    }).from(documentLines)
+        .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, doc.id)));
+    const recurring = lines.filter((l) => l.offeringId && l.recurringMonths);
+    if (!recurring.length)
+        return;
+    // Claim the document first. Conditional on it still being unclaimed, so two
+    // payments landing together cannot both start the same subscriptions.
+    const claim = await db.update(documents).set({ subscriptionsStartedAt: new Date() })
+        .where(and(tenantWhere(documents, accountId, eq(documents.id, doc.id)), isNull(documents.subscriptionsStartedAt)));
+    if (!claim[0].affectedRows)
+        return;
+    const today = new Date().toISOString().slice(0, 10);
+    for (const line of recurring) {
+        try {
+            const months = line.recurringMonths;
+            const ins = await db.insert(subscriptions).values(withTenant(accountId, {
+                businessId: doc.businessId,
+                offeringId: line.offeringId,
+                folderId: doc.folderId,
+                status: 'active',
+                intervalMonths: months,
+                startedOn: today,
+                // The first period is paid for by THIS invoice, so the next bill is one
+                // period out. Billing again today would charge them twice for the same month.
+                nextBillDate: addMonths(today, months),
+                lastBilledAt: new Date(),
+            }));
+            const subId = Number(ins[0].insertId);
+            await db.update(documentLines).set({ startedSubscriptionId: subId })
+                .where(tenantWhere(documentLines, accountId, eq(documentLines.id, line.id)));
+            await note(accountId, doc.businessId, 'created', `${doc.number} started a ${months === 1 ? 'monthly' : `${months}-monthly`} subscription for ${line.description}.`, { subscriptionId: subId, documentId: doc.id });
+            // And if that offering sets something up, set it up. This is what makes
+            // "add hosting to an invoice" actually produce hosting.
+            await provisionSubscription(accountId, subId, doc.number).catch(() => null);
+        }
+        catch {
+            await note(accountId, doc.businessId, 'failed', `Could not start a subscription for "${line.description}" from ${doc.number}. Start it by hand from Offerings.`, { documentId: doc.id });
+        }
     }
 }
 export async function provisionSubscription(accountId, subscriptionId, invoiceNumber = '') {

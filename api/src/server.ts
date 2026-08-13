@@ -23,7 +23,7 @@ import { userRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { workspaceRoutes } from './routes/workspaces.js';
-import { brandingRoutes } from './routes/branding.js';
+import { brandingRoutes, publicBrandingRoutes } from './routes/branding.js';
 import { storageRoutes } from './routes/storage.js';
 import { noteRoutes } from './routes/notes.js';
 import { reportRoutes } from './routes/reports.js';
@@ -127,6 +127,7 @@ export function buildServer() {
   app.register(searchRoutes);
   app.register(tokenRoutes);
   app.register(workspaceRoutes);
+  app.register(publicBrandingRoutes);
   app.register(brandingRoutes);
   app.register(storageRoutes);
   app.register(noteRoutes);

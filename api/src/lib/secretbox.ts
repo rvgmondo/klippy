@@ -61,3 +61,26 @@ export function verifyPayToken(docId: number, token: string): boolean {
   if (!expected || !token || token.length !== expected.length) return false;
   return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
 }
+
+/**
+ * The same idea for a logo in an email.
+ *
+ * An email client fetches images with no cookie, so a logo URL behind the session
+ * simply comes back 401 and the recipient sees a broken image. A logo is not a
+ * secret, it is printed on every invoice, but the URL is still signed so the
+ * endpoint cannot be walked to enumerate which businesses exist.
+ *
+ * No expiry on purpose: emails outlive tokens, and a two-year-old invoice should
+ * still render its letterhead.
+ */
+export function signLogoToken(kind: 'business' | 'account', id: number): string | null {
+  const raw = process.env.PAYMENTS_SECRET;
+  if (!raw || raw.length < 16) return null;
+  return createHmac('sha256', raw).update(`logo:${kind}:${id}`).digest('hex').slice(0, 32);
+}
+
+export function verifyLogoToken(kind: 'business' | 'account', id: number, token: string): boolean {
+  const expected = signLogoToken(kind, id);
+  if (!expected || !token || token.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+}

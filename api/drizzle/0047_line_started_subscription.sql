@@ -1,0 +1,1 @@
+ALTER TABLE `document_lines` ADD `started_subscription_id` int unsigned;
