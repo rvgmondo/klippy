@@ -4,7 +4,7 @@ import {
   documents, documentLines, events, folders, hostingAccounts, hostingSettings, offerings,
   subscriptions,
 } from '../db/schema.js';
-import { tenantWhere, withTenant } from './tenant.js';
+import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
 import { addMonths } from './billing.js';
 import { decryptSecret } from './secretbox.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
@@ -262,8 +262,12 @@ export async function provisionSubscription(
         whmPackage: offering.whmPackage ?? null, status: 'pending' as const,
         isTemporary, tempDomain: holding,
       }));
-    } catch {
-      return { outcome: 'skipped', detail: 'This subscription already has a hosting account.' };
+    } catch (err) {
+      if (isDuplicateKey(err)) {
+        return { outcome: 'skipped', detail: 'This subscription already has a hosting account.' };
+      }
+      return done('failed', `Could not claim this subscription, so nothing was created: ${
+        err instanceof Error ? err.message : String(err)}`);
     }
   }
 

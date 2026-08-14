@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNotNull, lt, lte } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals, events } from '../db/schema.js';
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
@@ -157,8 +157,23 @@ export async function runSubscriptionBilling(): Promise<string> {
         lastBilledAt: new Date(),
       }).where(eq(subscriptions.id, sub.id));
       billed++;
-    } catch {
+    } catch (err) {
+      // A subscription that fails to bill used to increment a counter and lose the
+      // reason entirely: the morning summary said "1 failed" and there was nowhere
+      // to find out why. Recorded where the rest of the money trail is read.
       failed++;
+      await db.insert(events).values({
+        accountId: sub.accountId, businessId: sub.businessId, name: 'billing.failed',
+        payload: {
+          subscriptionId: sub.id, offeringId: sub.offeringId, folderId: sub.folderId,
+          detail: err instanceof Error ? err.message : String(err),
+        },
+        results: [{
+          handler: 'bill-subscriptions',
+          outcome: `Could not raise this cycle's invoice: ${err instanceof Error ? err.message : String(err)}`,
+          ok: false,
+        }],
+      }).catch(() => { /* the run must finish even if the note cannot be written */ });
     }
   }
   return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}`;

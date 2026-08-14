@@ -3,7 +3,7 @@ import { db } from '../db/client.js';
 import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
 import { onInvoicePaid } from './hosting.js';
-import { tenantWhere, withTenant } from './tenant.js';
+import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
 import { chargeToken } from './payfast.js';
 async function note(accountId, businessId, outcome, detail, extra) {
@@ -50,8 +50,14 @@ export async function attemptAutoDebit(r) {
             status: 'pending', amount: r.amount.toFixed(2),
         }));
     }
-    catch {
-        return { outcome: 'skipped', detail: 'Already attempted for this invoice.' };
+    catch (err) {
+        if (isDuplicateKey(err)) {
+            return { outcome: 'skipped', detail: 'Already attempted for this invoice.' };
+        }
+        // Anything else means the claim never landed, so nothing was charged and a
+        // later run should try again. Saying "already attempted" here would send
+        // somebody hunting for a charge that was never made.
+        return done('failed', `Could not record the attempt, so nothing was charged: ${err instanceof Error ? err.message : String(err)}`);
     }
     const finish = async (status, detail, pfPaymentId) => {
         await db.update(autoDebitAttempts).set({ status, detail, pfPaymentId: pfPaymentId ?? null })

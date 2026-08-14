@@ -14,6 +14,7 @@ import { credsFor } from '../lib/paymentSettings.js';
 import { buildCheckout } from '../lib/payfast.js';
 import { hostingSettingsFor, provisionSubscription, switchToRealDomain, cleanDomain } from '../lib/hosting.js';
 import { balanceOf, balancesFor } from '../lib/balances.js';
+import { isDuplicateKey } from '../lib/tenant.js';
 import {
   PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin,
   portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword,
@@ -646,8 +647,11 @@ export async function portalAdminRoutes(app: FastifyInstance) {
         accountId, businessId: client.businessId, folderId: id,
         email, name: parsed.data.name ?? null,
       });
-    } catch {
-      return reply.code(409).send({ error: 'That address already has access to this client.' });
+    } catch (err) {
+      if (isDuplicateKey(err)) {
+        return reply.code(409).send({ error: 'That address already has access to this client.' });
+      }
+      return reply.code(500).send({ error: 'Could not add that person. Try again.' });
     }
     if (parsed.data.invite !== false) await sendInvite(email);
     return reply.code(201).send({ ok: true });
