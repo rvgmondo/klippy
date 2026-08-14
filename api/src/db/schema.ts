@@ -694,6 +694,12 @@ export const documents = mysqlTable('documents', {
   // businessId is nullable; MySQL allows multiple NULLs here, so legacy business-less
   // documents do not collide.
   uniqueIndex('uniq_doc_number').on(t.accountId, t.businessId, t.type, t.seq),
+  // The portal reads every document for ONE client, and the hosting flow reads
+  // every document for ONE subscription. Neither had an index that fit: both fell
+  // back to the account prefix and scanned the rest, which is fine at a hundred
+  // documents and not at ten thousand.
+  index('idx_docs_account_folder').on(t.accountId, t.folderId),
+  index('idx_docs_account_subscription').on(t.accountId, t.subscriptionId),
   index('idx_docs_account_type').on(t.accountId, t.type, t.createdAt),
 ]);
 

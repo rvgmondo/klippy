@@ -156,10 +156,3 @@ export async function attemptAutoDebit(r: DebitRequest): Promise<{ outcome: Debi
   return done('charged', `Charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`, { pfPaymentId: res.pfPaymentId });
 }
 
-/** Recent auto-debit attempts for an account, newest first. */
-export async function recentAttempts(accountId: number, limit = 20) {
-  return db.select().from(autoDebitAttempts)
-    .where(and(eq(autoDebitAttempts.accountId, accountId)))
-    .orderBy(autoDebitAttempts.id)
-    .limit(limit);
-}

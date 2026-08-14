@@ -7,6 +7,7 @@ import { payLinkFor } from './paylink.js';
 import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { runHostingSuspensions } from './hosting.js';
+import { pruneLoginTokens } from './portalAuth.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -73,6 +74,10 @@ function renderDigest(name, today, overdue) {
 }
 export async function runDailyDigest() {
     const today = todayStr();
+    // Spent and expired portal sign-in links are rubbish after a week. Nothing ever
+    // deleted them, so the table only grew; hung off the digest because it already
+    // runs once a day and this is not worth a schedule of its own.
+    await pruneLoginTokens().catch(() => { });
     // One row per (person, workspace) so someone in two workspaces gets each.
     const recipients = await db.select({
         id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,

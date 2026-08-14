@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
  *  1. Redirect to checkout: build a signed set of fields and send the client to
  *     PayFast's process page. They pay, PayFast calls our notify URL (ITN).
  *  2. ITN (Instant Transaction Notification): PayFast POSTs the result to us. We
- *     verify it four ways before trusting it (signature, source, amount, and a
+ *     verify it three ways before trusting it (signature, amount, and a
  *     server-to-server confirmation), then mark the invoice paid.
  *
  * The signature scheme follows PayFast's own published Node example exactly:
@@ -15,9 +15,9 @@ import { createHash } from 'node:crypto';
  * MD5. Matching their encoding to the character is the whole game; a mismatch just
  * reads as "signature invalid" with no hint why.
  *
- * NOTE: This code is written to PayFast's documented spec but has NOT been run
- * against their sandbox in this environment. It ships disabled (paymentSettings
- * .enabled defaults false). Do a full sandbox payment before trusting it live.
+ * NOTE: written to PayFast's documented spec but NOT run against their sandbox
+ * from here. It ships disabled (paymentSettings.enabled defaults false). Do a full
+ * sandbox payment before trusting it live.
  */
 
 export interface PayfastCreds {
@@ -29,11 +29,6 @@ export interface PayfastCreds {
 
 export const processUrl = (sandbox: boolean) => `https://${sandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'}/eng/process`;
 export const validateUrl = (sandbox: boolean) => `https://${sandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'}/eng/query/validate`;
-
-/** PayFast's servers, for checking an ITN really came from them. */
-export const VALID_ITN_HOSTS = [
-  'www.payfast.co.za', 'sandbox.payfast.co.za', 'w1w.payfast.co.za', 'w2w.payfast.co.za',
-];
 
 /** urlencode a value the way PayFast expects (PHP urlencode: spaces become +). */
 function enc(v: string): string {
@@ -119,11 +114,6 @@ export async function validateItnWithServer(rawBody: string, sandbox: boolean): 
   }
 }
 
-export function isValidItnHost(host: string | undefined): boolean {
-  if (!host) return false;
-  return VALID_ITN_HOSTS.includes(host.toLowerCase());
-}
-
 /**
  * Signature for PayFast's server API, which is NOT the same rule as the checkout
  * above and is the usual reason an adhoc charge comes back rejected.
@@ -143,9 +133,6 @@ export function apiSignature(params: Record<string, string>, passphrase: string 
     .join('&');
   return createHash('md5').update(str).digest('hex');
 }
-
-export const ADHOC_UNTESTED =
-  'Auto-debit has never been run against PayFast from this install. Keep it in dry-run until one live charge has been seen to work.';
 
 /**
  * Charge a stored token: take money for a later subscription cycle without the

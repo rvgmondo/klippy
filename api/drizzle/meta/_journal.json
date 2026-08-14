@@ -344,6 +344,13 @@
       "when": 1786634140456,
       "tag": "0048_doc_subs_started",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "5",
+      "when": 1786686777213,
+      "tag": "0049_doc_lookup_indexes",
+      "breakpoints": true
     }
   ]
 }

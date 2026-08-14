@@ -1,10 +1,6 @@
 import { createHash } from 'node:crypto';
 export const processUrl = (sandbox) => `https://${sandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'}/eng/process`;
 export const validateUrl = (sandbox) => `https://${sandbox ? 'sandbox.payfast.co.za' : 'www.payfast.co.za'}/eng/query/validate`;
-/** PayFast's servers, for checking an ITN really came from them. */
-export const VALID_ITN_HOSTS = [
-    'www.payfast.co.za', 'sandbox.payfast.co.za', 'w1w.payfast.co.za', 'w2w.payfast.co.za',
-];
 /** urlencode a value the way PayFast expects (PHP urlencode: spaces become +). */
 function enc(v) {
     return encodeURIComponent(v.trim()).replace(/%20/g, '+');
@@ -78,11 +74,6 @@ export async function validateItnWithServer(rawBody, sandbox) {
         return false;
     }
 }
-export function isValidItnHost(host) {
-    if (!host)
-        return false;
-    return VALID_ITN_HOSTS.includes(host.toLowerCase());
-}
 /**
  * Signature for PayFast's server API, which is NOT the same rule as the checkout
  * above and is the usual reason an adhoc charge comes back rejected.
@@ -103,7 +94,6 @@ export function apiSignature(params, passphrase) {
         .join('&');
     return createHash('md5').update(str).digest('hex');
 }
-export const ADHOC_UNTESTED = 'Auto-debit has never been run against PayFast from this install. Keep it in dry-run until one live charge has been seen to work.';
 /**
  * Charge a stored token: take money for a later subscription cycle without the
  * client present. This is the highest-consequence call in Klippy, so read the

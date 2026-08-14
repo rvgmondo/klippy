@@ -5,6 +5,7 @@ import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
+import { balanceOf } from '../lib/balances.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
@@ -71,20 +72,6 @@ function computeTotals(
  * the correct way to reduce an issued invoice, since an invoice that has gone to a
  * client should not be edited after the fact.
  */
-async function balanceOf(accountId: number, docId: number, total: number) {
-  const payRows = await db.select({ amount: payments.amount }).from(payments)
-    .where(tenantWhere(payments, accountId, eq(payments.documentId, docId)));
-  const paid = payRows.reduce((s, p) => s + Number(p.amount), 0);
-  const creditRows = await db.select({ total: documents.total }).from(documents)
-    .where(tenantWhere(documents, accountId,
-      eq(documents.type, 'credit_note'),
-      eq(documents.sourceDocumentId, docId),
-      ne(documents.status, 'void'),
-    ));
-  const credited = creditRows.reduce((s, c) => s + Number(c.total), 0);
-  const round = (n: number) => Math.round(n * 100) / 100;
-  return { paid: round(paid), credited: round(credited), outstanding: round(total - paid - credited) };
-}
 
 // Numbering (prefix + where the count is) lives in lib/numbering.ts so every path
 // that issues a document follows the same rule.

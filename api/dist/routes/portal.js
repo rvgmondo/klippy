@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, offerings, } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
@@ -8,6 +8,7 @@ import { renderDocumentPdf } from '../lib/pdf.js';
 import { credsFor } from '../lib/paymentSettings.js';
 import { buildCheckout } from '../lib/payfast.js';
 import { hostingSettingsFor, provisionSubscription, switchToRealDomain, cleanDomain } from '../lib/hosting.js';
+import { balanceOf, balancesFor } from '../lib/balances.js';
 import { PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin, portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword, signPortalToken, signPreviewToken, normaliseEmail, } from '../lib/portalAuth.js';
 import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
@@ -24,16 +25,6 @@ async function ownerEmail(accountId) {
         .where(and(eq(memberships.accountId, accountId), eq(memberships.role, 'owner'), eq(memberships.isActive, true)))
         .limit(1);
     return row?.email ?? null;
-}
-async function balanceOf(accountId, docId, total) {
-    const payRows = await db.select({ amount: payments.amount }).from(payments)
-        .where(and(eq(payments.accountId, accountId), eq(payments.documentId, docId)));
-    const paid = payRows.reduce((s, p) => s + Number(p.amount), 0);
-    const creditRows = await db.select({ total: documents.total }).from(documents)
-        .where(and(eq(documents.accountId, accountId), eq(documents.type, 'credit_note'), eq(documents.sourceDocumentId, docId), ne(documents.status, 'void')));
-    const credited = creditRows.reduce((s, c) => s + Number(c.total), 0);
-    const round = (n) => Math.round(n * 100) / 100;
-    return { paid: round(paid), credited: round(credited), outstanding: round(total - paid - credited) };
 }
 export async function portalRoutes(app) {
     /** Resolve the caller, or answer 401. Used by everything past sign-in. */
@@ -192,12 +183,16 @@ export async function portalRoutes(app) {
             .orderBy(desc(documents.issueDate), desc(documents.id))
             .limit(300);
         // Outstanding per invoice, so the portal can show what is actually still owed
-        // rather than the face value of every invoice ever raised.
-        const withBalance = await Promise.all(rows.map(async (r) => {
-            if (r.type !== 'invoice' || r.status === 'void')
-                return { ...r, outstanding: 0 };
-            const b = await balanceOf(c.user.accountId, r.id, Number(r.total));
-            return { ...r, outstanding: b.outstanding };
+        // rather than the face value of every invoice ever raised. Batched: this used
+        // to run two queries per row, so a client with a hundred invoices paid for the
+        // page with two hundred round trips.
+        const billable = rows.filter((r) => r.type === 'invoice' && r.status !== 'void');
+        const balances = await balancesFor(c.user.accountId, billable);
+        const withBalance = rows.map((r) => ({
+            ...r,
+            outstanding: r.type === 'invoice' && r.status !== 'void'
+                ? (balances.get(r.id)?.outstanding ?? Number(r.total))
+                : 0,
         }));
         const owed = withBalance.reduce((s, r) => s + Math.max(0, r.outstanding), 0);
         return { documents: withBalance, totalOutstanding: money(owed) };
@@ -386,14 +381,23 @@ export async function portalRoutes(app) {
         const cpanel = settings?.whmHost ? `https://${settings.whmHost}:2083` : null;
         // What they owe on the hosting itself, which is what a suspended client needs
         // to know: how much, and paying it brings the site back.
-        const withOwed = await Promise.all(rows.map(async (r) => {
-            const unpaid = await db.select({ id: documents.id, number: documents.number, total: documents.total })
-                .from(documents)
-                .where(and(mine(c), eq(documents.subscriptionId, r.subscriptionId), eq(documents.status, 'sent')));
+        // Every unpaid invoice across every one of their hosting subscriptions, in one
+        // query, then the balances in two more. Previously this was a query per
+        // subscription plus two per invoice underneath it.
+        const subIds = rows.map((r) => r.subscriptionId);
+        const unpaidAll = subIds.length
+            ? await db.select({
+                id: documents.id, number: documents.number, total: documents.total,
+                subscriptionId: documents.subscriptionId,
+            }).from(documents)
+                .where(and(mine(c), inArray(documents.subscriptionId, subIds), eq(documents.status, 'sent')))
+            : [];
+        const unpaidBalances = await balancesFor(c.user.accountId, unpaidAll);
+        const withOwed = rows.map((r) => {
+            const unpaid = unpaidAll.filter((u) => u.subscriptionId === r.subscriptionId);
             let owed = 0;
             for (const u of unpaid) {
-                const b = await balanceOf(c.user.accountId, u.id, Number(u.total));
-                owed += Math.max(0, b.outstanding);
+                owed += Math.max(0, unpaidBalances.get(u.id)?.outstanding ?? Number(u.total));
             }
             return {
                 ...r,
@@ -403,7 +407,7 @@ export async function portalRoutes(app) {
                 outstanding: money(owed),
                 unpaidInvoiceId: unpaid[0]?.id ?? null,
             };
-        }));
+        });
         return { hosting: withOwed, cpanelUrl: cpanel };
     });
     /**
@@ -470,12 +474,19 @@ export async function portalRoutes(app) {
             .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.folderId, c.user.folderId), eq(subscriptions.status, 'active'), eq(offerings.provisioning, 'cpanel'), isNull(subscriptions.domain)));
         // Whether they are already up on a holding address changes what we say to them:
         // "we cannot set you up yet" is wrong for somebody whose site is already live.
-        const withState = await Promise.all(rows.map(async (r) => {
-            const [h] = await db.select({ domain: hostingAccounts.domain, isTemporary: hostingAccounts.isTemporary })
-                .from(hostingAccounts)
-                .where(and(eq(hostingAccounts.accountId, c.user.accountId), eq(hostingAccounts.subscriptionId, r.id))).limit(1);
+        const ids = rows.map((r) => r.id);
+        const accounts = ids.length
+            ? await db.select({
+                subscriptionId: hostingAccounts.subscriptionId,
+                domain: hostingAccounts.domain, isTemporary: hostingAccounts.isTemporary,
+            }).from(hostingAccounts)
+                .where(and(eq(hostingAccounts.accountId, c.user.accountId), inArray(hostingAccounts.subscriptionId, ids)))
+            : [];
+        const bySub = new Map(accounts.map((a) => [a.subscriptionId, a]));
+        const withState = rows.map((r) => {
+            const h = bySub.get(r.id);
             return { ...r, onHoldingAddress: !!h?.isTemporary, holdingDomain: h?.isTemporary ? h.domain : null };
-        }));
+        });
         return { awaiting: withState };
     });
     // ---- Their own details ----------------------------------------------------

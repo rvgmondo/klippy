@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
@@ -99,12 +99,5 @@ export async function attemptAutoDebit(r) {
     }
     await finish('charged', `Charged ${r.amount.toFixed(2)}.`, res.pfPaymentId);
     return done('charged', `Charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`, { pfPaymentId: res.pfPaymentId });
-}
-/** Recent auto-debit attempts for an account, newest first. */
-export async function recentAttempts(accountId, limit = 20) {
-    return db.select().from(autoDebitAttempts)
-        .where(and(eq(autoDebitAttempts.accountId, accountId)))
-        .orderBy(autoDebitAttempts.id)
-        .limit(limit);
 }
 //# sourceMappingURL=autoDebit.js.map
