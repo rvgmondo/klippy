@@ -511,6 +511,9 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: ['documents'] });
     qc.invalidateQueries({ queryKey: ['collections'] });
+    // A statement is the same money seen another way; recording a payment behind
+    // an open statement used to leave it showing the old balance.
+    qc.invalidateQueries({ queryKey: ['statement'] });
   };
   const add = useMutation({
     mutationFn: () => apiPost(`/documents/${doc.id}/payments`, { amount: Number(amount), paidOn, method: method.trim() || null }),

@@ -46,7 +46,13 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });
   const deals = data?.deals ?? [];
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['deals'] }); };
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['deals'] });
+    // The follow-up strip is a different query over the same data. Without this a
+    // date you just set, or a deal you just won, keeps showing in the strip until
+    // the page is reloaded.
+    qc.invalidateQueries({ queryKey: ['follow-ups'] });
+  };
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
   const [adding, setAdding] = useState(false);
@@ -279,6 +285,30 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
       businessId ? `/contacts?businessId=${businessId}` : '/contacts'),
   });
 
+  /**
+   * Promote whoever is typed on this deal into a saved contact.
+   *
+   * Contacts were listable and not creatable, so the picker only ever offered
+   * people the migration happened to find. Saving from here is the natural moment:
+   * the name, email and company are already in front of you, and the deal is
+   * linked to the new record straight away rather than needing a second visit.
+   */
+  const qcp = useQueryClient();
+  const saveContact = useMutation({
+    mutationFn: () => apiPost<{ contact: Contact }>('/contacts', {
+      name: contactName.trim() || company.trim() || title.trim(),
+      email: contactEmail.trim() || null,
+      phone: contactPhone.trim() || null,
+      company: company.trim() || null,
+      ...(businessId ? { businessId } : {}),
+    }),
+    onSuccess: (r) => {
+      setContactId(r.contact.id);
+      qcp.invalidateQueries({ queryKey: ['contacts'] });
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : 'Could not save that contact.'),
+  });
+
   const save = useMutation({
     mutationFn: () => {
       const body = {
@@ -317,6 +347,7 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
           </div>
           <select className={field} value={contactId ?? ''}
             onChange={(e) => {
+              if (e.target.value === '__new') { saveContact.mutate(); return; }
               const v = e.target.value ? Number(e.target.value) : null;
               setContactId(v);
               const c = contactsQ.data?.contacts.find((x) => x.id === v);
@@ -328,6 +359,7 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
             {(contactsQ.data?.contacts ?? []).map((c) => (
               <option key={c.id} value={c.id}>{c.name}{c.company ? ' - ' + c.company : ''}</option>
             ))}
+            <option value="__new">+ Save this person as a contact</option>
           </select>
           <input className={field} placeholder="Where did this lead come from? (referral, Google, ...)"
             value={source} onChange={(e) => setSource(e.target.value)} />
