@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
@@ -219,8 +220,8 @@ export function TodayView({ businessId, onNavigate }: {
               <span className="text-slate-500">Planned</span>
               <span className={`num font-semibold ${cap?.overcommitted ? 'text-red-400' : 'text-violet-300'}`}>
                 {fmtDuration(cap?.plannedMinutes ?? 0)} /{' '}
-                <button onClick={() => {
-                  const v = window.prompt('How many hours is your working day?', String(workingHours));
+                <button onClick={async () => {
+                  const v = await promptDialog('How many hours is your working day?', String(workingHours));
                   if (v && Number(v) > 0) setHours(Number(v));
                 }}
                   title="Change the length of your working day"

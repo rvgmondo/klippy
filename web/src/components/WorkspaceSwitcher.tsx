@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -49,8 +50,8 @@ export function WorkspaceSwitcher() {
     })),
     {
       label: '+ New workspace',
-      onClick: () => {
-        const name = window.prompt('Name for the new workspace');
+      onClick: async () => {
+        const name = await promptDialog('Name for the new workspace');
         if (name?.trim()) create.mutate(name.trim());
       },
     },

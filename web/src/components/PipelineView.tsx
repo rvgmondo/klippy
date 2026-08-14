@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent,
@@ -65,8 +66,8 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
   });
   const convert = useMutation({
     mutationFn: (id: number) => apiPost<{ name: string }>(`/deals/${id}/convert`),
-    onSuccess: (r) => { invalidate(); qc.invalidateQueries({ queryKey: ['folders'] }); alert(`${r.name} is now a client under Delivery.`); },
-    onError: (e) => alert(e instanceof Error ? e.message : 'Could not convert.'),
+    onSuccess: (r) => { invalidate(); qc.invalidateQueries({ queryKey: ['folders'] }); notify(`${r.name} is now a client under Delivery.`); },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not convert.', 'error'),
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/deals/${id}`), onSuccess: invalidate });
 
@@ -237,8 +238,8 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
           items={[
             ...(deal.clientFolderId
               ? [{ label: 'Open client (Delivery)', onClick: () => onGoToClients?.() }]
-              : [{ label: 'Convert to client', onClick: () => { if (confirm(`Turn "${deal.company || deal.title}" into a Delivery client?`)) onConvert(deal.id); } }]),
-            { label: 'Delete', danger: true, onClick: () => { if (confirm('Delete this deal?')) onDelete(deal.id); } },
+              : [{ label: 'Convert to client', onClick: async () => { if (await confirmDialog(`Turn "${deal.company || deal.title}" into a Delivery client?`)) onConvert(deal.id); } }]),
+            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog('Delete this deal?', { danger: true })) onDelete(deal.id); } },
           ]}
         />
       </div>

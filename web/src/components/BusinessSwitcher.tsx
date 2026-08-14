@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Layers } from 'lucide-react';
 import { apiGet, apiPost, apiDelete, ApiError } from '../lib/api';
@@ -27,7 +28,7 @@ export function BusinessSwitcher({ value, onChange, full }: {
       setShowNew(false);
     },
     onError: (err) => {
-      alert(err instanceof ApiError ? err.message : 'Failed to create business.');
+      notify(err instanceof ApiError ? err.message : 'Failed to create business.', 'error');
     },
   });
 
@@ -38,7 +39,7 @@ export function BusinessSwitcher({ value, onChange, full }: {
       if (value === id) onChange('all');
     },
     onError: (err) => {
-      alert(err instanceof ApiError ? err.message : 'Failed to delete business.');
+      notify(err instanceof ApiError ? err.message : 'Failed to delete business.', 'error');
     },
   });
 
@@ -49,9 +50,9 @@ export function BusinessSwitcher({ value, onChange, full }: {
     ...list.map((b) => ({
       label: `${b.id === value ? '✓ ' : '   '}${b.name}`,
       onClick: () => onChange(b.id),
-      onDelete: () => {
-        if (list.length <= 1) { alert('You need at least one business.'); return; }
-        if (confirm(`Delete "${b.name}"? This cannot be undone.`)) del.mutate(b.id);
+      onDelete: async () => {
+        if (list.length <= 1) { notify('You need at least one business.', 'error'); return; }
+        if (await confirmDialog(`Delete "${b.name}"? This cannot be undone.`, { danger: true })) del.mutate(b.id);
       },
     })),
     { label: '+ New business', onClick: () => setShowNew(true) },

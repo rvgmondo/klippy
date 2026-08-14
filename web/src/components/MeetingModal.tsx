@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Trash2 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
@@ -173,7 +174,7 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
             {save.isPending ? 'Saving...' : isNew ? 'Add to calendar' : 'Save'}
           </button>
           {!isNew && (
-            <button type="button" onClick={() => { if (confirm('Delete this meeting?')) del.mutate(); }}
+            <button type="button" onClick={async () => { if (await confirmDialog('Delete this meeting?', { danger: true })) del.mutate(); }}
               className="grid h-9 w-9 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-red-500/10 hover:text-red-400">
               <Trash2 size={15} />
             </button>

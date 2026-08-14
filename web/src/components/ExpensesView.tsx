@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Receipt } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
@@ -79,7 +80,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setEditing(e)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
-                      <button onClick={() => { if (confirm(`Delete "${e.description}"?`)) del.mutate(e.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                      <button onClick={async () => { if (await confirmDialog(`Delete "${e.description}"?`, { danger: true })) del.mutate(e.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>

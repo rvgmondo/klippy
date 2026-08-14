@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Trash2, Plus, Check, Square, CheckSquare } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '../lib/api';
@@ -72,7 +73,7 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
             </button>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={() => { if (confirm('Delete this card?')) delTask.mutate(); }}
+            <button onClick={async () => { if (await confirmDialog('Delete this card?', { danger: true })) delTask.mutate(); }}
               className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-400"><Trash2 size={15} /></button>
             <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
           </div>

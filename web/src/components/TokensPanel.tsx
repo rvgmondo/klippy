@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Copy, Check } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
@@ -68,7 +69,7 @@ export function TokensPanel() {
                 {t.lastUsedAt ? `Last used ${new Date(t.lastUsedAt).toLocaleString()}` : 'Never used'}
               </div>
             </div>
-            <button onClick={() => { if (confirm(`Revoke "${t.name}"? Anything using it stops working.`)) del.mutate(t.id); }}
+            <button onClick={async () => { if (await confirmDialog(`Revoke "${t.name}"? Anything using it stops working.`, { danger: true })) del.mutate(t.id); }}
               className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
           </div>
         ))}

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, closestCenter, PointerSensor, useSensor, useSensors,
@@ -86,8 +87,9 @@ function NavButton({ nav, view, onNavigate, compact }: {
   );
 }
 
-function ask(prompt: string, current: string): string | null {
-  const v = window.prompt(prompt, current);
+/** Ask for a value, trimmed, or null if they cancelled or left it blank. */
+async function ask(prompt: string, current: string): Promise<string | null> {
+  const v = await promptDialog(prompt, current);
   return v && v.trim() ? v.trim() : null;
 }
 
@@ -234,9 +236,9 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
   // internal area is just a folder, so it stays a one-line prompt.
   const [addingClient, setAddingClient] = useState<'delivery' | 'operations' | null>(null);
 
-  function addTop(pillar: 'delivery' | 'operations') {
+  async function addTop(pillar: 'delivery' | 'operations') {
     if (pillar === 'delivery') { setAddingClient('delivery'); return; }
-    const name = window.prompt(`New internal area name in ${business.name}`);
+    const name = await promptDialog(`New internal area name in ${business.name}`);
     if (name?.trim()) createFolder.mutate({ name: name.trim(), parentId: null, businessId: business.id, pillar });
   }
 
@@ -413,7 +415,7 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
         method: 'POST', body: form, credentials: 'same-origin',
       });
       if (res.ok) qc.invalidateQueries({ queryKey: ['folders'] });
-      else alert((await res.json().catch(() => null))?.error ?? 'Upload failed.');
+      else notify((await res.json().catch(() => null))?.error ?? 'Upload failed.', 'error');
     };
     input.click();
   }
@@ -436,36 +438,36 @@ function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard }: {
         )}
         <button onClick={() => setOpen(!open)} className="flex-1 truncate text-left text-sm text-slate-200">{folder.name}</button>
         <button title="Add board"
-          onClick={() => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); }}
+          onClick={async () => { const n = await ask('Board name', ''); if (n) createBoard.mutate(n); }}
           className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block">
           <Plus size={14} />
         </button>
         <Menu
           trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={14} /></span>}
           items={[
-            { label: 'Add board', onClick: () => { const n = ask('Board name', ''); if (n) createBoard.mutate(n); } },
-            { label: 'Add subfolder', onClick: () => { const n = ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
-            { label: 'Rename', onClick: () => { const n = ask('Rename folder', folder.name); if (n) renameFolder.mutate(n); } },
+            { label: 'Add board', onClick: async () => { const n = await ask('Board name', ''); if (n) createBoard.mutate(n); } },
+            { label: 'Add subfolder', onClick: async () => { const n = await ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
+            { label: 'Rename', onClick: async () => { const n = await ask('Rename folder', folder.name); if (n) renameFolder.mutate(n); } },
             { label: folder.imagePath ? 'Change image' : 'Add image', onClick: () => pickImage() },
             ...(depth === 0 ? [{ label: (folder.pillar === 'operations') ? 'Move to Delivery' : 'Move to Operations', onClick: () => setPillar.mutate(folder.pillar === 'operations' ? 'delivery' : 'operations') }] : []),
-            ...(depth === 0 ? [{ label: folder.hourlyRate != null ? `Rate: ${folder.hourlyRate}/h (change)` : 'Set billing rate', onClick: () => {
+            ...(depth === 0 ? [{ label: folder.hourlyRate != null ? `Rate: ${folder.hourlyRate}/h (change)` : 'Set billing rate', onClick: async () => {
               const cur = folder.hourlyRate != null ? String(folder.hourlyRate) : '';
-              const v = window.prompt('Hourly rate for this client (blank to clear)', cur);
+              const v = await promptDialog('Hourly rate for this client (blank to clear)', cur);
               if (v === null) return;
               const t = v.trim();
               setRate.mutate(t === '' ? null : Number(t));
             } }] : []),
             // Without a billing email a recurring invoice can only ever be a draft
             // someone has to send by hand, and nothing can be chased automatically.
-            ...(depth === 0 ? [{ label: folder.billingEmail ? `Billing email: ${folder.billingEmail}` : 'Set billing email', onClick: () => {
-              const v = window.prompt('Where should invoices and payment reminders go? (blank to clear)', folder.billingEmail ?? '');
+            ...(depth === 0 ? [{ label: folder.billingEmail ? `Billing email: ${folder.billingEmail}` : 'Set billing email', onClick: async () => {
+              const v = await promptDialog('Where should invoices and payment reminders go? (blank to clear)', folder.billingEmail ?? '');
               if (v === null) return;
               setBillingEmail.mutate(v.trim());
             } }] : []),
             // Only top-level folders are clients, and only a client has a portal.
             ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
-            { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`)) deleteFolder.mutate(); } },
+            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`, { danger: true })) deleteFolder.mutate(); } },
           ]}
         />
       </div>
@@ -545,8 +547,8 @@ function BoardRow({ board, folderId, depth, selected, onSelect }: {
       <Menu
         trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={13} /></span>}
         items={[
-          { label: 'Rename', onClick: () => { const n = ask('Rename board', board.name); if (n) rename.mutate(n); } },
-          { label: 'Delete', danger: true, onClick: () => { if (confirm(`Delete board "${board.name}" and its cards? This cannot be undone.`)) del.mutate(); } },
+          { label: 'Rename', onClick: async () => { const n = await ask('Rename board', board.name); if (n) rename.mutate(n); } },
+          { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Delete board "${board.name}" and its cards? This cannot be undone.`, { danger: true })) del.mutate(); } },
         ]}
       />
     </div>

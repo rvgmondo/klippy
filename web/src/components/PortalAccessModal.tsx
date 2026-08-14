@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../lib/api';
@@ -112,7 +113,7 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
                 className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">
                 {u.isActive ? 'Switch off' : 'Switch on'}
               </button>
-              <button onClick={() => { if (confirm(`Remove ${u.email}'s access?`)) remove.mutate(u.id); }}
+              <button onClick={async () => { if (await confirmDialog(`Remove ${u.email}'s access?`, { danger: true })) remove.mutate(u.id); }}
                 className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800 hover:text-red-300">
                 Remove
               </button>

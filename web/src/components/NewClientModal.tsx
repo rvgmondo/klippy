@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiPatch, apiPost } from '../lib/api';
@@ -67,7 +68,7 @@ export function NewClientModal({ businessId, businessName, pillar, label, onClos
   return (
     <Modal onClose={onClose} size="md" labelledBy="new-client-title"
       confirmClose={() => (name.trim() || billingEmail.trim()
-        ? window.confirm('Close without adding this client?') : true)}>
+        ? confirmDialog('Close without adding this client?', { confirmLabel: 'Discard', danger: true }) : true)}>
       <form className="p-5" onSubmit={(e) => { e.preventDefault(); if (name.trim()) create.mutate(); }}>
         <div className="mb-1 flex items-center justify-between">
           <h2 id="new-client-title" className="text-base font-semibold text-slate-100">

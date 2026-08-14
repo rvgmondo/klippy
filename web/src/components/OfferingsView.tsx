@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Pause, Play, XCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
@@ -151,7 +152,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                         title={o.active ? 'Archive' : 'Reactivate'}
                         className="text-[11px] text-slate-500 hover:text-slate-200">{o.active ? 'Archive' : 'Reactivate'}</button>
                       <button onClick={() => setEditing(o)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
-                      <button onClick={() => { if (confirm(`Delete "${o.name}"?`)) del.mutate(o.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                      <button onClick={async () => { if (await confirmDialog(`Delete "${o.name}"?`, { danger: true })) del.mutate(o.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -226,9 +227,9 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                             <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'active' })} title="Resume" className="text-slate-500 hover:text-green-300"><Play size={14} /></button>
                           )}
                           {s.status !== 'canceled' && (
-                            <button onClick={() => { if (confirm('Cancel this subscription? It will stop billing.')) setSubStatus.mutate({ id: s.id, status: 'canceled' }); }} title="Cancel" className="text-slate-500 hover:text-red-400"><XCircle size={14} /></button>
+                            <button onClick={async () => { if (await confirmDialog('Cancel this subscription? It will stop billing.', { danger: true })) setSubStatus.mutate({ id: s.id, status: 'canceled' }); }} title="Cancel" className="text-slate-500 hover:text-red-400"><XCircle size={14} /></button>
                           )}
-                          <button onClick={() => { if (confirm('Delete this subscription record entirely?')) delSub.mutate(s.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                          <button onClick={async () => { if (await confirmDialog('Delete this subscription record entirely?', { danger: true })) delSub.mutate(s.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>

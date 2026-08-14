@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Plus } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
@@ -25,7 +26,7 @@ export function LabelsPanel() {
           <div key={l.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900">
             <span className="h-3 w-3 rounded-full" style={{ background: l.color }} />
             <span className="flex-1 text-sm text-slate-200">{l.name}</span>
-            <button onClick={() => { if (confirm(`Delete label "${l.name}"?`)) del.mutate(l.id); }} className="hidden text-slate-500 hover:text-red-400 group-hover:block"><Trash2 size={14} /></button>
+            <button onClick={async () => { if (await confirmDialog(`Delete label "${l.name}"?`, { danger: true })) del.mutate(l.id); }} className="hidden text-slate-500 hover:text-red-400 group-hover:block"><Trash2 size={14} /></button>
           </div>
         ))}
         {labels.length === 0 && <p className="px-2 py-4 text-center text-xs text-slate-500">No labels yet.</p>}

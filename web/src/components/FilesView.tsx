@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronRight, ChevronDown, Folder, FolderPlus, Upload, Download,
@@ -129,7 +130,7 @@ export function FilesView() {
               </span>
             ))}
           </div>
-          <button onClick={() => { const n = window.prompt('Folder name'); if (n?.trim()) mkdir.mutate(n.trim()); }}
+          <button onClick={async () => { const n = await promptDialog('Folder name'); if (n?.trim()) mkdir.mutate(n.trim()); }}
             className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
             <FolderPlus size={14} /> New folder
           </button>
@@ -184,10 +185,10 @@ export function FilesView() {
                 <Menu
                   trigger={<span className="shrink-0 text-slate-500 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
                   items={[
-                    { label: 'Rename', onClick: () => { const v = window.prompt('New name', n.name); if (v?.trim()) rename.mutate({ id: n.id, name: v.trim() }); } },
+                    { label: 'Rename', onClick: async () => { const v = await promptDialog('New name', n.name); if (v?.trim()) rename.mutate({ id: n.id, name: v.trim() }); } },
                     ...(cwd !== null ? [{ label: 'Move up one level', onClick: () => move.mutate({ id: n.id, parentId: null }) }] : []),
-                    { label: 'Delete', danger: true, onClick: () => {
-                      if (confirm(n.kind === 'folder'
+                    { label: 'Delete', danger: true, onClick: async () => {
+                      if (await confirmDialog(n.kind === 'folder'
                         ? `Delete "${n.name}" and everything inside it? This cannot be undone.`
                         : `Delete "${n.name}"? This cannot be undone.`)) remove.mutate(n.id);
                     } },

@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { confirmDialog, notify } from './ConfirmDialog';
 import { useAuth } from '../lib/auth';
 
 /**
@@ -78,8 +79,9 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
   const [isDeleting, setIsDeleting] = useState(false);
 
   const handleDelete = async () => {
-    const confirmed = window.confirm(
-      "Are you absolutely sure? This will permanently delete this account, including all businesses, boards, tasks, and files. This action CANNOT be undone."
+    const confirmed = await confirmDialog(
+      'Permanently delete this workspace, with every business, board, task and file in it? This cannot be undone.',
+      { confirmLabel: 'Delete workspace', danger: true },
     );
 
     if (!confirmed) return;
@@ -95,12 +97,12 @@ export function DeleteWorkspaceButton({ workspaceId }: { workspaceId: number }) 
         window.location.href = '/'; 
       } else {
         const data = await response.json();
-        alert(data.error || 'Failed to delete workspace.');
+        notify(data.error || 'Failed to delete workspace.', 'error');
         setIsDeleting(false);
       }
     } catch (error) {
       console.error("Error deleting workspace:", error);
-      alert('An unexpected error occurred.');
+      notify('An unexpected error occurred.', 'error');
       setIsDeleting(false);
     }
   };

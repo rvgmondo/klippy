@@ -33,18 +33,24 @@ export function Modal({
   onClose: () => void;
   size?: 'sm' | 'md' | 'lg' | 'xl';
   variant?: ModalVariant;
-  /** Return true to allow closing. Called for backdrop clicks and Escape. */
-  confirmClose?: () => boolean;
+  /**
+   * Return true to allow closing. Called for backdrop clicks and Escape.
+   *
+   * May be async, because the thing it usually wants to do is ask, and the app's
+   * own confirm dialog returns a promise. Keeping this synchronous would have
+   * forced three call sites back onto window.confirm.
+   */
+  confirmClose?: () => boolean | Promise<boolean>;
   labelledBy?: string;
 }) {
-  const attempt = () => {
-    if (confirmClose && !confirmClose()) return;
+  const attempt = async () => {
+    if (confirmClose && !(await confirmClose())) return;
     onClose();
   };
 
   // Escape closes, and the page behind does not scroll while a dialog is open.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') attempt(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') void attempt(); };
     window.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -65,7 +71,7 @@ export function Modal({
    */
   const backdrop = (extra: string) => ({
     className: `fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm ${extra}`,
-    onMouseDown: (e: React.MouseEvent) => { if (e.target === e.currentTarget) attempt(); },
+    onMouseDown: (e: React.MouseEvent) => { if (e.target === e.currentTarget) void attempt(); },
     role: 'dialog' as const,
     'aria-modal': true,
     'aria-labelledby': labelledBy,

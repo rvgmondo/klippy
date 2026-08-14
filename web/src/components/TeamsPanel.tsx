@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
@@ -72,7 +73,7 @@ export function TeamsPanel() {
         {(teams.data?.teams ?? []).length === 0 && (
           <p className="text-sm text-slate-500">No teams yet.</p>
         )}
-        {(teams.data?.teams ?? []).map((t) => {
+        {(teams.data?.teams ?? []).map(async (t) => {
           const memberIds = new Set(t.members.map((m) => m.userId));
           const available = (people.data?.users ?? []).filter((p) => p.isActive && !memberIds.has(p.id));
           return (
@@ -80,7 +81,7 @@ export function TeamsPanel() {
               <div className="mb-2 flex items-center gap-2">
                 <span className="h-3 w-3 rounded-full" style={{ background: t.color }} />
                 <span className="flex-1 text-sm font-medium text-slate-200">{t.name}</span>
-                <button onClick={() => { if (confirm(`Delete team "${t.name}"?`)) del.mutate(t.id); }}
+                <button onClick={async () => { if (await confirmDialog(`Delete team "${t.name}"?`, { danger: true })) del.mutate(t.id); }}
                   className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
               </div>
 

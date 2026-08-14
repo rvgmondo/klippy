@@ -5,6 +5,7 @@ import './index.css';
 import { AuthProvider } from './lib/auth';
 import { Root } from './Root';
 import { PortalRoot, isPortalRequest } from './portal/PortalRoot';
+import { ConfirmHost } from './components/ConfirmDialog';
 import { ThemeSync, applyAppearance, readCachedAppearance } from './lib/theme';
 
 const queryClient = new QueryClient({
@@ -32,6 +33,9 @@ createRoot(document.getElementById('root')!).render(
           <Root />
         </AuthProvider>
       )}
+      {/* Mounted for both apps: a client deleting nothing still gets asked the same
+          way, and confirmDialog falls back to the browser if this is ever missing. */}
+      <ConfirmHost />
     </QueryClientProvider>
   </StrictMode>,
 );

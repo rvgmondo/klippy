@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { confirmDialog, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners,
@@ -278,8 +279,8 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
         <Menu align="right"
           trigger={<span className="text-slate-500 opacity-0 hover:text-slate-200 group-hover/col:opacity-100"><MoreHorizontal size={15} /></span>}
           items={[
-            { label: 'Rename column', onClick: () => { const n = window.prompt('Rename column', column.name); if (n?.trim()) renameCol.mutate(n.trim()); } },
-            { label: 'Delete column', danger: true, onClick: () => { if (confirm(`Delete "${column.name}"${taskIds.length ? ` and its ${taskIds.length} card(s)` : ''}?`)) deleteCol.mutate(); } },
+            { label: 'Rename column', onClick: async () => { const n = await promptDialog('Rename column', column.name); if (n?.trim()) renameCol.mutate(n.trim()); } },
+            { label: 'Delete column', danger: true, onClick: async () => { if (await confirmDialog(`Delete "${column.name}"${taskIds.length ? ` and its ${taskIds.length} card(s)` : ''}?`)) deleteCol.mutate(); } },
           ]} />
       </div>
 

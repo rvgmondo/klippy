@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard , Download } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
@@ -87,7 +88,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
       }
       document.body.appendChild(form); form.submit(); form.remove();
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Could not start the payment.');
+      notify(e instanceof Error ? e.message : 'Could not start the payment.', 'error');
     }
   }
 
@@ -102,8 +103,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   });
   const email = useMutation({
     mutationFn: (v: { id: number; message?: string }) => apiPost<{ to: string }>(`/documents/${v.id}/email`, { message: v.message }),
-    onSuccess: (r) => { invalidate(); alert(`Sent to ${r.to}.`); },
-    onError: (e) => alert(e instanceof Error ? e.message : 'Could not send.'),
+    onSuccess: (r) => { invalidate(); notify(`Sent to ${r.to}.`); },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not send.', 'error'),
   });
 
   return (
@@ -155,7 +156,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
                       <button onClick={() => setPrinting(d.id)} title="Print / PDF" className="text-slate-500 hover:text-slate-200"><Printer size={15} /></button>
-                      <button onClick={() => { const m = window.prompt('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); }} title="Email to client" className="text-slate-500 hover:text-slate-200"><Mail size={14} /></button>
+                      <button onClick={async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); }} title="Email to client" className="text-slate-500 hover:text-slate-200"><Mail size={14} /></button>
                       <button onClick={() => setEditing(d.id)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
                       {d.type === 'invoice' && (
                         <button onClick={() => setPaying(d)} title="Payments" className="text-slate-500 hover:text-green-300"><DollarSign size={14} /></button>
@@ -166,7 +167,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                       {d.type === 'quote' && (
                         <button onClick={() => convert.mutate(d.id)} title="Convert to invoice" className="text-slate-500 hover:text-violet-300"><ArrowRightLeft size={14} /></button>
                       )}
-                      <button onClick={() => { if (confirm(`Delete ${d.number}?`)) del.mutate(d.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                      <button onClick={async () => { if (await confirmDialog(`Delete ${d.number}?`, { danger: true })) del.mutate(d.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -313,9 +314,10 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     || notes.trim() || folderId
     || lines.some((l) => l.description.trim() || Number(l.quantity) !== 1 || Number(l.unitPrice) !== 0),
   );
-  const confirmClose = () => {
+  const confirmClose = async () => {
     if (!hasContent) return true;
-    return window.confirm('Close without saving? Anything you have entered on this document will be lost.');
+    return confirmDialog('Close without saving? Anything you have entered on this document will be lost.',
+      { confirmLabel: 'Discard', danger: true });
   };
 
   return (
@@ -323,7 +325,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 id="doc-editor-title" className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
-          <button onClick={() => { if (confirmClose()) onClose(); }} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
+          <button onClick={async () => { if (await confirmClose()) onClose(); }} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -484,7 +486,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
-          <button onClick={() => { if (confirmClose()) onClose(); }}
+          <button onClick={async () => { if (await confirmClose()) onClose(); }}
             className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
         </div>
       </div>
@@ -578,8 +580,8 @@ function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () => void 
         {/* Credit notes only apply to invoices, and only while something is owed. */}
         {doc.type === 'invoice' && (data?.outstanding ?? 0) > 0.005 && (
           <button
-            onClick={() => {
-              const reason = window.prompt(`Credit the remaining ${money(data?.outstanding ?? 0, doc.currency)} on ${doc.number}?\n\nReason (optional):`);
+            onClick={async () => {
+              const reason = await promptDialog(`Credit the remaining ${money(data?.outstanding ?? 0, doc.currency)} on ${doc.number}?\n\nReason (optional):`);
               if (reason !== null) credit.mutate(reason.trim());
             }}
             disabled={credit.isPending}

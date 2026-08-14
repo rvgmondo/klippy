@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { notify } from './ConfirmDialog';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { X, Play, Pause, RotateCcw, PictureInPicture2, Square, Clock } from 'lucide-react';
@@ -81,7 +82,7 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
       // Fallback: a plain popup window (movable, just not always-on-top).
       const w = window.open('', 'klippy-timer', 'width=260,height=320');
       if (w) { primeWindow(w); w.addEventListener('pagehide', () => setPip(null)); setPip(w); }
-      else alert('Your browser blocked the popup. Allow popups for Klippy to float the timer.');
+      else notify('Your browser blocked the popup. Allow popups for Klippy to float the timer.', 'error');
       return;
     }
     const w = await docPiP.requestWindow({ width: 260, height: 320 });

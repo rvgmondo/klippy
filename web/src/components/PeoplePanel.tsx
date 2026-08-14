@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { UserPlus } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '../lib/api';
@@ -93,7 +94,7 @@ export function PeoplePanel() {
                 items={[
                   { label: u.role === 'admin' ? 'Make member' : 'Make admin', onClick: () => patch.mutate({ id: u.id, body: { role: u.role === 'admin' ? 'member' : 'admin' } }) },
                   { label: u.isActive ? 'Deactivate' : 'Reactivate', onClick: () => patch.mutate({ id: u.id, body: { isActive: !u.isActive } }) },
-                  { label: 'Reset password', onClick: () => { const p = window.prompt('New password (min 8 chars)'); if (p && p.length >= 8) patch.mutate({ id: u.id, body: { password: p } }); } },
+                  { label: 'Reset password', onClick: async () => { const p = await promptDialog('New password (min 8 chars)'); if (p && p.length >= 8) patch.mutate({ id: u.id, body: { password: p } }); } },
                 ]} />
             )}
           </div>

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Copy, Check, Lightbulb, Bug, Wrench, HelpCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
@@ -125,7 +126,7 @@ export function NotesPanel() {
                 <option value="done">Done</option>
                 <option value="dropped">Dropped</option>
               </select>
-              <button onClick={() => { if (confirm('Delete this note?')) del.mutate(n.id); }}
+              <button onClick={async () => { if (await confirmDialog('Delete this note?', { danger: true })) del.mutate(n.id); }}
                 className="shrink-0 text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
             </div>
           </div>
