@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { money } from './money.js';
 import { db } from './../db/client.js';
 import {
   deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses,
@@ -39,7 +40,6 @@ export interface DealWonPayload extends Record<string, unknown> {
   value: number;
 }
 
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 /** 1. Fulfillment: the client gets somewhere for the work to live. */
 on<DealWonPayload>('deal.won', 'create-client-workspace', async (p, ctx): Promise<HandlerResult> => {

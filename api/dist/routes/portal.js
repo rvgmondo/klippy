@@ -1,3 +1,4 @@
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -17,7 +18,6 @@ import { assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
 const mine = (c) => and(eq(documents.accountId, c.user.accountId), eq(documents.folderId, c.user.folderId));
 /** What a client is allowed to see at all: issued documents, never drafts. */
 const VISIBLE_STATUSES = ['sent', 'paid', 'void'];
-const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
 /** Who to tell when something happens in the portal. */
 async function ownerEmail(accountId) {
     const [row] = await db.select({ email: users.email }).from(memberships)

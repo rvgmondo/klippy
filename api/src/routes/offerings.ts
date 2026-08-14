@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -9,7 +10,6 @@ import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 const createSchema = z.object({
   businessId: z.number().int().positive().optional(),

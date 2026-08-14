@@ -1,3 +1,4 @@
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -10,7 +11,6 @@ import { resolveBusinessId } from '../lib/business.js';
 import { emit } from '../lib/events.js';
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'];
 const stage = z.enum(STAGES);
-const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const DEFAULT_COLUMNS = [
     { name: 'To do', color: '#94a3b8', isDoneColumn: false },
     { name: 'Doing', color: '#3b82f6', isDoneColumn: false },

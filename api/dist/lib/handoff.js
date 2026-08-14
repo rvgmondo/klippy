@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { money } from './money.js';
 import { db } from './../db/client.js';
 import { deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses, memberships, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -24,7 +25,6 @@ const DEFAULT_COLUMNS = [
     { name: 'Doing', color: '#3b82f6', isDoneColumn: false },
     { name: 'Done', color: '#22c55e', isDoneColumn: true },
 ];
-const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
 /** 1. Fulfillment: the client gets somewhere for the work to live. */
 on('deal.won', 'create-client-workspace', async (p, ctx) => {
     const { accountId, userId } = ctx;

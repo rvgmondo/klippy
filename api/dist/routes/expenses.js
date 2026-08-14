@@ -1,3 +1,4 @@
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { desc, eq, gte, lte, and } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -7,7 +8,6 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
-const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 const createSchema = z.object({
     businessId: z.number().int().positive().optional(),

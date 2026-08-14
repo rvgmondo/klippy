@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -49,7 +50,6 @@ const mine = (c: Ctx) => and(
 /** What a client is allowed to see at all: issued documents, never drafts. */
 const VISIBLE_STATUSES = ['sent', 'paid', 'void'] as const;
 
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 /** Who to tell when something happens in the portal. */
 async function ownerEmail(accountId: number): Promise<string | null> {

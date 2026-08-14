@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import { money } from './money.js';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -7,7 +8,6 @@ import { sendBusinessMail, emailBrandFor } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { renderDocumentPdf } from './pdf.js';
-const money = (n) => (Math.round(n * 100) / 100).toFixed(2);
 /**
  * Next billing date, one month on.
  *
@@ -44,7 +44,8 @@ export function addMonths(dateStr, months, anchorDay) {
 export function anchorDayOf(startedOn) {
     return Number(startedOn.split('-')[2]);
 }
-function addDays(dateStr, days) {
+/** Plain day arithmetic in UTC, so a due date never shifts with the server's zone. */
+export function addDays(dateStr, days) {
     const d = new Date(`${dateStr}T00:00:00.000Z`);
     d.setUTCDate(d.getUTCDate() + days);
     return d.toISOString().slice(0, 10);

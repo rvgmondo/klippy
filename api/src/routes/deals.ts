@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, asc, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -13,7 +14,6 @@ import type { DealWonPayload } from '../lib/handoff.js';
 
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'] as const;
 const stage = z.enum(STAGES);
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 const DEFAULT_COLUMNS = [
   { name: 'To do', color: '#94a3b8', isDoneColumn: false },

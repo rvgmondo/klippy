@@ -4,7 +4,7 @@ import { tasks, users, boards, folders, memberships, subscriptions, documents, j
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
-import { addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
+import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { runHostingSuspensions } from './hosting.js';
 import { pruneLoginTokens } from './portalAuth.js';
@@ -288,7 +288,7 @@ export async function runInvoiceReminders() {
         // A normal reminder is due when today has reached one of the scheduled dates
         // (dueDate + offset) that we have not already passed. Using "<= today and later
         // than the last reminder" means a missed day is caught up rather than skipped.
-        const scheduledDates = cfg.offsets.map((o) => addDaysStr(doc.dueDate, o)).sort();
+        const scheduledDates = cfg.offsets.map((o) => addDays(doc.dueDate, o)).sort();
         const dueNow = scheduledDates.filter((d) => daysBetween(d, today) <= 0
             && (!doc.lastReminderOn || daysBetween(doc.lastReminderOn, d) > 0));
         if (dueNow.length === 0)
@@ -327,11 +327,6 @@ export async function runInvoiceReminders() {
     return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid`;
 }
 /** dateStr + n days, as YYYY-MM-DD. */
-function addDaysStr(dateStr, n) {
-    const d = new Date(`${dateStr}T00:00:00.000Z`);
-    d.setUTCDate(d.getUTCDate() + n);
-    return d.toISOString().slice(0, 10);
-}
 const RUNNERS = {
     'daily-digest': runDailyDigest,
     'bill-subscriptions': runSubscriptionBilling,

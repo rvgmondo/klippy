@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -47,7 +48,6 @@ const bodySchema = z.object({
 });
 
 const PREFIX: Record<'quote' | 'invoice' | 'credit_note', string> = { quote: 'QUO-', invoice: 'INV-', credit_note: 'CN-' };
-const money = (n: number) => (Math.round(n * 100) / 100).toFixed(2);
 
 /**
  * Totals with an optional discount taken off the subtotal before tax, so tax is
