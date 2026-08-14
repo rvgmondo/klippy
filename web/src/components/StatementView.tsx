@@ -3,6 +3,7 @@ import { Modal } from './Modal';
 import { useQuery } from '@tanstack/react-query';
 import { Printer, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
+import { money } from '../lib/money';
 
 interface Entry {
   date: string; kind: 'invoice' | 'credit_note' | 'payment' | 'refund';
@@ -10,15 +11,15 @@ interface Entry {
 }
 interface Statement {
   client: { id: number; name: string; businessId: number | null };
-  from: string | null; to: string | null; currency: string;
+  from: string | null; to: string | null;
+  /** The currency THIS statement is drawn in. A balance only means something in one. */
+  currency: string;
+  /** Every currency this client has been billed in, when there is more than one. */
+  currencies: string[];
   entries: Entry[];
   summary: { invoiced: number; credited: number; received: number; balance: number };
 }
 
-function money(v: number, currency: string) {
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v); }
-  catch { return `${currency} ${v.toFixed(2)}`; }
-}
 
 const KIND_LABEL: Record<Entry['kind'], string> = {
   invoice: 'Invoice', credit_note: 'Credit note', payment: 'Payment', refund: 'Refund',
@@ -32,13 +33,18 @@ const KIND_LABEL: Record<Entry['kind'], string> = {
 export function StatementView({ folderId, onClose }: { folderId: number; onClose: () => void }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const qs = [from && `from=${from}`, to && `to=${to}`].filter(Boolean).join('&');
+  // Blank means "whichever the server picks", which is the only currency for almost
+  // every client. A running balance cannot span currencies, so this is a filter on
+  // the statement rather than a display option.
+  const [pick, setPick] = useState('');
+  const qs = [from && `from=${from}`, to && `to=${to}`, pick && `currency=${pick}`].filter(Boolean).join('&');
   const { data } = useQuery({
-    queryKey: ['statement', folderId, from, to],
+    queryKey: ['statement', folderId, from, to, pick],
     queryFn: () => apiGet<Statement>(`/statements/${folderId}${qs ? `?${qs}` : ''}`),
   });
 
   const cur = data?.currency ?? 'ZAR';
+  const others = data?.currencies ?? [];
   const field = 'rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 outline-none';
 
   return (
@@ -47,6 +53,12 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
         <div className="no-print mb-3 flex flex-wrap items-center justify-end gap-2">
           <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} title="From" />
           <input type="date" className={field} value={to} onChange={(e) => setTo(e.target.value)} title="To" />
+          {others.length > 1 && (
+            <select className={field} value={pick || cur} onChange={(e) => setPick(e.target.value)}
+              title="This client has been billed in more than one currency">
+              {others.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
           <button onClick={() => window.print()}
             className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">
             <Printer size={15} /> Print / Save as PDF
@@ -61,6 +73,11 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
             <div>
               <div className="text-xl font-bold">Statement of account</div>
               <div className="mt-1 text-sm text-slate-600">{data?.client.name}</div>
+              {others.length > 1 && (
+                <div className="mt-1 text-xs text-slate-500">
+                  In {cur}. This client has also been billed in {others.filter((c) => c !== cur).join(', ')}.
+                </div>
+              )}
             </div>
             <div className="text-right text-xs text-slate-500">
               {(data?.from || data?.to)

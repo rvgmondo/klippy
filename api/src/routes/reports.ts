@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
+import { DEFAULT_CURRENCY } from '../lib/currency.js';
 import { db } from '../db/client.js';
-import { timeEntries, tasks, boards, folders, users, accounts, expenses, offerings } from '../db/schema.js';
+import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, businessScope } from '../lib/access.js';
@@ -33,7 +34,19 @@ export async function reportRoutes(app: FastifyInstance) {
     const end = new Date(`${q.data.to}T23:59:59.999Z`);
 
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
-    const currency = account?.currency ?? 'ZAR';
+    const workspaceCurrency = account?.currency || DEFAULT_CURRENCY;
+
+    // Money recorded against a business is denominated in that business's currency:
+    // an expense, an hourly rate and an offering price all belong to one business,
+    // and that is what decides what the number means. Klippy never converts, so a
+    // workspace running a rand company and a dollar company gets a line per
+    // currency instead of one meaningless sum.
+    const bizRows = await db.select({ id: businesses.id, currency: businesses.currency })
+      .from(businesses).where(tenantWhere(businesses, accountId));
+    const currencyOfBusiness = new Map(bizRows.map((b) => [b.id, b.currency || workspaceCurrency]));
+    const curOf = (businessId: number | null | undefined) =>
+      (businessId != null ? currencyOfBusiness.get(businessId) : null) || workspaceCurrency;
+    const scopeCurrency = onlyBusiness !== undefined ? curOf(onlyBusiness) : workspaceCurrency;
 
     // Every folder, so we can walk ancestors for rate inheritance and roll-up.
     const allFolders = await db.select({
@@ -72,7 +85,7 @@ export async function reportRoutes(app: FastifyInstance) {
         lte(timeEntries.startTime, end),
       )));
 
-    const perClient = new Map<number, { name: string; seconds: number; cost: number }>();
+    const perClient = new Map<number, { name: string; seconds: number; cost: number; currency: string }>();
     const perPerson = new Map<number, { name: string; seconds: number }>();
     let totalSeconds = 0;
 
@@ -87,7 +100,8 @@ export async function reportRoutes(app: FastifyInstance) {
       totalSeconds += secs;
 
       if (root) {
-        const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0, cost: 0 };
+        const cur = perClient.get(root.id)
+          ?? { name: root.name, seconds: 0, cost: 0, currency: curOf(root.businessId) };
         cur.seconds += secs;
         perClient.set(root.id, cur);
       }
@@ -100,7 +114,9 @@ export async function reportRoutes(app: FastifyInstance) {
     // Attribute each one (if tagged to a client) to that client's root folder, same
     // rollup rule as time, so per-client profit is possible - not just business totals.
     const expenseFilter = onlyBusiness !== undefined ? eq(expenses.businessId, onlyBusiness) : undefined;
-    const expenseRows = await db.select({ amount: expenses.amount, folderId: expenses.folderId }).from(expenses)
+    const expenseRows = await db.select({
+      amount: expenses.amount, folderId: expenses.folderId, businessId: expenses.businessId,
+    }).from(expenses)
       .where(tenantWhere(expenses, accountId, and(
         expenseFilter,
         await businessScope(req, expenses.businessId),
@@ -112,7 +128,8 @@ export async function reportRoutes(app: FastifyInstance) {
       if (e.folderId == null) continue; // general overhead, not attributed to a client
       const root = rootOf(e.folderId);
       if (!root || (onlyBusiness !== undefined && root.businessId !== onlyBusiness)) continue;
-      const cur = perClient.get(root.id) ?? { name: root.name, seconds: 0, cost: 0 };
+      const cur = perClient.get(root.id)
+        ?? { name: root.name, seconds: 0, cost: 0, currency: curOf(root.businessId) };
       cur.cost += Number(e.amount);
       perClient.set(root.id, cur);
     }
@@ -123,7 +140,7 @@ export async function reportRoutes(app: FastifyInstance) {
       const amount = rate == null ? null : Math.round(hours * rate * 100) / 100;
       const cost = Math.round(v.cost * 100) / 100;
       return {
-        folderId, name: v.name, seconds: v.seconds,
+        folderId, name: v.name, seconds: v.seconds, currency: v.currency,
         hours: Math.round(hours * 100) / 100,
         rate, amount, cost,
         profit: amount == null ? null : Math.round((amount - cost) * 100) / 100,
@@ -139,13 +156,45 @@ export async function reportRoutes(app: FastifyInstance) {
 
     // MRR is a snapshot, not date-ranged: sum of active recurring offerings right now.
     const offeringFilter = onlyBusiness !== undefined ? eq(offerings.businessId, onlyBusiness) : undefined;
-    const offeringRows = await db.select({ price: offerings.price, recurring: offerings.recurring, active: offerings.active })
-      .from(offerings).where(tenantWhere(offerings, accountId, offeringFilter, await businessScope(req, offerings.businessId)));
-    const mrr = Math.round(offeringRows.filter((o) => o.recurring && o.active)
-      .reduce((s, o) => s + Number(o.price), 0) * 100) / 100;
+    const offeringRows = await db.select({
+      price: offerings.price, recurring: offerings.recurring, active: offerings.active,
+      businessId: offerings.businessId,
+    }).from(offerings)
+      .where(tenantWhere(offerings, accountId, offeringFilter, await businessScope(req, offerings.businessId)));
+    const recurringOfferings = offeringRows.filter((o) => o.recurring && o.active);
+    const mrr = Math.round(recurringOfferings.reduce((s, o) => s + Number(o.price), 0) * 100) / 100;
+
+    // The same figures split by currency. `mixed` is what the UI keys off: with one
+    // currency the flat totals below are exactly right and simpler to read, and with
+    // several they are the sum of unlike things and must not be shown.
+    const bucket = new Map<string, { billable: number; expenses: number; mrr: number }>();
+    const into = (cur: string) => {
+      let b = bucket.get(cur);
+      if (!b) { b = { billable: 0, expenses: 0, mrr: 0 }; bucket.set(cur, b); }
+      return b;
+    };
+    for (const c of clients) if (c.amount != null) into(c.currency).billable += c.amount;
+    for (const e of expenseRows) into(curOf(e.businessId)).expenses += Number(e.amount);
+    for (const o of recurringOfferings) into(curOf(o.businessId)).mrr += Number(o.price);
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const byCurrency = [...bucket].map(([cur, b]) => ({
+      currency: cur,
+      billable: round2(b.billable),
+      expenses: round2(b.expenses),
+      profit: round2(b.billable - b.expenses),
+      mrr: round2(b.mrr),
+    })).sort((a, b) => b.billable - a.billable);
+
+    // The headline currency has to be the one the flat totals are actually in, not
+    // the workspace default. A workspace-wide report over a single dollar business
+    // was labelling real dollars as rand: one bucket, so `mixed` was false and the
+    // UI drew the simple tiles, with the wrong currency on them.
+    const currency = byCurrency.length === 1 ? byCurrency[0]!.currency : scopeCurrency;
 
     return {
       currency,
+      byCurrency,
+      mixed: byCurrency.length > 1,
       from: q.data.from,
       to: q.data.to,
       clients,

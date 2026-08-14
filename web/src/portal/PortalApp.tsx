@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
+import { money as fmt } from '../lib/money';
 import type { PortalMe } from './PortalRoot';
 
 interface Doc {
@@ -11,17 +12,15 @@ interface Doc {
 }
 interface HostingRow {
   id: number; domain: string; username: string | null; whmPackage: string | null;
-  status: string; display: string; outstanding: string; unpaidInvoiceId: number | null;
+  status: string; display: string; outstanding: string; currency: string;
+  unpaidInvoiceId: number | null;
 }
 
 const TYPE_LABEL: Record<string, string> = {
   invoice: 'Invoice', quote: 'Quote', credit_note: 'Credit note',
 };
 
-function money(currency: string, v: string | number) {
-  const n = typeof v === 'string' ? Number(v) : v;
-  return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+const money = (currency: string, v: string | number) => fmt(v, currency);
 
 /**
  * The portal proper.
@@ -37,10 +36,14 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
 
   const { data } = useQuery({
     queryKey: ['portal-docs'],
-    queryFn: () => apiGet<{ documents: Doc[]; totalOutstanding: string }>('/portal/documents'),
+    queryFn: () => apiGet<{
+      documents: Doc[];
+      /** What is owed, per currency. Never one number: see the API for why. */
+      outstanding: { currency: string; amount: string }[];
+    }>('/portal/documents'),
   });
   const docs = data?.documents ?? [];
-  const currency = docs[0]?.currency ?? 'ZAR';
+  const owed = (data?.outstanding ?? []).filter((o) => Number(o.amount) > 0);
 
   const logout = useMutation({
     mutationFn: () => apiPost('/portal/logout'),
@@ -99,11 +102,17 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
           </div>
         )}
 
-        {Number(data?.totalOutstanding ?? 0) > 0 && (
+        {owed.length > 0 && (
           <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
             <div className="text-xs uppercase tracking-wide text-slate-500">Outstanding</div>
-            <div className="mt-1 text-2xl font-semibold num">
-              {money(currency, data!.totalOutstanding)}
+            {/* One figure per currency. A client billed in two used to be shown the
+                sum of both, labelled with whichever invoice came first. */}
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+              {owed.map((o) => (
+                <div key={o.currency} className="text-2xl font-semibold num">
+                  {money(o.currency, o.amount)}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -346,7 +355,7 @@ function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: n
           {h.display === 'suspended' && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-800">
               This site is switched off because of an unpaid invoice
-              {Number(h.outstanding) > 0 ? ` of ${money('ZAR', h.outstanding)}` : ''}.
+              {Number(h.outstanding) > 0 ? ` of ${money(h.currency, h.outstanding)}` : ''}.
               Paying it brings the site straight back.
               {h.unpaidInvoiceId && (
                 <button onClick={() => onPay(h.unpaidInvoiceId!)}

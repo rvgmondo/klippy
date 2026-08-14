@@ -6,12 +6,13 @@ import {
 } from '@dnd-kit/core';
 import { Plus, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
-import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
 import type { Stage, Deal, Summary } from './pipelineShared';
 import { DealEditor } from './DealEditor';
 import {} from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { moneyRound } from '../lib/money';
+import { useCurrency } from '../lib/useCurrency';
 
 
 const STAGES: { key: Stage; label: string; color: string }[] = [
@@ -24,13 +25,9 @@ const STAGES: { key: Stage; label: string; color: string }[] = [
 
 export function PipelineView({ businessId, onGoToClients }: { businessId: BusinessSelection; onGoToClients?: () => void }) {
   const qc = useQueryClient();
-  const { account } = useAuth();
-  const cur = account?.currency ?? 'ZAR';
-  const money = (v: number | string) => {
-    const n = typeof v === 'string' ? Number(v) : v;
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(n); }
-    catch { return `${cur} ${n.toFixed(0)}`; }
-  };
+  // Deal values read in the currency the selected business bills in.
+  const cur = useCurrency(businessId);
+  const money = (v: number | string) => moneyRound(v, cur);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;

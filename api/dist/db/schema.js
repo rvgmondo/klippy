@@ -154,6 +154,12 @@ export const businesses = mysqlTable('businesses', {
     // are the "from" details on a document. Backfilled from the account on migrate.
     brandName: varchar('brand_name', { length: 80 }),
     logoPath: varchar('logo_path', { length: 255 }),
+    // What this business bills in. Null inherits the workspace currency, which is
+    // what most stay on; a value here is for the account that runs a rand company
+    // and a dollar company side by side. Set on the business rather than the client
+    // because it is the seller's bank account that decides what can be received,
+    // and because every document a business issues has to agree with its own books.
+    currency: varchar('currency', { length: 3 }),
     bizAddress: varchar('biz_address', { length: 500 }),
     bizTaxNumber: varchar('biz_tax_number', { length: 60 }),
     bizRegNumber: varchar('biz_reg_number', { length: 60 }),

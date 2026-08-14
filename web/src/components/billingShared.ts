@@ -47,8 +47,4 @@ export const STATUS_COLOR: Record<Status, string> = {
   void: 'bg-slate-800 text-slate-500 line-through',
 };
 
-export function money(v: number | string, currency: string) {
-  const n = typeof v === 'string' ? Number(v) : v;
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(n); }
-  catch { return `${currency} ${n.toFixed(2)}`; }
-}
+export { money } from '../lib/money';

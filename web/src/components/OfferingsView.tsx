@@ -6,6 +6,8 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { Business, BusinessType, Offering, Subscription, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
+import { money as fmt } from '../lib/money';
+import { useCurrency } from '../lib/useCurrency';
 
 const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'services', label: 'Services' }, { value: 'products', label: 'Products' },
@@ -16,13 +18,13 @@ const ALL_TYPES: { value: BusinessType; label: string }[] = [
 const INTERVAL_SHORT: Record<number, string> = { 1: 'mo', 3: 'quarter', 6: '6mo', 12: 'yr' };
 const INTERVAL_WORD: Record<number, string> = { 1: 'month', 3: 'quarter', 6: 'six months', 12: 'year' };
 
-function money(v: string | number) {
-  const n = typeof v === 'string' ? Number(v) : v;
-  return `R ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 export function OfferingsView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
+  // What this business bills in. Both of these screens used to print a rand sign
+  // regardless of the setting, so a dollar business saw its own prices mislabelled.
+  const cur = useCurrency(businessId);
+  const money = (v: string | number) => fmt(v, cur);
   const [editing, setEditing] = useState<Offering | 'new' | null>(null);
   const [startingSub, setStartingSub] = useState(false);
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
@@ -270,6 +272,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
 }) {
   const [offeringId, setOfferingId] = useState<string>(recurringOfferings[0] ? String(recurringOfferings[0].id) : '');
   const [folderId, setFolderId] = useState('');
+  const cur = useCurrency(businessId ?? 'all');
   const [intervalMonths, setIntervalMonths] = useState(1);
   const [domain, setDomain] = useState('');
   const chosen = recurringOfferings.find((o) => String(o.id) === offeringId);
@@ -300,7 +303,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
         <label className="mb-1 block text-xs text-slate-400">Offering</label>
         <select value={offeringId} onChange={(e) => setOfferingId(e.target.value)}
           className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500">
-          {recurringOfferings.map((o) => <option key={o.id} value={o.id}>{o.name} ({money(o.price)}/mo)</option>)}
+          {recurringOfferings.map((o) => <option key={o.id} value={o.id}>{o.name} ({fmt(o.price, cur)}/mo)</option>)}
         </select>
 
         <label className="mb-1 block text-xs text-slate-400">Client</label>

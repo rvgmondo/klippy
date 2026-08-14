@@ -1,6 +1,7 @@
 import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { DEFAULT_CURRENCY, formatMoney, payfastSupports } from '../lib/currency.js';
 import { db } from '../db/client.js';
 import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, offerings, } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
@@ -195,8 +196,18 @@ export async function portalRoutes(app) {
                 ? (balances.get(r.id)?.outstanding ?? Number(r.total))
                 : 0,
         }));
-        const owed = withBalance.reduce((s, r) => s + Math.max(0, r.outstanding), 0);
-        return { documents: withBalance, totalOutstanding: money(owed) };
+        // Per currency, because this number is shown to a paying client. A client
+        // billed in two currencies used to be told they owed the sum of both, labelled
+        // with whichever happened to be first in the list.
+        const owedBy = new Map();
+        for (const r of withBalance) {
+            if (r.outstanding > 0)
+                owedBy.set(r.currency, (owedBy.get(r.currency) ?? 0) + r.outstanding);
+        }
+        const outstanding = [...owedBy]
+            .map(([currency, amount]) => ({ currency, amount: money(amount) }))
+            .sort((a, b) => Number(b.amount) - Number(a.amount));
+        return { documents: withBalance, outstanding };
     });
     app.get('/api/v1/portal/documents/:id', async (req, reply) => {
         const c = await require(req, reply);
@@ -288,9 +299,14 @@ export async function portalRoutes(app) {
         if (balance.outstanding <= 0)
             return reply.code(400).send({ error: 'That invoice is already settled.' });
         // Through the invoice's own business, so the money reaches the right company.
-        const creds = await credsFor(c.user.accountId, doc.businessId);
-        if (!creds)
-            return reply.code(400).send({ error: 'Online payment is not available for this invoice. Please use the bank details on it.' });
+        const creds = await credsFor(c.user.accountId, doc.businessId, doc.currency);
+        if (!creds) {
+            return reply.code(400).send({
+                error: payfastSupports(doc.currency)
+                    ? 'Online payment is not available for this invoice. Please use the bank details on it.'
+                    : `Invoices in ${doc.currency} cannot be paid by card here. Please use the bank details on the invoice.`,
+            });
+        }
         const base = appUrl();
         return buildCheckout(creds, {
             // The outstanding amount, not the face value: a part-paid or part-credited
@@ -349,7 +365,7 @@ export async function portalRoutes(app) {
             ],
             facts: [
                 ['Quote', quote.number],
-                ['Value', `${quote.currency} ${money(Number(quote.total))}`],
+                ['Value', formatMoney(Number(quote.total), quote.currency)],
             ],
         };
         const owner = await ownerEmail(c.user.accountId);
@@ -389,7 +405,7 @@ export async function portalRoutes(app) {
         const unpaidAll = subIds.length
             ? await db.select({
                 id: documents.id, number: documents.number, total: documents.total,
-                subscriptionId: documents.subscriptionId,
+                subscriptionId: documents.subscriptionId, currency: documents.currency,
             }).from(documents)
                 .where(and(mine(c), inArray(documents.subscriptionId, subIds), eq(documents.status, 'sent')))
             : [];
@@ -406,6 +422,9 @@ export async function portalRoutes(app) {
                 // up reads as "being set up", not "pending" or "dry-run".
                 display: r.status === 'active' ? 'active' : r.status === 'suspended' ? 'suspended' : 'being set up',
                 outstanding: money(owed),
+                // From the invoice that is actually owed, not a guess. The portal used to
+                // print a rand sign here whatever the invoice said.
+                currency: unpaid[0]?.currency ?? DEFAULT_CURRENCY,
                 unpaidInvoiceId: unpaid[0]?.id ?? null,
             };
         });

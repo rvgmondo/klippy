@@ -15,6 +15,7 @@ import { sanitiseTemplate, PLACEHOLDERS } from '../lib/template.js';
 import { nextNumberFor } from '../lib/numbering.js';
 import { PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS, TEMPLATE_INFO, TYPEFACE_INFO, PLACEMENT_INFO } from '../lib/pdfThemes.js';
 import { renderSamplePdf } from '../lib/pdf.js';
+import { isKnownCurrency } from '../lib/currency.js';
 const businessType = z.enum(['services', 'products', 'code', 'content']);
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
@@ -32,6 +33,10 @@ const updateSchema = z.object({
     notes: z.string().max(20000).nullable().optional(),
     // Brand + invoicing identity.
     brandName: nullableStr(80),
+    // What this business bills in. Null (or blank) means "use the workspace
+    // currency", which is what all but multi-country accounts stay on.
+    currency: z.string().trim().nullable().optional()
+        .refine((v) => v == null || v === '' || (v.length === 3 && isKnownCurrency(v)), 'That is not a currency Klippy knows.'),
     bizAddress: nullableStr(500),
     bizTaxNumber: nullableStr(60),
     bizRegNumber: nullableStr(60),
@@ -149,10 +154,13 @@ export async function businessRoutes(app) {
             patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
         }
         // Empty strings from the form mean "clear it"; decimals are stored as strings.
-        for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody']) {
+        for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody', 'currency']) {
             if (patch[k] === '')
                 patch[k] = null;
         }
+        // Stored upper case, so nothing downstream has to normalise it.
+        if (typeof patch.currency === 'string')
+            patch.currency = patch.currency.toUpperCase();
         if (parsed.data.defaultTaxRate !== undefined) {
             patch.defaultTaxRate = parsed.data.defaultTaxRate === null ? null : String(parsed.data.defaultTaxRate);
         }

@@ -4,6 +4,8 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
+import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
+import { publicAccount } from '../lib/publicAccount.js';
 
 const nullableStr = (max: number) => z.string().trim().max(max).nullable().optional().or(z.literal(''));
 const updateSchema = z.object({
@@ -11,7 +13,11 @@ const updateSchema = z.object({
   folderLabelSingular: z.string().trim().min(1).max(40).optional(),
   folderLabelPlural: z.string().trim().min(1).max(40).optional(),
   brandName: z.string().trim().max(80).nullable().optional(),
-  currency: z.string().trim().length(3).optional(),
+  // Checked against the list, not just the length: a typo here silently relabels
+  // every future invoice, and the currency is copied onto documents at issue time
+  // so it cannot be corrected in one place afterwards.
+  currency: z.string().trim().length(3).transform((v) => v.toUpperCase())
+    .refine(isKnownCurrency, 'That is not a currency Klippy knows.').optional(),
   // Invoicing settings.
   bizAddress: nullableStr(500),
   bizTaxNumber: nullableStr(60),
@@ -23,13 +29,6 @@ const updateSchema = z.object({
   defaultDueDays: z.number().int().min(0).max(365).optional(),
 });
 
-function publicAccount(a: typeof accounts.$inferSelect) {
-  return {
-    id: a.id, name: a.name, slug: a.slug, plan: a.plan,
-    folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
-    brandName: a.brandName, hasLogo: !!a.logoPath, currency: a.currency,
-  };
-}
 
 /** The invoicing settings, as the settings form and the invoice template read them. */
 function invoicingSettings(a: typeof accounts.$inferSelect) {
@@ -45,6 +44,14 @@ function invoicingSettings(a: typeof accounts.$inferSelect) {
 
 export async function accountRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.requireAuth);
+
+  /**
+   * The currencies on offer, for any picker that needs them.
+   *
+   * Served rather than duplicated in the web bundle so there is one list. Static,
+   * so it needs no tenant scoping beyond being behind auth.
+   */
+  app.get('/api/v1/currencies', async () => ({ currencies: CURRENCIES }));
 
   // The invoicing settings, for the settings screen to load into its form.
   app.get('/api/v1/account/invoicing', async (req, reply) => {

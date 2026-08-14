@@ -82,6 +82,8 @@ export interface Business {
   // Brand + invoicing identity (what a client sees on this business's documents).
   brandName?: string | null;
   logoPath?: string | null;
+  /** What this business bills in. Null inherits the workspace currency. */
+  currency?: string | null;
   bizAddress?: string | null;
   bizTaxNumber?: string | null;
   bizRegNumber?: string | null;

@@ -1,5 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { money } from './money.js';
+import { formatMoney, roundMoney } from './currency.js';
+import { currencyFor } from './currencyFor.js';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -81,8 +83,8 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   const [business] = await db.select({ brandName: businesses.brandName, name: businesses.name }).from(businesses)
     .where(tenantWhere(businesses, accountId, eq(businesses.id, sub.businessId))).limit(1);
   const brand = business?.brandName || business?.name || account?.brandName || 'Invoice';
-  const currency = account?.currency ?? 'ZAR';
-  const price = Number(offering.price);
+  const currency = await currencyFor(accountId, sub.businessId);
+  const price = roundMoney(Number(offering.price), currency);
   const issueDate = new Date().toISOString().slice(0, 10);
   const dueDate = addDays(issueDate, 7);
 
@@ -124,7 +126,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
           `Your invoice for ${offering.name} is attached.`,
         ],
         facts: [
-          ['Amount', `${currency} ${money(price)}`] as [string, string],
+          ['Amount', formatMoney(price, currency)] as [string, string],
           ['Due', dueDate] as [string, string],
         ],
         ...(payLink ? { button: { label: 'Pay online', url: payLink } } : {}),

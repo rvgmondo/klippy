@@ -10,6 +10,8 @@ import { CardDetail } from './CardDetail';
 import { BusinessNotes } from './BusinessNotes';
 import { BusinessSettings } from './BusinessSettings';
 import { ErrorNote } from './ErrorNote';
+import { moneyRound } from '../lib/money';
+import { useCurrency } from '../lib/useCurrency';
 
 interface Bucket { open: number; dueToday: number; overdue: number; flagged: number; weekSeconds: number }
 interface BizRoll { id: number; name: string; open: number; weekSeconds: number }
@@ -46,12 +48,9 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   onNavigate?: (v: string) => void;
   onPickBusiness?: (id: number) => void;
 }) {
-  const { user, account } = useAuth();
-  const cur = account?.currency ?? 'ZAR';
-  const money = (v: number) => {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur, maximumFractionDigits: 0 }).format(v); }
-    catch { return `${cur} ${v.toFixed(0)}`; }
-  };
+  const { user } = useAuth();
+  const cur = useCurrency(businessId);
+  const money = (v: number) => moneyRound(v, cur);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data, error, refetch } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`), retry: false });
   const deals = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ summary: DealSummary }>(`/deals${bizQ}`) });
@@ -75,7 +74,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
 
   const heading = businessId === 'all'
     ? `${greeting()}, ${user?.name?.split(' ')[0] ?? 'there'}`
-    : (bizList.find((b) => b.id === businessId)?.name ?? account?.name ?? 'Business');
+    : (bizList.find((b) => b.id === businessId)?.name ?? 'Business');
   const sub = businessId === 'all'
     ? "Here's where your businesses stand today."
     : 'The three engines of this business, at a glance.';

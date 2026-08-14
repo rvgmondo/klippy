@@ -5,18 +5,23 @@ import { apiGet, apiPost } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { money } from '../lib/money';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
   businessId: number | null; folderId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
 }
-interface Collections { items: Item[]; summary: { count: number; outstanding: number; suspended: number } }
-
-function money(v: number, currency: string) {
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v); }
-  catch { return `${currency} ${v.toFixed(2)}`; }
+interface Collections {
+  items: Item[];
+  summary: {
+    count: number;
+    /** One total per currency. Klippy never adds unlike currencies together. */
+    byCurrency: { currency: string; outstanding: number; count: number }[];
+    suspended: number;
+  };
 }
+
 
 /**
  * Who owes money and needs chasing. Overdue unpaid invoices, worst first, with the
@@ -50,8 +55,17 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
 
         {data && (
           <>
-            <div className="grid grid-cols-3 gap-4">
-              <Kpi label="Outstanding" value={money(data.summary.outstanding, data.items[0]?.currency ?? 'ZAR')} />
+            {/* One "Outstanding" tile per currency. The old single tile added every
+                overdue invoice together and labelled the result with whichever
+                currency happened to be first in the list, which for a workspace
+                billing in two currencies was simply a wrong number. */}
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {(data.summary.byCurrency.length ? data.summary.byCurrency : [{ currency: 'ZAR', outstanding: 0, count: 0 }])
+                .map((c) => (
+                  <Kpi key={c.currency}
+                    label={data.summary.byCurrency.length > 1 ? `Outstanding (${c.currency})` : 'Outstanding'}
+                    value={money(c.outstanding, c.currency)} />
+                ))}
               <Kpi label="Overdue invoices" value={String(data.summary.count)} />
               <Kpi label="Flagged at risk" value={String(data.summary.suspended)} warn={data.summary.suspended > 0} />
             </div>

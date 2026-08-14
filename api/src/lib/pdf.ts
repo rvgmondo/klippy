@@ -7,6 +7,7 @@ import { documents, documentLines, accounts, businesses } from '../db/schema.js'
 import { tenantWhere } from './tenant.js';
 import { fillTemplate, templateDataFor } from './template.js';
 import { safeImage } from './imageGuard.js';
+import { DEFAULT_CURRENCY, formatMoney } from './currency.js';
 import {
   drawDocument, PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS,
   type DocData, type PdfTemplate, type PdfTypeface, type IssuerPlacement,
@@ -91,11 +92,7 @@ export async function renderDocumentPdf(
     logo = safeImage(await readFile(path.join(uploadDir(), logoPath)).catch(() => null));
   }
 
-  const cur = doc.currency;
-  const money = (v: number | string) => {
-    const n = typeof v === 'string' ? Number(v) : v;
-    return `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
-  };
+  const money = (v: number | string) => formatMoney(v, doc.currency);
 
   // Custom blocks, sanitised on save, with this document's values filled in.
   const tplData = templateDataFor(
@@ -182,8 +179,8 @@ export async function renderSamplePdf(
   const logo = logoPath
     ? safeImage(await readFile(path.join(uploadDir(), logoPath)).catch(() => null))
     : null;
-  const cur = account?.currency ?? 'ZAR';
-  const money = (n: number) => `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+  const cur = business?.currency || account?.currency || DEFAULT_CURRENCY;
+  const money = (n: number) => formatMoney(n, cur);
 
   const data: DocData = {
     label: pick('bizTaxNumber') ? 'Tax Invoice' : 'Invoice',

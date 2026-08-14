@@ -7,6 +7,7 @@ import { documents, documentLines, accounts, businesses } from '../db/schema.js'
 import { tenantWhere } from './tenant.js';
 import { fillTemplate, templateDataFor } from './template.js';
 import { safeImage } from './imageGuard.js';
+import { DEFAULT_CURRENCY, formatMoney } from './currency.js';
 import { drawDocument, PDF_TEMPLATES, PDF_TYPEFACES, ISSUER_PLACEMENTS, } from './pdfThemes.js';
 /**
  * Renders a document to a real PDF, so an emailed invoice arrives as a file the
@@ -72,11 +73,7 @@ export async function renderDocumentPdf(accountId, docId, override) {
         // before it throws, which would drag every emailed invoice down with it.
         logo = safeImage(await readFile(path.join(uploadDir(), logoPath)).catch(() => null));
     }
-    const cur = doc.currency;
-    const money = (v) => {
-        const n = typeof v === 'string' ? Number(v) : v;
-        return `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
-    };
+    const money = (v) => formatMoney(v, doc.currency);
     // Custom blocks, sanitised on save, with this document's values filled in.
     const tplData = templateDataFor(doc, business, account);
     const data = {
@@ -148,8 +145,8 @@ export async function renderSamplePdf(accountId, businessId, opts) {
     const logo = logoPath
         ? safeImage(await readFile(path.join(uploadDir(), logoPath)).catch(() => null))
         : null;
-    const cur = account?.currency ?? 'ZAR';
-    const money = (n) => `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    const cur = business?.currency || account?.currency || DEFAULT_CURRENCY;
+    const money = (n) => formatMoney(n, cur);
     const data = {
         label: pick('bizTaxNumber') ? 'Tax Invoice' : 'Invoice',
         number: 'INV-0042',

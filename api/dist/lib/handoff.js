@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { money } from './money.js';
+import { currencyFor } from './currencyFor.js';
 import { db } from './../db/client.js';
 import { deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses, memberships, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -92,7 +93,7 @@ on('deal.won', 'draft-opening-invoice', async (p, ctx) => {
             type: 'invoice', seq, number, businessId: p.businessId, folderId,
             clientName: p.company || p.title, clientEmail: p.contactEmail || null,
             issueDate, dueDate: due.toISOString().slice(0, 10),
-            currency: account?.currency ?? 'ZAR',
+            currency: await currencyFor(accountId, p.businessId),
             taxRate: money(taxRate), subtotal: money(subtotal),
             taxAmount: money(taxAmount), total: money(subtotal + taxAmount),
             // A DRAFT on purpose: the handoff should save the typing, not send a client

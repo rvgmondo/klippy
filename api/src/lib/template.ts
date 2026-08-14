@@ -19,6 +19,8 @@
  *      a client named `<script>` cannot become a tag.
  */
 
+import { formatMoney } from './currency.js';
+
 /** Tags that mean the same thing on screen and on paper. */
 const ALLOWED_TAGS = new Set([
   'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u',
@@ -170,7 +172,7 @@ export function templateDataFor(
   account: Record<string, unknown> | undefined,
 ): TemplateData {
   const pick = (k: string) => (business?.[k] ?? account?.[k] ?? null) as string | null;
-  const money = (v: unknown) => `${doc.currency ?? ''} ${Number(v ?? 0).toFixed(2)}`.trim();
+  const money = (v: unknown) => formatMoney(Number(v ?? 0), doc.currency as string | null);
   return {
     'business.name': (business?.brandName as string) || (business?.name as string) || (account?.brandName as string) || '',
     'business.address': pick('bizAddress') ?? '',

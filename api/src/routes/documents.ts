@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { money } from '../lib/money.js';
+import { DEFAULT_CURRENCY, formatMoney, roundMoney } from '../lib/currency.js';
+import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
@@ -56,14 +58,31 @@ const PREFIX: Record<'quote' | 'invoice' | 'credit_note', string> = { quote: 'QU
 function computeTotals(
   lines: { quantity: number; unitPrice: number }[],
   taxRate: number, discountType: 'none' | 'percent' | 'amount' = 'none', discountValue = 0,
+  currency = DEFAULT_CURRENCY,
 ) {
-  const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
+  // Every figure is rounded to what the currency can express, and each one is then
+  // built from figures that are ALREADY rounded. Rounding each part independently
+  // from the raw arithmetic gives an invoice that does not add up: a yen invoice
+  // came out as 28,334 subtotal + 2,833 tax = 31,168, and a client checking the
+  // column with a calculator gets 31,167. Rare at two decimals, routine at zero.
+  const r = (n: number) => roundMoney(n, currency);
+
+  // The unit price is rounded before it is multiplied, not after. Displaying a
+  // rounded price beside an amount worked out from the unrounded one gives a row
+  // that reads 2 x JPY 12,501 = JPY 25,001, which is simply wrong on its face.
+  const priced = lines.map((l) => {
+    const unitPrice = r(l.unitPrice);
+    return { unitPrice, amount: r(l.quantity * unitPrice) };
+  });
+  const subtotal = r(priced.reduce((s, l) => s + l.amount, 0));
+
   let discountAmount = 0;
-  if (discountType === 'percent') discountAmount = subtotal * (Math.min(discountValue, 100) / 100);
-  else if (discountType === 'amount') discountAmount = Math.min(discountValue, subtotal);
-  const taxable = subtotal - discountAmount;
-  const taxAmount = taxable * (taxRate / 100);
-  return { subtotal, discountAmount, taxAmount, total: taxable + taxAmount };
+  if (discountType === 'percent') discountAmount = r(subtotal * (Math.min(discountValue, 100) / 100));
+  else if (discountType === 'amount') discountAmount = r(Math.min(discountValue, subtotal));
+
+  const taxable = r(subtotal - discountAmount);
+  const taxAmount = r(taxable * (taxRate / 100));
+  return { priced, subtotal, discountAmount, taxAmount, total: r(taxable + taxAmount) };
 }
 
 /**
@@ -163,10 +182,27 @@ export async function documentRoutes(app: FastifyInstance) {
       }))
       // A fully credited or fully paid invoice is not a collections problem.
       .filter((i) => i.outstanding > 0.001);
-    const outstanding = round(items.reduce((s, i) => s + i.outstanding, 0));
+    // One total PER CURRENCY. Adding a dollar invoice to a rand one produces a
+    // number that is not money in any currency, and the old code did exactly that
+    // and then labelled it with whatever the first row happened to be. Klippy does
+    // not convert, so it reports each currency on its own line.
+    const byCurrency = [...items.reduce((m, i) => {
+      m.set(i.currency, (m.get(i.currency) ?? 0) + i.outstanding);
+      return m;
+    }, new Map<string, number>())]
+      .map(([currency, outstanding]) => ({
+        currency,
+        outstanding: round(outstanding),
+        count: items.filter((i) => i.currency === currency).length,
+      }))
+      .sort((a, b) => b.outstanding - a.outstanding);
     return {
       items,
-      summary: { count: items.length, outstanding, suspended: items.filter((i) => i.suspended).length },
+      summary: {
+        count: items.length,
+        byCurrency,
+        suspended: items.filter((i) => i.suspended).length,
+      },
     };
   });
 
@@ -183,16 +219,20 @@ export async function documentRoutes(app: FastifyInstance) {
     const { accountId } = authOf(req);
     const folderId = intId(req);
     if (!folderId) return reply.code(400).send({ error: 'Bad id.' });
-    const q = z.object({ from: dateStr.optional(), to: dateStr.optional() }).safeParse(req.query);
+    const q = z.object({
+      from: dateStr.optional(), to: dateStr.optional(),
+      currency: z.string().trim().length(3).optional(),
+    }).safeParse(req.query);
     const from = q.success ? q.data.from : undefined;
     const to = q.success ? q.data.to : undefined;
+    const wantCurrency = q.success ? q.data.currency?.toUpperCase() : undefined;
 
     const [client] = await db.select({ id: folders.id, name: folders.name, businessId: folders.businessId })
       .from(folders).where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
     if (!client) return reply.code(404).send({ error: 'Client not found.' });
     if (!(await assertMaybeBusiness(req, reply, client.businessId, 'viewer'))) return;
 
-    const docs = await db.select({
+    const allDocs = await db.select({
       id: documents.id, type: documents.type, number: documents.number, issueDate: documents.issueDate,
       dueDate: documents.dueDate, total: documents.total, status: documents.status, currency: documents.currency,
     }).from(documents)
@@ -204,6 +244,21 @@ export async function documentRoutes(app: FastifyInstance) {
         from ? gte(documents.issueDate, from) : undefined,
         to ? lte(documents.issueDate, to) : undefined,
       ));
+
+    // A running balance only means something within ONE currency. If this client
+    // has been billed in more than one, the statement is produced per currency and
+    // the caller is told which others exist rather than being handed a total that
+    // silently added dollars to rand.
+    const currencies = [...new Set(allDocs.map((d) => d.currency))].sort();
+    // Default to whatever the most recent document was raised in, not to whichever
+    // code sorts first. Someone opening a statement wants the account they are
+    // currently being billed on; alphabetical order is a coin toss.
+    const latest = allDocs.reduce<typeof allDocs[number] | undefined>(
+      (best, d) => (!best || d.issueDate > best.issueDate ? d : best), undefined);
+    const currency = (wantCurrency && currencies.includes(wantCurrency))
+      ? wantCurrency
+      : (latest?.currency ?? await currencyFor(accountId, client.businessId));
+    const docs = allDocs.filter((d) => d.currency === currency);
 
     // Payments belong to those documents, so pull them by document id.
     const docIds = docs.map((d) => d.id);
@@ -247,7 +302,8 @@ export async function documentRoutes(app: FastifyInstance) {
     return {
       client: { id: client.id, name: client.name, businessId: client.businessId },
       from: from ?? null, to: to ?? null,
-      currency: docs[0]?.currency ?? 'ZAR',
+      currency,
+      currencies,
       entries: rows,
       summary: {
         invoiced: round(entries.reduce((s, e) => s + (e.kind === 'invoice' ? e.charge : 0), 0)),
@@ -336,14 +392,17 @@ export async function documentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
 
-    const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
-    const currency = account?.currency ?? 'ZAR';
+    const businessId = await resolveBusinessId(accountId, d.businessId);
+    // The business decides what it bills in, so this has to be settled before the
+    // totals: rounding depends on the currency. Copied onto the document and never
+    // re-read, so changing the setting later cannot restate what was already issued.
+    const currency = await currencyFor(accountId, businessId);
+
     const taxRate = d.taxRate ?? 0;
     const discountType = d.discountType ?? 'none';
     const discountValue = d.discountValue ?? 0;
-    const totals = computeTotals(d.lines, taxRate, discountType, discountValue);
+    const totals = computeTotals(d.lines, taxRate, discountType, discountValue, currency);
 
-    const businessId = await resolveBusinessId(accountId, d.businessId);
     // A member can only raise a document in a business they can work in.
     if (businessId && !(await canSeeBusiness(req, businessId))) {
       return reply.code(403).send({ error: 'You do not have access to that business.' });
@@ -365,7 +424,8 @@ export async function documentRoutes(app: FastifyInstance) {
       if (d.lines.length) {
         await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
           documentId: newId, description: l.description, quantity: money(l.quantity),
-          unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+          unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+          amount: money(totals.priced[i]?.amount ?? 0), position: i,
           offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
         })));
       }
@@ -393,7 +453,10 @@ export async function documentRoutes(app: FastifyInstance) {
     const taxRate = d.taxRate ?? 0;
     const discountType = d.discountType ?? 'none';
     const discountValue = d.discountValue ?? 0;
-    const totals = computeTotals(d.lines, taxRate, discountType, discountValue);
+    // The document's own currency, not the business's current setting: editing an
+    // old invoice must not silently re-round it into whatever the business bills in
+    // today.
+    const totals = computeTotals(d.lines, taxRate, discountType, discountValue, existing.currency);
     await db.transaction(async (tx) => {
       await tx.update(documents).set({
         folderId: d.folderId ?? null, clientName: d.clientName, clientEmail: d.clientEmail || null,
@@ -407,7 +470,8 @@ export async function documentRoutes(app: FastifyInstance) {
       if (d.lines.length) {
         await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
           documentId: id, description: l.description, quantity: money(l.quantity),
-          unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+          unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+          amount: money(totals.priced[i]?.amount ?? 0), position: i,
           offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
         })));
       }
@@ -524,13 +588,13 @@ export async function documentRoutes(app: FastifyInstance) {
       : [{
           description: `Credit against invoice ${inv.number}`,
           quantity: 1,
-          unitPrice: Math.round((bal.outstanding / (1 + taxRate / 100)) * 100) / 100,
+          unitPrice: roundMoney(bal.outstanding / (1 + taxRate / 100), inv.currency),
         }];
 
-    const totals = computeTotals(lines, taxRate);
+    const totals = computeTotals(lines, taxRate, 'none', 0, inv.currency);
     if (totals.total > bal.outstanding + 0.02) {
       return reply.code(400).send({
-        error: `That credits ${totals.total.toFixed(2)} but only ${bal.outstanding.toFixed(2)} is outstanding.`,
+        error: `That credits ${formatMoney(totals.total, inv.currency)} but only ${formatMoney(bal.outstanding, inv.currency)} is outstanding.`,
       });
     }
 
@@ -551,7 +615,8 @@ export async function documentRoutes(app: FastifyInstance) {
       const cid = Number(ins[0].insertId);
       await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
         documentId: cid, description: l.description, quantity: money(l.quantity),
-        unitPrice: money(l.unitPrice), amount: money(l.quantity * l.unitPrice), position: i,
+        unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+        amount: money(totals.priced[i]?.amount ?? 0), position: i,
       })));
       return cid;
     });
@@ -666,8 +731,7 @@ export async function documentRoutes(app: FastifyInstance) {
         .where(tenantWhere(businesses, accountId, eq(businesses.id, doc.businessId))).limit(1)
       : [undefined];
     const brand = business?.brandName || business?.name || account?.brandName || 'Klippy';
-    const cur = doc.currency;
-    const fmt = (v: string | number) => `${cur} ${Number(v).toFixed(2)}`;
+    const fmt = (v: string | number) => formatMoney(v, doc.currency);
 
     const lineText = lines.map((l) => `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`).join('\n');
     const label = doc.type === 'quote' ? 'Quotation' : 'Invoice';

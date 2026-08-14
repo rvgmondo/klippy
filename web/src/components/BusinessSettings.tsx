@@ -5,6 +5,8 @@ import { X, Upload, Trash2 } from 'lucide-react';
 import { apiGet, apiPatch, apiPut, apiDelete } from '../lib/api';
 import type { Business } from '../lib/types';
 import { fontsFor, loadFont } from '../lib/fonts';
+import { useCurrencyOptions } from '../lib/useCurrency';
+import { useAuth } from '../lib/auth';
 
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
 
@@ -54,6 +56,7 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
   const qc = useQueryClient();
   const [form, setForm] = useState({
     brandName: business.brandName ?? '',
+    currency: business.currency ?? '',
     bizAddress: business.bizAddress ?? '',
     bizTaxNumber: business.bizTaxNumber ?? '',
     bizRegNumber: business.bizRegNumber ?? '',
@@ -82,13 +85,17 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
   const fileRef = useRef<HTMLInputElement>(null);
 
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm({ ...form, [k]: v });
+  const currencies = useCurrencyOptions();
+  const { account } = useAuth();
+  const workspaceCurrency = account?.currency ?? 'ZAR';
   const show = (s: BusinessSection) => !only || only === s;
   // Brand, invoicing and reminders share one save, so any of them shows the button.
   const showSave = show('brand') || show('invoicing') || show('reminders');
 
   const save = useMutation({
     mutationFn: () => apiPatch(`/businesses/${business.id}`, {
-      brandName: form.brandName, bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
+      brandName: form.brandName, currency: form.currency || null,
+      bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
       bizRegNumber: form.bizRegNumber, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
       invoiceHeaderHtml: form.invoiceHeaderHtml || null,
       invoiceFooterHtml: form.invoiceFooterHtml || null,
@@ -216,6 +223,24 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
           {/* Invoicing */}
           {show('invoicing') && <section className="space-y-4 border-t border-slate-800 pt-5">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoicing details</h3>
+            <div>
+              <label className={label}>Currency</label>
+              <select className={field} value={form.currency} onChange={(e) => set('currency', e.target.value)}>
+                <option value="">Use the workspace currency ({workspaceCurrency})</option>
+                {currencies.map((c) => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500">
+                What this business bills in. Set it only if this business bills in something
+                other than the workspace currency. Quotes and invoices already issued keep the
+                currency they were raised in.
+                {form.currency && form.currency !== 'ZAR' && (
+                  <span className="mt-1 block text-amber-400/90">
+                    PayFast settles rand only, so invoices in {form.currency} will not offer a
+                    Pay online button. They still carry your bank details for a transfer.
+                  </span>
+                )}
+              </p>
+            </div>
             <div>
               <label className={label}>Address</label>
               <textarea className={`${field} min-h-[64px] resize-y`} value={form.bizAddress}

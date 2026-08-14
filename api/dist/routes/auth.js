@@ -7,6 +7,7 @@ import { getMembership, workspacesFor } from '../lib/membership.js';
 import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
+import { publicAccount } from '../lib/publicAccount.js';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const signupSchema = z.object({
     accountName: z.string().trim().min(1, 'Workspace name is required').max(150),
@@ -20,13 +21,6 @@ const loginSchema = z.object({
 });
 function publicUser(u, role, accountId) {
     return { id: u.id, name: u.name, email: u.email, role, accountId, dailyDigest: u.dailyDigest, theme: u.theme, accent: u.accent };
-}
-function publicAccount(a) {
-    return {
-        id: a.id, name: a.name, slug: a.slug, plan: a.plan,
-        folderLabelSingular: a.folderLabelSingular, folderLabelPlural: a.folderLabelPlural,
-        brandName: a.brandName, hasLogo: !!a.logoPath,
-    };
 }
 async function uniqueSlug(base) {
     let slug = slugify(base);

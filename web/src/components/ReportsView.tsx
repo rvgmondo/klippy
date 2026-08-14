@@ -3,22 +3,28 @@ import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { ErrorNote } from './ErrorNote';
+import { money } from '../lib/money';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
   cost: number; profit: number | null;
+  /** The currency this client's business bills in. */
+  currency: string;
+}
+interface CurrencyTotals {
+  currency: string; billable: number; expenses: number; profit: number; mrr: number;
 }
 interface Report {
   currency: string;
+  /** The money split by currency. Klippy never converts, so this is the truth. */
+  byCurrency: CurrencyTotals[];
+  /** True when the businesses in range do not share a currency. */
+  mixed: boolean;
   clients: ClientRow[];
   people: { userId: number; name: string; hours: number }[];
   totals: { hours: number; amount: number; unratedClients: number; expenses: number; profit: number; mrr: number };
 }
 
-function money(v: number, currency: string) {
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v); }
-  catch { return `${currency} ${v.toFixed(2)}`; }
-}
 
 function startOfMonth() {
   const d = new Date();
@@ -65,12 +71,52 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           <>
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               <Tile label="Total time" value={`${data.totals.hours.toFixed(2)} h`} />
-              <Tile label="Billable" value={money(data.totals.amount, cur)} accent />
-              <Tile label="Expenses" value={money(data.totals.expenses, cur)} />
-              <Tile label="Profit" value={money(data.totals.profit, cur)} accent={data.totals.profit >= 0} warn={data.totals.profit < 0} />
+              {/* With one currency these read as before. With several, adding them
+                  would produce a number that is not money in any currency, so each
+                  gets its own row instead and nothing is converted. */}
+              {data.mixed ? (
+                <Tile label="Billable" value={`${data.byCurrency.length} currencies`}
+                  hint={data.byCurrency.map((b) => money(b.billable, b.currency)).join('  |  ')} />
+              ) : (
+                <>
+                  <Tile label="Billable" value={money(data.totals.amount, cur)} accent />
+                  <Tile label="Expenses" value={money(data.totals.expenses, cur)} />
+                  <Tile label="Profit" value={money(data.totals.profit, cur)} accent={data.totals.profit >= 0} warn={data.totals.profit < 0} />
+                </>
+              )}
               <Tile label="Clients without a rate" value={String(data.totals.unratedClients)} />
             </div>
-            {data.totals.mrr > 0 && (
+            {data.mixed && (
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                      <th className="px-3 py-2">Currency</th>
+                      <th className="px-3 py-2 text-right">Billable</th>
+                      <th className="px-3 py-2 text-right">Expenses</th>
+                      <th className="px-3 py-2 text-right">Profit</th>
+                      <th className="px-3 py-2 text-right">MRR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.byCurrency.map((b) => (
+                      <tr key={b.currency} className="border-b border-slate-800/60 last:border-0">
+                        <td className="px-3 py-2 font-medium text-slate-200">{b.currency}</td>
+                        <td className="px-3 py-2 text-right num text-slate-100">{money(b.billable, b.currency)}</td>
+                        <td className="px-3 py-2 text-right num text-slate-400">{money(b.expenses, b.currency)}</td>
+                        <td className={`px-3 py-2 text-right num ${b.profit < 0 ? 'text-red-300' : 'text-slate-100'}`}>{money(b.profit, b.currency)}</td>
+                        <td className="px-3 py-2 text-right num text-violet-300">{money(b.mrr, b.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="border-t border-slate-800 px-3 py-2 text-[11px] text-slate-500">
+                  Not converted. Klippy reports each currency as it was billed.
+                </p>
+              </div>
+            )}
+
+            {!data.mixed && data.totals.mrr > 0 && (
               <p className="-mt-3 mb-5 text-xs text-slate-500">
                 Plus <span className="font-medium text-violet-300">{money(data.totals.mrr, cur)}</span> in monthly recurring revenue (not date-ranged - see Offerings).
               </p>
@@ -101,13 +147,13 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
                         {c.rate == null ? <span className="text-amber-400/80">no rate</span> : money(c.rate, cur)}
                       </td>
                       <td className="px-3 py-2 text-right num text-slate-100">
-                        {c.amount == null ? '-' : money(c.amount, cur)}
+                        {c.amount == null ? '-' : money(c.amount, c.currency)}
                       </td>
                       <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">
-                        {c.cost > 0 ? money(c.cost, cur) : '-'}
+                        {c.cost > 0 ? money(c.cost, c.currency) : '-'}
                       </td>
                       <td className="hidden px-3 py-2 text-right num sm:table-cell">
-                        {c.profit == null ? '-' : <span className={c.profit < 0 ? 'text-red-400' : 'text-slate-100'}>{money(c.profit, cur)}</span>}
+                        {c.profit == null ? '-' : <span className={c.profit < 0 ? 'text-red-400' : 'text-slate-100'}>{money(c.profit, c.currency)}</span>}
                       </td>
                     </tr>
                   ))}
@@ -230,11 +276,12 @@ function EstimateAccuracy({ from, to, businessId }: { from: string; to: string; 
   );
 }
 
-function Tile({ label, value, accent, warn }: { label: string; value: string; accent?: boolean; warn?: boolean }) {
+function Tile({ label, value, accent, warn, hint }: { label: string; value: string; accent?: boolean; warn?: boolean; hint?: string }) {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
       <div className="mb-1 text-xs text-slate-400">{label}</div>
       <div className={`num text-2xl font-semibold ${warn ? 'text-red-400' : accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
+      {hint && <div className="mt-1 num text-[11px] text-slate-500">{hint}</div>}
     </div>
   );
 }

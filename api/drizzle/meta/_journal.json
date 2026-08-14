@@ -351,6 +351,13 @@
       "when": 1786686777213,
       "tag": "0049_doc_lookup_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "5",
+      "when": 1786700000000,
+      "tag": "0050_business_currency",
+      "breakpoints": true
     }
   ]
 }

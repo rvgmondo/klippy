@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNotNull, lt, lte } from 'drizzle-orm';
+import { formatMoney } from './currency.js';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals, events } from '../db/schema.js';
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
@@ -138,12 +139,13 @@ export async function runSubscriptionBilling(): Promise<string> {
       // where auto-debit is off, and a failure to charge must never undo the
       // invoice or stop the rest of the run.
       try {
-        const [raised] = await db.select({ total: documents.total, number: documents.number })
-          .from(documents).where(eq(documents.id, docId)).limit(1);
+        const [raised] = await db.select({
+          total: documents.total, number: documents.number, currency: documents.currency,
+        }).from(documents).where(eq(documents.id, docId)).limit(1);
         if (raised) {
           const res = await attemptAutoDebit({
             accountId: sub.accountId, businessId: sub.businessId, subscriptionId: sub.id,
-            documentId: docId, amount: Number(raised.total),
+            documentId: docId, amount: Number(raised.total), currency: raised.currency,
             itemName: `Invoice ${raised.number}`, invoiceNumber: raised.number,
           });
           if (res.outcome === 'charged') debited++;
@@ -308,7 +310,7 @@ export async function runInvoiceReminders(): Promise<string> {
           'To avoid any interruption to your service, please settle it as soon as possible.',
         ],
         facts: [
-          ['Amount', `${doc.currency} ${doc.total}`] as [string, string],
+          ['Amount', formatMoney(doc.total, doc.currency)] as [string, string],
           ['Was due', doc.dueDate!] as [string, string],
           ['Days overdue', String(overdueBy)] as [string, string],
         ],
@@ -349,7 +351,7 @@ export async function runInvoiceReminders(): Promise<string> {
           : `This is a reminder that invoice ${doc.number} is due on ${doc.dueDate}.`,
       ],
       facts: [
-        ['Amount', `${doc.currency} ${doc.total}`] as [string, string],
+        ['Amount', formatMoney(doc.total, doc.currency)] as [string, string],
         [overdueBy > 0 ? 'Was due' : 'Due', doc.dueDate!] as [string, string],
       ],
       ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),

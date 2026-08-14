@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { useAuth } from '../lib/auth';
+import { useCurrencyOptions } from '../lib/useCurrency';
 
 /**
  * The account everyone in it shares: its name, what top-level folders are called,
@@ -12,6 +13,8 @@ export function AccountPanel() {
   const [name, setName] = useState(account?.name ?? '');
   const [singular, setSingular] = useState(account?.folderLabelSingular ?? 'Client');
   const [plural, setPlural] = useState(account?.folderLabelPlural ?? 'Clients');
+  const [currency, setCurrency] = useState(account?.currency ?? 'ZAR');
+  const currencies = useCurrencyOptions();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -23,7 +26,10 @@ export function AccountPanel() {
     e.preventDefault();
     setError(null); setSaved(false); setBusy(true);
     try {
-      await updateAccount({ name: name.trim(), folderLabelSingular: singular.trim(), folderLabelPlural: plural.trim() });
+      await updateAccount({
+        name: name.trim(), folderLabelSingular: singular.trim(), folderLabelPlural: plural.trim(),
+        currency,
+      });
       setSaved(true); setTimeout(() => setSaved(false), 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save.');
@@ -53,6 +59,20 @@ export function AccountPanel() {
               <input className={field} value={plural} disabled={!isAdmin} onChange={(e) => setPlural(e.target.value)} placeholder="Clients" />
             </div>
           </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-400">Currency</label>
+          <select className={field} value={currency} disabled={!isAdmin}
+            onChange={(e) => setCurrency(e.target.value)}>
+            {(currencies.length ? currencies : [{ code: currency, name: currency, symbol: '', decimals: 2 }])
+              .map((c) => <option key={c.code} value={c.code}>{c.code} - {c.name}</option>)}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-500">
+            What this workspace bills in by default. Each business can override it under
+            Business settings, which is how one account runs a rand company and a dollar
+            company side by side. Documents already issued keep the currency they were
+            raised in and are never restated.
+          </p>
         </div>
         {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         {isAdmin && (

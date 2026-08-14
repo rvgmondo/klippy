@@ -11,7 +11,7 @@ interface AuthState {
   signup: (accountName: string, name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
-  updateAccount: (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural'>>) => Promise<void>;
+  updateAccount: (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural' | 'currency'>>) => Promise<void>;
 }
 
 const Ctx = createContext<AuthState | null>(null);
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccount(null);
     }
   };
-  const updateAccount = async (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural'>>) => {
+  const updateAccount = async (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural' | 'currency'>>) => {
     const res = await apiPatch<{ account: Account }>('/account', patch);
     setAccount(res.account);
   };

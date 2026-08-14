@@ -18,6 +18,7 @@
  *   2. Placeholders are substituted AFTER sanitising, with their values escaped, so
  *      a client named `<script>` cannot become a tag.
  */
+import { formatMoney } from './currency.js';
 /** Tags that mean the same thing on screen and on paper. */
 const ALLOWED_TAGS = new Set([
     'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u',
@@ -170,7 +171,7 @@ export function htmlToPdfRuns(html) {
  */
 export function templateDataFor(doc, business, account) {
     const pick = (k) => (business?.[k] ?? account?.[k] ?? null);
-    const money = (v) => `${doc.currency ?? ''} ${Number(v ?? 0).toFixed(2)}`.trim();
+    const money = (v) => formatMoney(Number(v ?? 0), doc.currency);
     return {
         'business.name': business?.brandName || business?.name || account?.brandName || '',
         'business.address': pick('bizAddress') ?? '',

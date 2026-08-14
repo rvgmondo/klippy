@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
+import { payfastSupports } from './currency.js';
 import { onInvoicePaid } from './hosting.js';
 import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
@@ -23,6 +24,12 @@ export async function attemptAutoDebit(r) {
     };
     // Per business, so a subscription is charged through the merchant account that
     // business actually banks into.
+    // Rail zero: PayFast takes rand. Sending it a dollar amount would not fail, it
+    // would charge the number as rand and report success, which is the worst
+    // possible outcome for something that runs unattended.
+    if (!payfastSupports(r.currency)) {
+        return done('skipped', `PayFast cannot charge ${r.currency}. This invoice has to be collected another way.`);
+    }
     const settings = await settingsFor(r.accountId, r.businessId);
     if (!settings?.enabled)
         return { outcome: 'skipped', detail: 'PayFast is not set up for this business.' };

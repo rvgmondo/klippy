@@ -15,6 +15,7 @@ import {
   buildCheckout, verifyItnSignature, validateItnWithServer, signature,
   type PayfastCreds,
 } from '../lib/payfast.js';
+import { payfastSupports } from '../lib/currency.js';
 
 /**
  * Should this checkout ask PayFast to store the card?
@@ -198,7 +199,15 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (!doc) return reply.code(404).send({ error: 'Invoice not found.' });
     // Resolved from the invoice's business, so each business is paid into its own
     // merchant account rather than whichever one was set up first.
-    const creds = await credsFor(accountId, doc.businessId);
+    // Two different reasons, two different answers. Telling someone to go and set
+    // up PayFast for a dollar invoice sends them to configure something that could
+    // never have worked, and they would come back none the wiser.
+    if (!payfastSupports(doc.currency)) {
+      return reply.code(400).send({
+        error: `PayFast settles rand only, and this invoice is in ${doc.currency}. Collect it by transfer using the bank details on the invoice.`,
+      });
+    }
+    const creds = await credsFor(accountId, doc.businessId, doc.currency);
     if (!creds) return reply.code(400).send({ error: 'PayFast is not set up for this business. Add it under the business, or set a workspace default in Settings > Payments.' });
     if (doc.type !== 'invoice') return reply.code(400).send({ error: 'Only invoices can be paid.' });
     if (doc.status === 'paid') return reply.code(400).send({ error: 'This invoice is already paid.' });
@@ -236,8 +245,14 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (!doc || doc.type !== 'invoice') return page('Not found', 'We could not find that invoice.');
     if (doc.status === 'paid') return page('Already paid', `Invoice ${doc.number} is already paid. Thank you.`);
 
-    const creds = await credsFor(doc.accountId, doc.businessId);
-    if (!creds) return page('Online payment unavailable', 'This invoice cannot be paid online right now.');
+    const creds = await credsFor(doc.accountId, doc.businessId, doc.currency);
+    // A client is reading this page, so the wording stays plain and points at the
+    // thing they can actually do rather than at our gateway's limitations.
+    if (!creds) {
+      return page('Online payment unavailable', payfastSupports(doc.currency)
+        ? 'This invoice cannot be paid online right now.'
+        : `Invoices in ${doc.currency} cannot be paid by card here. Please use the bank details on your invoice.`);
+    }
 
     const base = appUrl();
     const { url, fields } = buildCheckout(creds, {
