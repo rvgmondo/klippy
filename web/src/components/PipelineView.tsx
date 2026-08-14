@@ -7,6 +7,7 @@ import { Plus, MoreHorizontal, ArrowRightLeft, X } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Menu } from './Menu';
+import { Modal } from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 
 type Stage = 'lead' | 'contacted' | 'proposal' | 'won' | 'lost';
@@ -328,8 +329,8 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="panel">
+      <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New deal' : 'Edit deal'}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
@@ -388,7 +389,7 @@ function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; busin
           {!isNew && <DealActivity dealId={deal!.id} />}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Modal } from './Modal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, LayoutTemplate, X } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -69,8 +70,8 @@ export function BoardActions({ boardId, boardName, onClose, onCreated }: {
   const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-[var(--accent)]';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
+    <Modal onClose={onClose} variant="panel">
+      <div
         className="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
           <h2 className="text-lg font-semibold text-slate-100">Add a board</h2>
@@ -147,6 +148,6 @@ export function BoardActions({ boardId, boardName, onClose, onCreated }: {
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

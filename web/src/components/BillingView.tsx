@@ -609,8 +609,8 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
   loadFont(issuer.fontDisplay); loadFont(issuer.fontBody);
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
-      <div className="mx-auto my-4 max-w-3xl" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="page">
+      <div className="mx-auto my-4 max-w-3xl">
         <div className="no-print mb-3 flex justify-end gap-2">
           {/* The same PDF the client receives by email, rather than a browser print. */}
           <a href={`/api/v1/documents/${id}/pdf`} download
@@ -748,6 +748,6 @@ function PrintView({ id, onClose }: { id: number; onClose: () => void }) {
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

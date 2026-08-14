@@ -4,6 +4,7 @@ import { X, Trash2, Plus, Check, Square, CheckSquare } from 'lucide-react';
 import { apiGet, apiPatch, apiPost, apiDelete } from '../lib/api';
 import type { Label, Priority, TaskDetail, TeamUser } from '../lib/types';
 import { TimeSection } from './TimeSection';
+import { Modal } from './Modal';
 import { FilesSection } from './FilesSection';
 import { LabelsSection } from './LabelsSection';
 import { ErrorNote } from './ErrorNote';
@@ -61,8 +62,8 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/50" onClick={onClose}>
-      <div className="flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-950" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="drawer">
+      <div className="flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-950">
         <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
           <div className="flex items-center gap-2">
             <button onClick={() => t && patchTask.mutate({ isCompleted: !t.isCompleted })}
@@ -216,6 +217,6 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

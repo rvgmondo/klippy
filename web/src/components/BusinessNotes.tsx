@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Modal } from './Modal';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Check } from 'lucide-react';
 import { apiPatch } from '../lib/api';
@@ -46,9 +47,8 @@ export function BusinessNotes({ businessId, businessName, initial, onClose }: {
         : '';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex h-[70vh] max-h-[600px] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
-        onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="panel">
+      <div className="flex h-[70vh] max-h-[600px] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
           <div className="min-w-0">
             <h2 className="truncate text-lg font-semibold text-slate-100">{businessName}</h2>
@@ -65,6 +65,6 @@ export function BusinessNotes({ businessId, businessName, initial, onClose }: {
           placeholder="Anything worth keeping next to this business: positioning, goals, the login you always forget, ideas for later."
           className="min-h-0 flex-1 resize-none bg-transparent px-5 py-4 text-sm leading-relaxed text-slate-100 placeholder-slate-600 outline-none" />
       </div>
-    </div>
+    </Modal>
   );
 }

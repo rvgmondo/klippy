@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Modal } from './Modal';
 import { useQuery } from '@tanstack/react-query';
 import { Printer, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -41,8 +42,8 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
   const field = 'rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 outline-none';
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4" onClick={onClose}>
-      <div className="mx-auto my-4 max-w-3xl" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="page">
+      <div className="mx-auto my-4 max-w-3xl">
         <div className="no-print mb-3 flex flex-wrap items-center justify-end gap-2">
           <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} title="From" />
           <input type="date" className={field} value={to} onChange={(e) => setTo(e.target.value)} title="To" />
@@ -116,6 +117,6 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

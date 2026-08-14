@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { X, Play, Pause, RotateCcw, PictureInPicture2, Square, Clock } from 'lucide-react';
 import { apiPost } from '../lib/api';
 import { useRunningTimer } from './TimerChip';
+import { Modal } from './Modal';
 
 type Mode = 'countdown' | 'stopwatch';
 const PRESETS = [15, 25, 50];
@@ -173,11 +174,11 @@ export function FocusTimer({ onClose }: { onClose: () => void }) {
   if (pip) return createPortal(body, pip.document.body);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-xs overflow-hidden rounded-2xl border border-slate-700" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="panel">
+      <div className="w-full max-w-xs overflow-hidden rounded-2xl border border-slate-700">
         {body}
       </div>
-    </div>
+    </Modal>
   );
 }
 

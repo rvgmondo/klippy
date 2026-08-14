@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Modal } from './Modal';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -34,8 +35,8 @@ export function NewBusinessModal({ onClose, onCreate, isPending }: {
   };
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <form onSubmit={submit} onClick={(e) => e.stopPropagation()}
+    <Modal onClose={onClose} variant="panel">
+      <form onSubmit={submit}
         className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">New business</h2>
@@ -69,6 +70,6 @@ export function NewBusinessModal({ onClose, onCreate, isPending }: {
           {isPending ? 'Creating...' : 'Create business'}
         </button>
       </form>
-    </div>
+    </Modal>
   );
 }

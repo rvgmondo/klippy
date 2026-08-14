@@ -4,6 +4,7 @@ import { X, Trash2 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { Modal } from './Modal';
 
 export interface CalendarEvent {
   id: number; title: string; kind: 'meeting' | 'call' | 'deadline' | 'other';
@@ -101,8 +102,8 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
   const label = 'mb-1 block text-[11px] text-slate-400';
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()}
+    <Modal onClose={onClose} variant="panel">
+      <form
         onSubmit={(e) => { e.preventDefault(); if (title.trim()) save.mutate(); }}
         className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
@@ -179,6 +180,6 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
           )}
         </div>
       </form>
-    </div>
+    </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Modal } from './Modal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -57,8 +58,8 @@ export function QuickAddTask({ dueDate, onClose }: { dueDate: string; onClose: (
   const noBoards = boards.isFetched && (boards.data?.length ?? 0) === 0;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-950 p-5" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="panel">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-slate-100">New card for {dueDate}</h3>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
@@ -98,6 +99,6 @@ export function QuickAddTask({ dueDate, onClose }: { dueDate: string; onClose: (
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Modal } from './Modal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Upload, Trash2 } from 'lucide-react';
 import { apiGet, apiPatch, apiPut, apiDelete } from '../lib/api';
@@ -27,9 +28,8 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950"
-        onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose} variant="panel">
+      <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">{business.name}</h2>
@@ -41,7 +41,7 @@ export function BusinessSettings({ business, onClose }: { business: Business; on
           <BusinessSettingsPanel business={business} />
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Pause, Play, XCircle } 
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { Business, BusinessType, Offering, Subscription, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { Modal } from './Modal';
 
 const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'services', label: 'Services' }, { value: 'products', label: 'Products' },
@@ -287,8 +288,8 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   });
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (offeringId && folderId) start.mutate(); }}
+    <Modal onClose={onClose} variant="panel">
+      <form onSubmit={(e) => { e.preventDefault(); if (offeringId && folderId) start.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">Start subscription</h2>
@@ -342,7 +343,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
           {start.isPending ? 'Starting...' : 'Start subscription'}
         </button>
       </form>
-    </div>
+    </Modal>
   );
 }
 
@@ -386,8 +387,8 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
   });
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (name.trim()) save.mutate(); }}
+    <Modal onClose={onClose} variant="panel">
+      <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) save.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New offering' : 'Edit offering'}</h2>
@@ -479,6 +480,6 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
           {save.isPending ? 'Saving...' : isNew ? 'Add offering' : 'Save changes'}
         </button>
       </form>
-    </div>
+    </Modal>
   );
 }

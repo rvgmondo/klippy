@@ -4,6 +4,7 @@ import { Plus, Pencil, Trash2, X, Receipt } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { Expense, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { Modal } from './Modal';
 
 function money(v: string | number) {
   const n = typeof v === 'string' ? Number(v) : v;
@@ -131,8 +132,8 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
   });
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (description.trim()) save.mutate(); }}
+    <Modal onClose={onClose} variant="panel">
+      <form onSubmit={(e) => { e.preventDefault(); if (description.trim()) save.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New expense' : 'Edit expense'}</h2>
@@ -173,6 +174,6 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
           {save.isPending ? 'Saving...' : isNew ? 'Add expense' : 'Save changes'}
         </button>
       </form>
-    </div>
+    </Modal>
   );
 }
