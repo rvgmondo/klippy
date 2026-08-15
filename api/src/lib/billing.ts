@@ -71,6 +71,13 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
   autoSend?: boolean;
   /** Recorded on the invoice so auto-debit can find its way back to the card. */
   subscriptionId?: number;
+  /**
+   * What this client pays, when it is not the list price. Undefined or null means
+   * charge the offering. Passed in rather than looked up so that the very first
+   * invoice, raised in the same breath as the subscription, cannot bill the list
+   * price because the row it would have read is not committed yet.
+   */
+  price?: number | null;
 }): Promise<number> {
   const [offering] = await db.select().from(offerings)
     .where(tenantWhere(offerings, accountId, eq(offerings.id, sub.offeringId))).limit(1);
@@ -84,7 +91,7 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
     .where(tenantWhere(businesses, accountId, eq(businesses.id, sub.businessId))).limit(1);
   const brand = business?.brandName || business?.name || account?.brandName || 'Invoice';
   const currency = await currencyFor(accountId, sub.businessId);
-  const price = roundMoney(Number(offering.price), currency);
+  const price = roundMoney(sub.price ?? Number(offering.price), currency);
   const issueDate = new Date().toISOString().slice(0, 10);
   const dueDate = addDays(issueDate, 7);
 

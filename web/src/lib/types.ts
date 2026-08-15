@@ -30,7 +30,12 @@ export interface Subscription {
   lastBilledAt: string | null;
   offeringId: number;
   offeringName: string;
+  /** What this client is actually charged per cycle: negotiated, or the list price. */
   price: string;
+  /** The offering's list price, for showing what a negotiated rate differs from. */
+  listPrice: string;
+  /** True when this client is on a negotiated rate rather than the list price. */
+  isCustomPrice: boolean;
   unit: string | null;
   folderId: number;
   clientName: string;

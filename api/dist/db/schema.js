@@ -795,6 +795,18 @@ export const subscriptions = mysqlTable('subscriptions', {
     folderId: int('folder_id', { unsigned: true }).notNull()
         .references(() => folders.id, { onDelete: 'cascade' }),
     status: mysqlEnum('status', ['active', 'paused', 'canceled']).default('active').notNull(),
+    // What THIS client pays, when it is not the list price.
+    //
+    // Null means "whatever the offering costs", which is what most subscriptions are
+    // and what every one of them was before this column existed. A value here is a
+    // negotiated rate: the same retainer at 9,000 for one client and 7,500 for
+    // another, without cloning the offering once per client and turning the price
+    // list into a client list.
+    //
+    // The distinction is deliberate and useful in both directions. Raise the list
+    // price and everyone on null follows; everyone on a negotiated rate does not,
+    // which is exactly what a negotiated rate means.
+    price: decimal('price', { precision: 12, scale: 2 }),
     // Email the generated invoice to the client instead of leaving a draft for
     // someone to send by hand. The whole point of a recurring charge.
     autoSend: boolean('auto_send').default(false).notNull(),

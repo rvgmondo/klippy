@@ -3,12 +3,13 @@ import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { offerings } from '../db/schema.js';
+import { offerings, subscriptions } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
+import { mrrByCurrency } from '../lib/mrr.js';
 
 
 const createSchema = z.object({
@@ -37,13 +38,18 @@ export async function offeringRoutes(app: FastifyInstance) {
   app.get('/api/v1/offerings', async (req) => {
     const { accountId } = authOf(req);
     const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
-    const bizFilter = q.success && q.data.businessId ? eq(offerings.businessId, q.data.businessId) : undefined;
-    const scope = await businessScope(req, offerings.businessId);
+    const bizId = q.success ? q.data.businessId : undefined;
+    const bizFilter = bizId ? eq(subscriptions.businessId, bizId) : undefined;
     const rows = await db.select().from(offerings)
-      .where(tenantWhere(offerings, accountId, bizFilter, scope))
+      .where(tenantWhere(offerings, accountId,
+        bizId ? eq(offerings.businessId, bizId) : undefined,
+        await businessScope(req, offerings.businessId)))
       .orderBy(asc(offerings.position));
-    const mrr = rows.filter((o) => o.recurring && o.active).reduce((s, o) => s + Number(o.price), 0);
-    return { offerings: rows, mrr: Math.round(mrr * 100) / 100 };
+    // From active SUBSCRIPTIONS, not from this list. Summing the catalogue reported
+    // the price list as if it were revenue: ten clients on one retainer counted
+    // once, and nobody on it counted the same.
+    const mrr = await mrrByCurrency(accountId, [bizFilter, await businessScope(req, subscriptions.businessId)]);
+    return { offerings: rows, mrr };
   });
 
   app.post('/api/v1/offerings', async (req, reply) => {

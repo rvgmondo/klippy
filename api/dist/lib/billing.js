@@ -74,7 +74,7 @@ export async function generateSubscriptionInvoice(accountId, sub) {
         .where(tenantWhere(businesses, accountId, eq(businesses.id, sub.businessId))).limit(1);
     const brand = business?.brandName || business?.name || account?.brandName || 'Invoice';
     const currency = await currencyFor(accountId, sub.businessId);
-    const price = roundMoney(Number(offering.price), currency);
+    const price = roundMoney(sub.price ?? Number(offering.price), currency);
     const issueDate = new Date().toISOString().slice(0, 10);
     const dueDate = addDays(issueDate, 7);
     // Numbering honours this business's prefix and starting number.

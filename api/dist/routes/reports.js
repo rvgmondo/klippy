@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY } from '../lib/currency.js';
+import { mrrByCurrency } from '../lib/mrr.js';
 import { db } from '../db/client.js';
-import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings } from '../db/schema.js';
+import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, subscriptions } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, businessScope } from '../lib/access.js';
@@ -134,15 +135,15 @@ export async function reportRoutes(app) {
             hours: Math.round((v.seconds / 3600) * 100) / 100,
         })).sort((a, b) => b.seconds - a.seconds);
         const billable = clients.reduce((sum, c) => sum + (c.amount ?? 0), 0);
-        // MRR is a snapshot, not date-ranged: sum of active recurring offerings right now.
-        const offeringFilter = onlyBusiness !== undefined ? eq(offerings.businessId, onlyBusiness) : undefined;
-        const offeringRows = await db.select({
-            price: offerings.price, recurring: offerings.recurring, active: offerings.active,
-            businessId: offerings.businessId,
-        }).from(offerings)
-            .where(tenantWhere(offerings, accountId, offeringFilter, await businessScope(req, offerings.businessId)));
-        const recurringOfferings = offeringRows.filter((o) => o.recurring && o.active);
-        const mrr = Math.round(recurringOfferings.reduce((s, o) => s + Number(o.price), 0) * 100) / 100;
+        // MRR is a snapshot, not date-ranged: what active subscriptions bill per month
+        // right now. It used to sum the offerings catalogue, which measured the price
+        // list rather than the business.
+        const mrrRows = await mrrByCurrency(accountId, [
+            onlyBusiness !== undefined ? eq(subscriptions.businessId, onlyBusiness) : undefined,
+            await businessScope(req, subscriptions.businessId),
+        ]);
+        const mrrOf = new Map(mrrRows.map((m) => [m.currency, m.mrr]));
+        const mrr = mrrRows.reduce((s, m) => s + m.mrr, 0);
         // The same figures split by currency. `mixed` is what the UI keys off: with one
         // currency the flat totals below are exactly right and simpler to read, and with
         // several they are the sum of unlike things and must not be shown.
@@ -160,8 +161,8 @@ export async function reportRoutes(app) {
                 into(c.currency).billable += c.amount;
         for (const e of expenseRows)
             into(curOf(e.businessId)).expenses += Number(e.amount);
-        for (const o of recurringOfferings)
-            into(curOf(o.businessId)).mrr += Number(o.price);
+        for (const m of mrrRows)
+            into(m.currency).mrr += m.mrr;
         const round2 = (n) => Math.round(n * 100) / 100;
         const byCurrency = [...bucket].map(([cur, b]) => ({
             currency: cur,
@@ -175,6 +176,9 @@ export async function reportRoutes(app) {
         // was labelling real dollars as rand: one bucket, so `mixed` was false and the
         // UI drew the simple tiles, with the wrong currency on them.
         const currency = byCurrency.length === 1 ? byCurrency[0].currency : scopeCurrency;
+        // The flat `mrr` below is only ever read when there is one currency, so it
+        // reports that one rather than a sum across currencies that means nothing.
+        const flatMrr = byCurrency.length > 1 ? (mrrOf.get(currency) ?? 0) : mrr;
         return {
             currency,
             byCurrency,
@@ -190,7 +194,7 @@ export async function reportRoutes(app) {
                 unratedClients: clients.filter((c) => c.rate == null).length,
                 expenses: expenseTotal,
                 profit: Math.round((billable - expenseTotal) * 100) / 100,
-                mrr,
+                mrr: flatMrr,
             },
         };
     });

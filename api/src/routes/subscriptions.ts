@@ -9,6 +9,7 @@ import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { addMonths, generateSubscriptionInvoice } from '../lib/billing.js';
+import { money } from '../lib/money.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
@@ -28,7 +29,9 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       intervalMonths: subscriptions.intervalMonths,
       startedOn: subscriptions.startedOn, nextBillDate: subscriptions.nextBillDate,
       lastBilledAt: subscriptions.lastBilledAt,
-      offeringId: subscriptions.offeringId, offeringName: offerings.name, price: offerings.price, unit: offerings.unit,
+      offeringId: subscriptions.offeringId, offeringName: offerings.name, unit: offerings.unit,
+      // Both, so the screen can show the charge AND say it is off the list price.
+      listPrice: offerings.price, customPrice: subscriptions.price,
       folderId: subscriptions.folderId, clientName: folders.name,
       autoSend: subscriptions.autoSend,
       autoDebit: subscriptions.autoDebit,
@@ -40,7 +43,13 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       .innerJoin(folders, eq(folders.id, subscriptions.folderId))
       .where(tenantWhere(subscriptions, accountId, bizFilter, scope))
       .orderBy(desc(subscriptions.createdAt));
-    return { subscriptions: rows };
+    return {
+      subscriptions: rows.map((r) => ({
+        ...r,
+        price: r.customPrice ?? r.listPrice,
+        isCustomPrice: r.customPrice != null,
+      })),
+    };
   });
 
   // Start a subscription: bills the first cycle immediately (as a draft invoice) so
@@ -56,6 +65,8 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       domain: z.string().trim().max(190).optional(),
       // 1 monthly, 3 quarterly, 6 half-yearly, 12 annually. Anything up to 5 years.
       intervalMonths: z.number().int().min(1).max(60).optional(),
+      // What THIS client pays per cycle. Omit (or null) to charge the list price.
+      price: z.number().min(0).max(100_000_000).nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
@@ -76,6 +87,9 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       businessId, offeringId: d.offeringId, folderId: d.folderId, status: 'active' as const,
       startedOn, nextBillDate: addMonths(startedOn, intervalMonths),
       intervalMonths, autoSend: d.autoSend ?? false, domain: d.domain || null, createdBy: userId,
+      // Null when it matches the list price, so the two cases stay distinguishable:
+      // a subscription on the list follows a price rise, a negotiated one does not.
+      price: d.price == null || d.price === Number(offering.price) ? null : money(d.price),
     }));
     const id = Number(ins[0].insertId);
 
@@ -86,6 +100,7 @@ export async function subscriptionRoutes(app: FastifyInstance) {
       await generateSubscriptionInvoice(accountId, {
         businessId, offeringId: d.offeringId, folderId: d.folderId,
         createdBy: userId, autoSend: d.autoSend ?? false, subscriptionId: id,
+        price: d.price ?? null,
       });
       await db.update(subscriptions).set({ lastBilledAt: new Date() })
         .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
@@ -105,13 +120,22 @@ export async function subscriptionRoutes(app: FastifyInstance) {
     const parsed = z.object({
       status: status.optional(), autoSend: z.boolean().optional(), autoDebit: z.boolean().optional(),
       domain: z.string().trim().max(190).nullable().optional(),
+      // Retainers get renegotiated. Null puts this client back on the list price.
+      price: z.number().min(0).max(100_000_000).nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const [own] = await db.select({ businessId: subscriptions.businessId }).from(subscriptions)
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
     if (!own) return reply.code(404).send({ error: 'Subscription not found.' });
     if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
-    const res = await db.update(subscriptions).set(parsed.data)
+    // Decimals are stored as strings. It takes effect on the NEXT invoice: an
+    // invoice already raised is a document the client has, and changing what it
+    // says after the fact is what credit notes are for.
+    const patch: Record<string, unknown> = { ...parsed.data };
+    if (parsed.data.price !== undefined) {
+      patch.price = parsed.data.price === null ? null : money(parsed.data.price);
+    }
+    const res = await db.update(subscriptions).set(patch)
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Subscription not found.' });
     const [updated] = await db.select().from(subscriptions)

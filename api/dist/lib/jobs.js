@@ -118,6 +118,7 @@ export async function runSubscriptionBilling() {
             const docId = await generateSubscriptionInvoice(sub.accountId, {
                 businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
                 createdBy: sub.createdBy, autoSend: sub.autoSend, subscriptionId: sub.id,
+                price: sub.price != null ? Number(sub.price) : null,
             });
             // Then try to take the money, if this subscription is set up for it. Every
             // guard lives in attemptAutoDebit; it returns "skipped" for the ordinary case

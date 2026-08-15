@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, events, folders, hostingAccounts, hostingSettings, offerings, subscriptions, } from '../db/schema.js';
 import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
@@ -96,6 +96,8 @@ async function startSubscriptionsFromLines(accountId, doc) {
     const lines = await db.select({
         id: documentLines.id, offeringId: documentLines.offeringId,
         recurringMonths: documentLines.recurringMonths, description: documentLines.description,
+        // What they were actually invoiced, which is not always the list price.
+        amount: documentLines.amount,
     }).from(documentLines)
         .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, doc.id)));
     const recurring = lines.filter((l) => l.offeringId && l.recurringMonths);
@@ -108,15 +110,35 @@ async function startSubscriptionsFromLines(accountId, doc) {
     if (!claim[0].affectedRows)
         return;
     const today = new Date().toISOString().slice(0, 10);
+    // The list prices, so a line billed at something else can be spotted.
+    const listPrices = new Map();
+    {
+        const ids = [...new Set(recurring.map((l) => l.offeringId))];
+        const rows = ids.length
+            ? await db.select({ id: offerings.id, price: offerings.price }).from(offerings)
+                .where(tenantWhere(offerings, accountId, inArray(offerings.id, ids)))
+            : [];
+        for (const o of rows)
+            listPrices.set(o.id, Number(o.price));
+    }
     for (const line of recurring) {
         try {
             const months = line.recurringMonths;
+            // Carry the invoiced amount onto the subscription when it is not the list
+            // price. Without this, discounting or marking up a recurring line worked for
+            // exactly one month: the client was invoiced the agreed figure at the point
+            // of sale and quietly moved onto the list price at the next cycle, and
+            // nothing anywhere said so.
+            const charged = Number(line.amount);
+            const list = listPrices.get(line.offeringId);
+            const custom = Number.isFinite(charged) && list != null && charged !== list ? line.amount : null;
             const ins = await db.insert(subscriptions).values(withTenant(accountId, {
                 businessId: doc.businessId,
                 offeringId: line.offeringId,
                 folderId: doc.folderId,
                 status: 'active',
                 intervalMonths: months,
+                price: custom,
                 startedOn: today,
                 // The first period is paid for by THIS invoice, so the next bill is one
                 // period out. Billing again today would charge them twice for the same month.

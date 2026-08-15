@@ -358,6 +358,13 @@
       "when": 1786700000000,
       "tag": "0050_business_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "5",
+      "when": 1786710000000,
+      "tag": "0051_subscription_price",
+      "breakpoints": true
     }
   ]
 }

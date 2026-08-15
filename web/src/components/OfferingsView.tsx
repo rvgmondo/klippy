@@ -27,6 +27,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
   const money = (v: string | number) => fmt(v, cur);
   const [editing, setEditing] = useState<Offering | 'new' | null>(null);
   const [startingSub, setStartingSub] = useState(false);
+  const [pricing, setPricing] = useState<Subscription | null>(null);
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
@@ -50,7 +51,11 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
 
   const { data } = useQuery({
     queryKey: ['offerings', businessId],
-    queryFn: () => apiGet<{ offerings: Offering[]; mrr: number }>(`/offerings${bizParam}`),
+    queryFn: () => apiGet<{
+      offerings: Offering[];
+      /** Real MRR, from active subscriptions, one figure per currency. */
+      mrr: { currency: string; mrr: number; subscriptions: number }[];
+    }>(`/offerings${bizParam}`),
   });
   const rows = data?.offerings ?? [];
   const invalidate = () => qc.invalidateQueries({ queryKey: ['offerings'] });
@@ -65,7 +70,16 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     queryFn: () => apiGet<{ subscriptions: Subscription[] }>(`/subscriptions${bizParam}`),
   });
   const subs = subsQ.data?.subscriptions ?? [];
-  const invalidateSubs = () => qc.invalidateQueries({ queryKey: ['subscriptions'] });
+  const invalidateSubs = () => {
+    qc.invalidateQueries({ queryKey: ['subscriptions'] });
+    // MRR is computed from subscriptions but arrives on the offerings response, so
+    // every change here moves it. Without this, pausing a client or renegotiating a
+    // retainer left the headline figure showing the old number until a reload, which
+    // is the most misleading possible moment for it to be stale.
+    qc.invalidateQueries({ queryKey: ['offerings'] });
+    qc.invalidateQueries({ queryKey: ['report'] });
+    qc.invalidateQueries({ queryKey: ['dashboard-money'] });
+  };
   const setSubStatus = useMutation({
     mutationFn: (v: { id: number; status: Subscription['status'] }) => apiPatch(`/subscriptions/${v.id}`, { status: v.status }),
     onSuccess: invalidateSubs,
@@ -110,7 +124,16 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
 
         {data && rows.length > 0 && rows.some((o) => o.recurring) && (
           <div className="mb-4 rounded-lg border border-violet-800/50 bg-violet-500/10 px-4 py-2.5 text-sm text-violet-200">
-            Monthly recurring revenue (MRR): <span className="font-semibold">{money(data.mrr)}</span>
+            Monthly recurring revenue (MRR):{' '}
+            {(data.mrr ?? []).length === 0
+              ? <span className="font-semibold">{money(0)}</span>
+              : (data.mrr).map((m, i) => (
+                  <span key={m.currency}>
+                    {i > 0 ? '  |  ' : ''}
+                    <span className="font-semibold">{fmt(m.mrr, m.currency)}</span>
+                    <span className="text-slate-500"> from {m.subscriptions} subscription{m.subscriptions === 1 ? '' : 's'}</span>
+                  </span>
+                ))}
           </div>
         )}
 
@@ -193,7 +216,27 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                   {subs.map((s) => (
                     <tr key={s.id} className={`border-t border-slate-800 ${s.status === 'canceled' ? 'opacity-50' : ''}`}>
                       <td className="px-3 py-2 text-slate-200">{s.clientName}</td>
-                      <td className="px-3 py-2 text-slate-300">{s.offeringName} <span className="text-slate-500">({money(s.price)}/{INTERVAL_SHORT[s.intervalMonths ?? 1] ?? `${s.intervalMonths}mo`})</span></td>
+                      <td className="px-3 py-2 text-slate-300">
+                        {s.offeringName}{' '}
+                        <span className="text-slate-500">
+                          ({money(s.price)}/{INTERVAL_SHORT[s.intervalMonths ?? 1] ?? `${s.intervalMonths}mo`})
+                        </span>
+                        {/* A negotiated rate has to be visible here. Otherwise the only
+                            way to know this client is not on the list price is to notice
+                            the number does not match, which nobody does. */}
+                        {s.isCustomPrice && (
+                          <span className="ml-1.5 rounded bg-violet-600/25 px-1.5 py-0.5 text-[10px] text-violet-200"
+                            title={`List price is ${money(s.listPrice)}`}>
+                            custom
+                          </span>
+                        )}
+                        <button
+                          onClick={() => setPricing(s)}
+                          className="ml-1.5 text-slate-600 hover:text-slate-300"
+                          title="Change what this client pays">
+                          <Pencil size={11} />
+                        </button>
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`rounded-md px-2 py-0.5 text-[11px] ${
                           s.status === 'active' ? 'bg-green-600/30 text-green-200'
@@ -252,6 +295,14 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           onSaved={() => { setEditing(null); invalidate(); }}
         />
       )}
+      {pricing && (
+        <SubscriptionPriceModal
+          subscription={pricing}
+          currency={cur}
+          onClose={() => setPricing(null)}
+          onSaved={() => { setPricing(null); invalidateSubs(); }}
+        />
+      )}
       {startingSub && (
         <StartSubscriptionModal
           businessId={newBusinessId}
@@ -261,6 +312,63 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Change what one client pays.
+ *
+ * Separate from the offering editor on purpose: editing the offering changes the
+ * price for everyone on the list price, and this changes it for one client. The two
+ * used to be the same action because there was nowhere else to put a price, which
+ * is how a price list ends up with "Monthly Retainer (Acme)" in it.
+ */
+function SubscriptionPriceModal({ subscription, currency, onClose, onSaved }: {
+  subscription: Subscription;
+  currency: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [price, setPrice] = useState(subscription.isCustomPrice ? String(Number(subscription.price)) : '');
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () => apiPatch(`/subscriptions/${subscription.id}`, {
+      price: price.trim() === '' ? null : Number(price),
+    }),
+    onSuccess: onSaved,
+    onError: (e) => setError(e instanceof Error ? e.message : 'Could not save that price.'),
+  });
+
+  const list = fmt(subscription.listPrice, currency);
+
+  return (
+    <Modal onClose={onClose} size="sm">
+      <form className="p-5" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <h2 className="text-base font-semibold text-slate-100">What {subscription.clientName} pays</h2>
+        <p className="mt-0.5 mb-4 text-xs text-slate-500">
+          {subscription.offeringName}. List price is {list}.
+        </p>
+
+        {error && <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{error}</p>}
+
+        <input autoFocus value={price} onChange={(e) => setPrice(e.target.value)}
+          type="number" step="0.01" min="0" placeholder={`${list} (list price)`}
+          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]" />
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Blank puts them back on the list price. This takes effect on their next invoice;
+          anything already raised stays as it was sent.
+        </p>
+
+        <div className="mt-5 flex items-center gap-3">
+          <button type="submit" disabled={save.isPending}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90 disabled:opacity-50">
+            {save.isPending ? 'Saving...' : 'Save price'}
+          </button>
+          <button type="button" onClick={onClose} className="text-sm text-slate-400 hover:text-slate-200">Cancel</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -277,6 +385,9 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   const [domain, setDomain] = useState('');
   const chosen = recurringOfferings.find((o) => String(o.id) === offeringId);
   const [error, setError] = useState<string | null>(null);
+  // Blank means the list price. Typing a figure here is how one client ends up on
+  // a negotiated retainer without cloning the offering for them.
+  const [price, setPrice] = useState('');
 
   const foldersQ = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const clientFolders = (foldersQ.data?.folders ?? []).filter((f) =>
@@ -285,6 +396,7 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   const start = useMutation({
     mutationFn: () => apiPost('/subscriptions', {
       offeringId: Number(offeringId), folderId: Number(folderId), businessId, intervalMonths,
+      ...(price.trim() ? { price: Number(price) } : {}),
       ...(domain.trim() ? { domain: domain.trim() } : {}),
     }),
     onSuccess: onStarted,
@@ -305,6 +417,15 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
           className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500">
           {recurringOfferings.map((o) => <option key={o.id} value={o.id}>{o.name} ({fmt(o.price, cur)}/mo)</option>)}
         </select>
+
+        <label className="mb-1 block text-xs text-slate-400">Price for this client</label>
+        <input value={price} onChange={(e) => setPrice(e.target.value)} type="number" step="0.01" min="0"
+          placeholder={chosen ? `${fmt(chosen.price, cur)} (list price)` : 'List price'}
+          className="mb-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500" />
+        <p className="mb-3 text-[11px] text-slate-500">
+          Leave blank to charge the list price, which then follows it if you put your prices
+          up. A figure here is this client's own rate and stays put until you change it.
+        </p>
 
         <label className="mb-1 block text-xs text-slate-400">Client</label>
         <select value={folderId} onChange={(e) => setFolderId(e.target.value)}
