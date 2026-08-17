@@ -365,6 +365,13 @@
       "when": 1786710000000,
       "tag": "0051_subscription_price",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "5",
+      "when": 1786713000000,
+      "tag": "0052_line_detail",
+      "breakpoints": true
     }
   ]
 }

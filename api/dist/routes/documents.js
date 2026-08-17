@@ -20,6 +20,8 @@ import { nextNumberFor } from '../lib/numbering.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
+    /** The longer version, printed under the title. Blank is the common case. */
+    detail: z.string().trim().max(4000).nullable().optional(),
     quantity: z.number().nonnegative().max(1_000_000),
     unitPrice: z.number().max(100_000_000).min(-100_000_000),
     // What is being sold, and whether it repeats. Both optional: most lines are a
@@ -383,7 +385,8 @@ export async function documentRoutes(app) {
             const newId = Number(ins[0].insertId);
             if (d.lines.length) {
                 await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
-                    documentId: newId, description: l.description, quantity: money(l.quantity),
+                    documentId: newId, description: l.description, detail: l.detail || null,
+                    quantity: money(l.quantity),
                     unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
                     amount: money(totals.priced[i]?.amount ?? 0), position: i,
                     offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
@@ -430,7 +433,8 @@ export async function documentRoutes(app) {
             await tx.delete(documentLines).where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id)));
             if (d.lines.length) {
                 await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
-                    documentId: id, description: l.description, quantity: money(l.quantity),
+                    documentId: id, description: l.description, detail: l.detail || null,
+                    quantity: money(l.quantity),
                     unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
                     amount: money(totals.priced[i]?.amount ?? 0), position: i,
                     offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
@@ -507,8 +511,8 @@ export async function documentRoutes(app) {
             const iid = Number(ins[0].insertId);
             if (lines.length) {
                 await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
-                    documentId: iid, description: l.description, quantity: l.quantity,
-                    unitPrice: l.unitPrice, amount: l.amount, position: i,
+                    documentId: iid, description: l.description, detail: l.detail,
+                    quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, position: i,
                 })));
             }
             return iid;
@@ -580,7 +584,8 @@ export async function documentRoutes(app) {
             }));
             const cid = Number(ins[0].insertId);
             await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
-                documentId: cid, description: l.description, quantity: money(l.quantity),
+                documentId: cid, description: l.description, detail: l.detail,
+                quantity: money(l.quantity),
                 unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
                 amount: money(totals.priced[i]?.amount ?? 0), position: i,
             })));
@@ -702,7 +707,15 @@ export async function documentRoutes(app) {
             : [undefined];
         const brand = business?.brandName || business?.name || account?.brandName || 'Klippy';
         const fmt = (v) => formatMoney(v, doc.currency);
-        const lineText = lines.map((l) => `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`).join('\n');
+        const lineText = lines.map((l) => {
+            const head = `  - ${l.description}: ${Number(l.quantity)} x ${fmt(l.unitPrice)} = ${fmt(l.amount)}`;
+            // Indented under its own line, so the plain-text copy of the email says
+            // as much as the PDF attached to it.
+            if (!l.detail)
+                return head;
+            const wrapped = l.detail.split('\n').map((x) => `      ${x}`).join('\n');
+            return `${head}\n${wrapped}`;
+        }).join('\n');
         const label = doc.type === 'quote' ? 'Quotation' : 'Invoice';
         // A one-click way to pay, when PayFast is on. Invoices only, never quotes.
         const payLink = doc.type === 'invoice' && doc.status !== 'paid'

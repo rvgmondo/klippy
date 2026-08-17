@@ -99,7 +99,7 @@ export async function renderDocumentPdf(accountId, docId, override) {
             vat: doc.clientVatNumber,
         },
         lines: lines.map((l) => ({
-            description: l.description,
+            description: l.description, detail: l.detail || null,
             quantity: String(Number(l.quantity)),
             unitPrice: money(l.unitPrice),
             amount: money(l.amount),
@@ -161,9 +161,16 @@ export async function renderSamplePdf(accountId, businessId, opts) {
         },
         client: { name: 'Sample Client (Pty) Ltd', email: 'accounts@sampleclient.co.za', address: null, vat: null },
         lines: [
-            { description: 'Monthly retainer', quantity: '1', unitPrice: money(12500), amount: money(12500) },
-            { description: 'Additional design hours', quantity: '6', unitPrice: money(850), amount: money(5100) },
-            { description: 'Hosting and maintenance', quantity: '1', unitPrice: money(1200), amount: money(1200) },
+            // One line carries detail and the others do not, which is the realistic mix
+            // and the only way the preview shows how the two sit together.
+            {
+                description: 'Monthly retainer',
+                detail: 'Strategy call every fortnight, unlimited small changes, and first call on '
+                    + 'design time. Covers the period shown above.',
+                quantity: '1', unitPrice: money(12500), amount: money(12500),
+            },
+            { description: 'Additional design hours', detail: null, quantity: '6', unitPrice: money(850), amount: money(5100) },
+            { description: 'Hosting and maintenance', detail: null, quantity: '1', unitPrice: money(1200), amount: money(1200) },
         ],
         totals: {
             subtotal: money(18800), discount: null,

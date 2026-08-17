@@ -164,7 +164,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, unitPrice: 0 }]);
   const offeringsQ = useQuery({
     queryKey: ['offerings', businessId],
-    queryFn: () => apiGet<{ offerings: { id: number; name: string; price: string; recurring: boolean; active: boolean }[] }>(
+    queryFn: () => apiGet<{ offerings: { id: number; name: string; description: string | null; price: string; recurring: boolean; active: boolean }[] }>(
       businessId ? `/offerings?businessId=${businessId}` : '/offerings'),
   });
   const offeringList = (offeringsQ.data?.offerings ?? []).filter((o) => o.active);
@@ -225,7 +225,8 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
     setDiscountType(d.discountType ?? 'none'); setDiscountValue(Number(d.discountValue ?? 0));
     setNotes(d.notes ?? '');
     setLines(existing.data.lines.map((l) => ({
-      description: l.description, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice),
+      description: l.description, detail: l.detail ?? null,
+      quantity: Number(l.quantity), unitPrice: Number(l.unitPrice),
       offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
     })));
     setReady(true);
@@ -247,6 +248,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         ...(isNew && businessId ? { businessId } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
           description: l.description.trim(),
+          detail: l.detail?.trim() || null,
           quantity: Number(l.quantity) || 0,
           unitPrice: Number(l.unitPrice) || 0,
           offeringId: l.offeringId ?? null,
@@ -378,6 +380,23 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
                   <button onClick={() => setLines(lines.filter((_, j) => j !== i))} className="col-span-1 grid place-items-center text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
                 </div>
 
+                {/* The longer wording. Hidden behind a link until it is wanted, so
+                    a three-line invoice stays a three-line invoice, but one click away
+                    because "what was this for?" is the most common reply to a bill. */}
+                {l.detail != null ? (
+                  <textarea
+                    className={field + ' mt-1 min-h-[52px] w-full resize-y text-xs'}
+                    autoFocus={l.detail === ''}
+                    placeholder="What this covers, in the client's words. Printed under the line on the PDF."
+                    value={l.detail}
+                    onChange={(e) => set({ detail: e.target.value })} />
+                ) : (
+                  <button type="button" onClick={() => set({ detail: '' })}
+                    className="mt-1 text-[11px] text-slate-500 hover:text-slate-300">
+                    + Add a description
+                  </button>
+                )}
+
                 {/* Pick from the catalogue instead of typing, and the line knows what
                     it is selling. That is what lets a recurring thing on an invoice
                     actually start a subscription when the invoice is paid. */}
@@ -390,6 +409,10 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
                       set({
                         offeringId: o.id,
                         description: l.description.trim() || o.name,
+                        // The offering's own words, unless this line already has some.
+                        // Written once on the offering, reused on every document that
+                        // sells it, and still editable here for a one-off caveat.
+                        detail: l.detail || o.description || null,
                         unitPrice: Number(o.price) || l.unitPrice,
                         // Recurring offerings default to monthly, which is the common
                         // case; anything sold by the year is changed on the next control.

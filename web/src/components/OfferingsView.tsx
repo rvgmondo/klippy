@@ -481,6 +481,7 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
 }) {
   const isNew = !offering;
   const [name, setName] = useState(offering?.name ?? '');
+  const [description, setDescription] = useState(offering?.description ?? '');
   const [price, setPrice] = useState(offering?.price ?? '0');
   const [unit, setUnit] = useState(offering?.unit ?? '');
   const [cost, setCost] = useState(offering?.cost ?? '');
@@ -498,7 +499,8 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
   const save = useMutation({
     mutationFn: () => {
       const body = {
-        name: name.trim(), price: Number(price) || 0, unit: unit.trim() || null,
+        name: name.trim(), description: description.trim() || null,
+        price: Number(price) || 0, unit: unit.trim() || null,
         cost: cost.trim() ? Number(cost) : null, recurring,
         provisioning, whmPackage: whmPackage.trim() || null,
         stockQty: stockQty.trim() ? Number(stockQty) : null,
@@ -523,6 +525,16 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
         <label className="mb-1 block text-xs text-slate-400">Name</label>
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Website Audit"
           className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
+
+        <label className="mb-1 block text-xs text-slate-400">What it is</label>
+        <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+          placeholder="Two lines on what the client actually gets. Printed under this item on quotes and invoices."
+          className="mb-1 min-h-[64px] w-full resize-y rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500" />
+        <p className="mb-3 text-[11px] text-slate-500">
+          Write it once here and every quote and invoice that sells this carries it, so a
+          client is never left reading a bare product name and wondering what they paid for.
+          Editable per line if one job needs different wording.
+        </p>
 
         <div className="mb-3 grid grid-cols-2 gap-2">
           <div>

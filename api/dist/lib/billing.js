@@ -91,6 +91,11 @@ export async function generateSubscriptionInvoice(accountId, sub) {
         const newId = Number(ins[0].insertId);
         await tx.insert(documentLines).values(withTenant(accountId, {
             documentId: newId, description: `${offering.name}${offering.unit ? ` (${offering.unit})` : ''}`,
+            // What they are paying for, in the words already written on the offering.
+            // A recurring invoice is the one a client sees most often and questions
+            // least often, so a bare product name is where "what is this charge?"
+            // emails come from.
+            detail: offering.description || null,
             quantity: '1.00', unitPrice: money(price), amount: money(price), position: 0,
         }));
         return newId;

@@ -108,7 +108,14 @@ export function PrintView({ id, onClose }: { id: number; onClose: () => void }) 
               <tbody>
                 {data.lines.map((l, i) => (
                   <tr key={i} className="border-b border-slate-100">
-                    <td className="py-2.5 pl-3 text-slate-700">{l.description}</td>
+                    <td className="py-2.5 pl-3 text-slate-700">
+                      {l.description}
+                      {l.detail && (
+                        <div className="mt-0.5 whitespace-pre-line text-[11px] leading-snug text-slate-500">
+                          {l.detail}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2.5 text-right num text-slate-600">{Number(l.quantity)}</td>
                     <td className="py-2.5 text-right num text-slate-600">{money(l.unitPrice, cur)}</td>
                     <td className="py-2.5 pr-3 text-right num font-medium text-slate-800">{money(l.amount, cur)}</td>

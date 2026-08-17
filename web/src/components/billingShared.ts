@@ -17,6 +17,8 @@ export interface DocSummary {
 }
 export interface Line {
   description: string; quantity: number; unitPrice: number;
+  /** The longer wording under the title, printed on the document. Usually blank. */
+  detail?: string | null;
   /** What is being sold, when it comes from the catalogue. */
   offeringId?: number | null;
   /** Bills again every N months. Null or absent is a one-off. */

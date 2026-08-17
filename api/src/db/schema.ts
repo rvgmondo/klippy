@@ -716,6 +716,22 @@ export const documentLines = mysqlTable('document_lines', {
   documentId: int('document_id', { unsigned: true }).notNull()
     .references(() => documents.id, { onDelete: 'cascade' }),
   description: varchar('description', { length: 500 }).notNull(),
+  /**
+   * The longer version, printed under the line title.
+   *
+   * A description column wide enough to say what was actually delivered is the
+   * difference between an invoice a client pays and one they email back asking
+   * what it was for. Kept separate from `description` rather than letting that
+   * grow, because the two are different things on the page: the title labels the
+   * row and lines up with the quantity and price, the detail sits under it in
+   * smaller grey text. One field could not be set in two typefaces, and a
+   * paragraph in the title column pushes the figures out of alignment.
+   *
+   * Filled from the offering's own description when one is picked, and editable
+   * afterwards, because the standard blurb usually wants a sentence about THIS
+   * client's job.
+   */
+  detail: text('detail'),
   quantity: decimal('quantity', { precision: 10, scale: 2 }).default('1').notNull(),
   unitPrice: decimal('unit_price', { precision: 12, scale: 2 }).default('0').notNull(),
   amount: decimal('amount', { precision: 12, scale: 2 }).default('0').notNull(),

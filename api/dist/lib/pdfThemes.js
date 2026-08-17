@@ -123,8 +123,19 @@ function drawLines(c, y, opts) {
         return out;
     };
     y = header(y);
+    // The detail sits under the title, a size down and in muted ink: it is there to
+    // be read after the row has been understood, not to compete with it. The figures
+    // stay level with the TITLE rather than the block, so the columns still line up
+    // when one row carries a paragraph and its neighbours do not.
+    const detailSize = size - 1;
+    const detailGap = 2.5;
     for (const l of d.lines) {
-        const h = pdf.heightOfString(l.description, { width: descW });
+        const titleH = pdf.heightOfString(l.description, { width: descW });
+        pdf.font(f.regular).fontSize(detailSize);
+        const detailH = l.detail
+            ? detailGap + pdf.heightOfString(l.detail, { width: descW })
+            : 0;
+        const h = titleH + detailH;
         // Break BEFORE drawing a row that would not fit, so a row is never split.
         if (y + h > c.H - 150) {
             pdf.addPage();
@@ -137,6 +148,10 @@ function drawLines(c, y, opts) {
         fitText(c, l.unitPrice, colUnit, y, 64, f.regular, size);
         pdf.fillColor(INK_STRONG);
         fitText(c, l.amount, colAmt, y, 74, f.regular, size);
+        if (l.detail) {
+            pdf.font(f.regular).fontSize(detailSize).fillColor(MUTED)
+                .text(l.detail, left, y + titleH + detailGap, { width: descW });
+        }
         y += Math.max(h, size + 2) + gap;
         pdf.moveTo(left, y - gap / 2).lineTo(left + width, y - gap / 2)
             .lineWidth(0.5).strokeColor(HAIRLINE).stroke();
