@@ -9,6 +9,7 @@ import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { addMonths, generateSubscriptionInvoice } from '../lib/billing.js';
 import { money } from '../lib/money.js';
+import { suspendForSubscription } from '../lib/hosting.js';
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const status = z.enum(['active', 'paused', 'canceled']);
@@ -137,6 +138,15 @@ export async function subscriptionRoutes(app) {
             .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Subscription not found.' });
+        // A status change flows through to the hosting it pays for: cancel/pause takes
+        // the site down, resume brings it back. Best-effort, so a WHM hiccup never blocks
+        // the status change itself.
+        if (parsed.data.status === 'canceled' || parsed.data.status === 'paused') {
+            await suspendForSubscription(accountId, id, true, parsed.data.status === 'paused' ? 'Subscription paused' : 'Subscription cancelled');
+        }
+        else if (parsed.data.status === 'active') {
+            await suspendForSubscription(accountId, id, false);
+        }
         const [updated] = await db.select().from(subscriptions)
             .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id))).limit(1);
         return { subscription: updated };
@@ -152,6 +162,10 @@ export async function subscriptionRoutes(app) {
             return reply.code(404).send({ error: 'Subscription not found.' });
         if (!(await assertMaybeBusiness(req, reply, own.businessId)))
             return;
+        // Suspend any hosting first, so deleting the record does not leave a live cPanel
+        // account running for free with no subscription pointing at it. The FK then sets
+        // the hosting row's subscription_id to null, keeping it visible for teardown.
+        await suspendForSubscription(accountId, id, true, 'Subscription deleted');
         const res = await db.delete(subscriptions).where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Subscription not found.' });

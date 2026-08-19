@@ -5,7 +5,7 @@ import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { balanceOf } from '../lib/balances.js';
@@ -504,16 +504,36 @@ export async function documentRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/v1/documents/:id', async (req, reply) => {
-    const { accountId } = authOf(req);
+    const { accountId, userId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
-    const [own] = await db.select({ businessId: documents.businessId }).from(documents)
+    const [own] = await db.select({
+      businessId: documents.businessId, type: documents.type, number: documents.number,
+      status: documents.status, total: documents.total,
+    }).from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!own) return reply.code(404).send({ error: 'Not found.' });
     if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
-    const res = await db.delete(documents).where(tenantWhere(documents, accountId, eq(documents.id, id)));
-    if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
-    return { ok: true };
+
+    // A draft was never issued to anyone, so it can be deleted outright. Anything
+    // that has been sent, accepted or paid is a real document a client may hold and,
+    // for a tax invoice, part of the sequential numbering SARS requires to be
+    // gap-free. Those are VOIDED, not deleted: the row and its number stay, marked
+    // void so they drop out of balances and collections. Either way it is recorded.
+    const issued = own.status !== 'draft';
+    if (issued) {
+      if (own.status === 'void') return { ok: true, voided: true };
+      await db.update(documents).set({ status: 'void' })
+        .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+    } else {
+      await db.delete(documents).where(tenantWhere(documents, accountId, eq(documents.id, id)));
+    }
+    await db.insert(events).values({
+      accountId, businessId: own.businessId, name: issued ? 'document.voided' : 'document.deleted',
+      payload: { documentId: id, number: own.number, type: own.type, total: own.total, was: own.status },
+      results: [{ handler: 'documents', outcome: `${issued ? 'Voided' : 'Deleted'} ${own.number} by user ${userId}`, ok: true }],
+    }).catch(() => { /* audit is best-effort; never block the action on it */ });
+    return { ok: true, voided: issued };
   });
 
   // Turn an accepted quote into a fresh invoice (copies client + lines).
@@ -720,11 +740,24 @@ export async function documentRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/v1/payments/:id', async (req, reply) => {
-    const { accountId } = authOf(req);
+    const { accountId, userId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    // Record what is being removed BEFORE removing it, so deleting money always
+    // leaves a trace of who did it and how much. Payments are legitimately corrected,
+    // so this stays a real delete, but never a silent one.
+    const [pay] = await db.select({
+      amount: payments.amount, documentId: payments.documentId, method: payments.method,
+    }).from(payments).where(tenantWhere(payments, accountId, eq(payments.id, id))).limit(1);
     const res = await db.delete(payments).where(tenantWhere(payments, accountId, eq(payments.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Not found.' });
+    if (pay) {
+      await db.insert(events).values({
+        accountId, businessId: null, name: 'payment.deleted',
+        payload: { paymentId: id, documentId: pay.documentId, amount: pay.amount, method: pay.method },
+        results: [{ handler: 'payments', outcome: `Deleted payment ${pay.amount} on doc ${pay.documentId} by user ${userId}`, ok: true }],
+      }).catch(() => {});
+    }
     return { ok: true };
   });
 

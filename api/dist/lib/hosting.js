@@ -393,6 +393,10 @@ export async function runHostingSuspensions() {
             // configured": do nothing rather than guess a number.
             if (!settings?.enabled || settings.suspendAfterDays == null)
                 continue;
+            // A hosting row whose subscription was deleted (subscription_id nulled by the
+            // FK) has no billing cycle to judge overdue against; leave it for manual teardown.
+            if (acct.subscriptionId == null)
+                continue;
             const overdue = await oldestOverdueDays(acct.accountId, acct.subscriptionId, today);
             if (overdue == null) {
                 // Paid up. Clear any warning so a later lapse warns again rather than
@@ -449,8 +453,10 @@ async function oldestOverdueDays(accountId, subscriptionId, today) {
     return worst;
 }
 async function sendSuspensionWarning(acct, when) {
-    const [sub] = await db.select({ folderId: subscriptions.folderId }).from(subscriptions)
-        .where(eq(subscriptions.id, acct.subscriptionId)).limit(1);
+    const [sub] = acct.subscriptionId != null
+        ? await db.select({ folderId: subscriptions.folderId }).from(subscriptions)
+            .where(eq(subscriptions.id, acct.subscriptionId)).limit(1)
+        : [undefined];
     const to = await billingEmailFor(acct.accountId, sub?.folderId ?? null);
     if (!to)
         return false;
@@ -611,6 +617,35 @@ export async function switchToRealDomain(accountId, subscriptionId, realDomain) 
         domain: realDomain, isTemporary: false, domainSwitchedAt: new Date(), status: 'active',
     });
     return { ok: true, message: 'Your domain is set up. It can take a few hours for it to work everywhere.' };
+}
+/**
+ * Suspend or restore every hosting account attached to a subscription.
+ *
+ * Cancelling or pausing a subscription used to touch only the subscription row, so
+ * the cPanel site ran free forever and, because a cancelled sub raises no invoices,
+ * the overdue-suspension sweep never reached it either. This is what makes "cancel"
+ * actually stop the service. Best-effort and never throws: a WHM outage must not
+ * block the status change the operator asked for; the hosting row keeps its old
+ * status and the next manual action (or the sweep) can retry.
+ */
+export async function suspendForSubscription(accountId, subscriptionId, suspend, reason = 'Subscription cancelled') {
+    try {
+        const rows = await db.select().from(hostingAccounts)
+            .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)));
+        for (const row of rows) {
+            // Already in the target state, or never provisioned: nothing to do.
+            if (!row.username)
+                continue;
+            if (suspend && row.status === 'suspended')
+                continue;
+            if (!suspend && row.status === 'active')
+                continue;
+            await setSuspended(accountId, row.id, suspend, reason).catch(() => { });
+        }
+    }
+    catch {
+        /* never let hosting side-effects fail the subscription change */
+    }
 }
 /** Suspend or restore one account by hand, from the hosting screen. */
 export async function setSuspended(accountId, hostingAccountId, suspend, reason = 'Unpaid') {

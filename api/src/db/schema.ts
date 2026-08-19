@@ -707,6 +707,9 @@ export const documents = mysqlTable('documents', {
   index('idx_docs_account_folder').on(t.accountId, t.folderId),
   index('idx_docs_account_subscription').on(t.accountId, t.subscriptionId),
   index('idx_docs_account_type').on(t.accountId, t.type, t.createdAt),
+  // Credit-note balance lookups (collections + the portal) filter by
+  // sourceDocumentId; without this they scan every credit note in the account.
+  index('idx_docs_account_source').on(t.accountId, t.sourceDocumentId),
 ]);
 
 export const documentLines = mysqlTable('document_lines', {
@@ -1085,7 +1088,12 @@ export const hostingAccounts = mysqlTable('hosting_accounts', {
   accountId: int('account_id', { unsigned: true }).notNull()
     .references(() => accounts.id, { onDelete: 'cascade' }),
   businessId: int('business_id', { unsigned: true }),
-  subscriptionId: int('subscription_id', { unsigned: true }).notNull(),
+  // Nullable + FK with ON DELETE SET NULL: deleting a subscription now nulls this
+  // rather than orphaning a live cPanel account the workspace can no longer see. The
+  // route suspends the account first, so a null here is a suspended site awaiting
+  // teardown, not a free one still serving.
+  subscriptionId: int('subscription_id', { unsigned: true })
+    .references(() => subscriptions.id, { onDelete: 'set null' }),
   domain: varchar('domain', { length: 190 }).notNull(),
   username: varchar('username', { length: 32 }),
   whmPackage: varchar('whm_package', { length: 60 }),

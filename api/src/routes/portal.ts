@@ -440,7 +440,8 @@ export async function portalRoutes(app: FastifyInstance) {
     // Every unpaid invoice across every one of their hosting subscriptions, in one
     // query, then the balances in two more. Previously this was a query per
     // subscription plus two per invoice underneath it.
-    const subIds = rows.map((r) => r.subscriptionId);
+    // Filter nulls: a hosting row can outlive its subscription (FK set-null on delete).
+    const subIds = rows.map((r) => r.subscriptionId).filter((n): n is number => n != null);
     const unpaidAll = subIds.length
       ? await db.select({
         id: documents.id, number: documents.number, total: documents.total,
