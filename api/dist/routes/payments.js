@@ -10,6 +10,8 @@ import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '
 import { credsFor, settingsFor } from '../lib/paymentSettings.js';
 import { onInvoicePaid } from '../lib/hosting.js';
 import { assertBusinessAccess } from '../lib/access.js';
+import { balanceOf } from '../lib/balances.js';
+import { isDuplicateKey } from '../lib/tenant.js';
 import { buildCheckout, verifyItnSignature, validateItnWithServer, signature, } from '../lib/payfast.js';
 import { payfastSupports } from '../lib/currency.js';
 /**
@@ -212,9 +214,15 @@ export async function paymentRoutes(app) {
             return reply.code(400).send({ error: 'Only invoices can be paid.' });
         if (doc.status === 'paid')
             return reply.code(400).send({ error: 'This invoice is already paid.' });
+        // Charge what is STILL OWED, not the face value. An invoice with a recorded
+        // deposit or a credit note against it must ask for the remainder, or the client
+        // is overcharged and has to be refunded by hand.
+        const owed = (await balanceOf(accountId, doc.id, Number(doc.total))).outstanding;
+        if (owed <= 0.001)
+            return reply.code(400).send({ error: 'Nothing is outstanding on this invoice.' });
         const base = appUrl();
         const checkout = buildCheckout(creds, {
-            amount: Number(doc.total),
+            amount: owed,
             itemName: `Invoice ${doc.number}`,
             mPaymentId: `doc-${doc.id}`,
             returnUrl: `${base}/?paid=${doc.number}`,
@@ -251,9 +259,12 @@ export async function paymentRoutes(app) {
                 ? 'This invoice cannot be paid online right now.'
                 : `Invoices in ${doc.currency} cannot be paid by card here. Please use the bank details on your invoice.`);
         }
+        const owed = (await balanceOf(doc.accountId, doc.id, Number(doc.total))).outstanding;
+        if (owed <= 0.001)
+            return page('Already paid', `Invoice ${doc.number} is already settled. Thank you.`);
         const base = appUrl();
         const { url, fields } = buildCheckout(creds, {
-            amount: Number(doc.total), itemName: `Invoice ${doc.number}`, mPaymentId: `doc-${doc.id}`,
+            amount: owed, itemName: `Invoice ${doc.number}`, mPaymentId: `doc-${doc.id}`,
             returnUrl: `${base}/?paid=${doc.number}`, cancelUrl: `${base}/?cancelled=${doc.number}`,
             notifyUrl: `${base}/api/v1/payfast/notify`, buyerEmail: doc.clientEmail,
             tokenize: await shouldTokenize(doc),
@@ -341,7 +352,13 @@ export async function paymentRoutes(app) {
                 return ok();
             const passphrase = settings.passphraseEnc ? decryptSecret(settings.passphraseEnc) : null;
             const sigOk = verifyItnSignature(body, passphrase);
-            const amountOk = Math.abs(Number(body.amount_gross || 0) - Number(doc.total)) < 0.01;
+            // Accept any positive payment up to the invoice total, not only the exact
+            // total. Charging the OUTSTANDING balance (a deposit, or the remainder after
+            // one) is a genuine payment; demanding the full face value here made partial
+            // and deposit payments impossible and rejected the very balance-based checkout
+            // this webhook is paired with.
+            const gross = Number(body.amount_gross || 0);
+            const amountOk = gross > 0 && gross <= Number(doc.total) + 0.01;
             const complete = body.payment_status === 'COMPLETE';
             /**
              * Write down what happened, where it can actually be seen.
@@ -376,7 +393,7 @@ export async function paymentRoutes(app) {
                 const why = [
                     !complete && `payment_status is ${body.payment_status || 'missing'}, not COMPLETE`,
                     !sigOk && 'the signature did not match, which usually means the passphrase here differs from the one on your PayFast account',
-                    !amountOk && `the amount ${body.amount_gross} does not match the invoice total ${doc.total}`,
+                    !amountOk && `the amount ${body.amount_gross} is not a valid payment against an invoice total of ${doc.total}`,
                 ].filter(Boolean).join('; ');
                 req.log.warn({ docId, sigOk, amountOk, status: body.payment_status }, 'payfast ITN rejected');
                 await record(`Rejected: ${why}`, false);
@@ -389,21 +406,26 @@ export async function paymentRoutes(app) {
                 await record('Rejected: PayFast did not confirm this notification when we handed it back. If the sandbox is unreachable from the server this check cannot pass.', false);
                 return ok();
             }
-            // Idempotency: if we already logged this PayFast payment id, do nothing.
+            // Idempotency by DB constraint, not by scanning. PayFast retries ITNs and can
+            // deliver two at once; a read-then-insert let both pass the "already?" check
+            // and insert twice, doubling the paid total. The unique index on pf_payment_id
+            // makes the second insert fail, and we treat that failure as "already recorded".
             const pfId = body.pf_payment_id || '';
-            const existing = await db.select({ id: payments.id }).from(payments)
-                .where(tenantWhere(payments, doc.accountId, eq(payments.documentId, docId)));
-            const already = existing.length > 0 && !!pfId
-                && (await db.select({ note: payments.note }).from(payments)
-                    .where(tenantWhere(payments, doc.accountId, eq(payments.documentId, docId))))
-                    .some((p) => p.note?.includes(pfId));
-            if (already)
-                return ok();
             const today = new Date().toISOString().slice(0, 10);
-            await db.insert(payments).values(withTenant(doc.accountId, {
-                documentId: docId, amount: Number(body.amount_gross).toFixed(2), paidOn: today,
-                method: 'PayFast', note: pfId ? `PayFast ${pfId}` : 'PayFast', createdBy: null,
-            }));
+            try {
+                await db.insert(payments).values(withTenant(doc.accountId, {
+                    documentId: docId, amount: Number(body.amount_gross).toFixed(2), paidOn: today,
+                    method: 'PayFast', pfPaymentId: pfId || null,
+                    note: pfId ? `PayFast ${pfId}` : 'PayFast', createdBy: null,
+                }));
+            }
+            catch (e) {
+                if (isDuplicateKey(e)) {
+                    await record('Duplicate ITN ignored; this payment was already recorded.', true);
+                    return ok();
+                }
+                throw e;
+            }
             // Mark paid once covered.
             const paidRows = await db.select({ amount: payments.amount }).from(payments)
                 .where(tenantWhere(payments, doc.accountId, eq(payments.documentId, docId)));

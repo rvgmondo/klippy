@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, lt, lte } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import { formatMoney } from './currency.js';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals, events } from '../db/schema.js';
@@ -113,7 +113,23 @@ export async function runSubscriptionBilling() {
     let billed = 0;
     let failed = 0;
     let debited = 0;
+    let skipped = 0;
     for (const sub of due) {
+        // Claim THIS cycle before billing it: advance nextBillDate only while it still
+        // equals the date we read. Two overlapping runs (or a manual re-run after the
+        // scheduled one) both see the same due subscription, but only the first advance
+        // matches; the second finds affectedRows 0 and skips. So a cycle is invoiced and
+        // charged at most once, even if the job-level guard is somehow bypassed. Claiming
+        // BEFORE billing means a crash mid-invoice skips the cycle (visible, recoverable)
+        // rather than risking a second charge.
+        const nextDate = addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, anchorDayOf(sub.startedOn));
+        const claim = await db.update(subscriptions)
+            .set({ nextBillDate: nextDate, lastBilledAt: new Date() })
+            .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.nextBillDate, sub.nextBillDate), eq(subscriptions.status, 'active')));
+        if (!claim[0].affectedRows) {
+            skipped++;
+            continue;
+        }
         try {
             const docId = await generateSubscriptionInvoice(sub.accountId, {
                 businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
@@ -139,12 +155,7 @@ export async function runSubscriptionBilling() {
                 }
             }
             catch { /* the invoice stands; the charge can be retried by hand */ }
-            await db.update(subscriptions).set({
-                // Advance by the subscription's own interval (monthly, quarterly, annual),
-                // anchored on the start day so month-end bills spring back rather than drift.
-                nextBillDate: addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, anchorDayOf(sub.startedOn)),
-                lastBilledAt: new Date(),
-            }).where(eq(subscriptions.id, sub.id));
+            // nextBillDate was already advanced by the atomic claim above.
             billed++;
         }
         catch (err) {
@@ -166,7 +177,7 @@ export async function runSubscriptionBilling() {
             }).catch(() => { });
         }
     }
-    return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}`;
+    return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} already billed (skipped)` : ''}`;
 }
 /**
  * Tell people what they said they would chase.
@@ -379,6 +390,29 @@ export async function runJob(name) {
  * only fire once their hour has passed, so a restart at midnight does not send the
  * morning digest early.
  */
+/**
+ * Claim a job for today, atomically, so only ONE caller ever runs it.
+ *
+ * The old guard read lastRunOn and then ran the job, writing lastRunOn only when
+ * the job finished. `/automation/tick` fires on every app load, and Passenger runs
+ * several workers, so two ticks a few milliseconds apart both read "not run yet"
+ * and both billed the same cycle and charged the same card. This closes that: the
+ * conditional UPDATE is a single atomic row operation, so of two concurrent callers
+ * exactly one flips lastRunOn to today (affectedRows 1) and the other matches
+ * nothing (affectedRows 0) and backs off.
+ *
+ * lastRunOn is stamped here, BEFORE the work, on purpose: a job that crashes must
+ * not be retried by the next tick and bill twice. A missed run waits for tomorrow
+ * (or a manual trigger), which is the safe direction for money.
+ */
+async function claimJobForToday(name, today) {
+    // Make sure a row exists to update (first run of a fresh install).
+    await db.insert(jobRuns).values({ name }).onDuplicateKeyUpdate({ set: { name } });
+    const res = await db.update(jobRuns)
+        .set({ lastRunOn: today, lastRunAt: new Date() })
+        .where(and(eq(jobRuns.name, name), or(isNull(jobRuns.lastRunOn), ne(jobRuns.lastRunOn, today))));
+    return res[0].affectedRows > 0;
+}
 export async function runDueJobs() {
     const today = todayStr();
     const hour = new Date().getHours();
@@ -389,8 +423,11 @@ export async function runDueJobs() {
         if (s && s.enabled === false)
             continue;
         if (s?.lastRunOn === today)
-            continue;
+            continue; // cheap fast path; the claim is the real gate
         if (hour < job.hour)
+            continue;
+        // Only the caller that wins the atomic claim runs the job.
+        if (!(await claimJobForToday(job.name, today)))
             continue;
         await runJob(job.name);
     }

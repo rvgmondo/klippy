@@ -18,6 +18,7 @@ import { onInvoicePaid } from '../lib/hosting.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor } from '../lib/numbering.js';
+import { addDays } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 
 const lineSchema = z.object({
@@ -529,13 +530,24 @@ export async function documentRoutes(app: FastifyInstance) {
 
     const { seq, number } = await nextNumber(accountId, quote.businessId, 'invoice');
     const today = new Date().toISOString().slice(0, 10);
+    // A quote-born invoice used to have NO due date, so it never appeared on
+    // Collections, never triggered a reminder, and never counted toward hosting
+    // suspension. Give it the business's standard term (fallback 14 days) so the
+    // most common invoice source is actually chased.
+    const dueDays = await (async () => {
+      if (!quote.businessId) return 14;
+      const [b] = await db.select({ d: businesses.defaultDueDays }).from(businesses)
+        .where(tenantWhere(businesses, accountId, eq(businesses.id, quote.businessId))).limit(1);
+      return b?.d ?? 14;
+    })();
+    const dueDate = addDays(today, dueDays);
 
     const newId = await db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
         type: 'invoice' as const, seq, number, businessId: quote.businessId, folderId: quote.folderId,
         clientName: quote.clientName, clientEmail: quote.clientEmail, clientAddress: quote.clientAddress,
         clientVatNumber: quote.clientVatNumber,
-        issueDate: today, dueDate: null, currency: quote.currency, taxRate: quote.taxRate,
+        issueDate: today, dueDate, currency: quote.currency, taxRate: quote.taxRate,
         discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
         subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
         notes: quote.notes, createdBy: userId,
@@ -696,7 +708,11 @@ export async function documentRoutes(app: FastifyInstance) {
       await db.update(documents).set({ status: 'paid' })
         .where(tenantWhere(documents, accountId, eq(documents.id, id)));
       await onInvoicePaid(accountId, id);
-    } else if (!settled && doc.status === 'paid') {
+    } else if (!settled && doc.status === 'paid' && parsed.data.amount >= 0) {
+      // Only a genuine reopening (a correcting entry, not a refund) reverts to
+      // 'sent'. A refund is money you GAVE BACK: flipping the invoice back to 'sent'
+      // used to re-enter it into the reminder + auto-suspend pipeline and chase, or
+      // switch off the site of, a client you just refunded.
       await db.update(documents).set({ status: 'sent' })
         .where(tenantWhere(documents, accountId, eq(documents.id, id)));
     }

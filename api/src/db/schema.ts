@@ -776,10 +776,17 @@ export const payments = mysqlTable('payments', {
   paidOn: date('paid_on', { mode: 'string' }).notNull(),
   method: varchar('method', { length: 40 }),
   note: varchar('note', { length: 255 }),
+  // PayFast's own payment id, for gateway payments. A UNIQUE index on it turns a
+  // duplicate or concurrent ITN retry into a no-op insert instead of a second
+  // payment row that would double the paid total and drive outstanding negative.
+  // Null for manual/EFT payments; MySQL allows many nulls in a unique index, so
+  // hand-entered payments are unaffected.
+  pfPaymentId: varchar('pf_payment_id', { length: 64 }),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
 }, (t) => [
   index('idx_payments_account_doc').on(t.accountId, t.documentId),
+  uniqueIndex('uniq_payments_pf').on(t.pfPaymentId),
 ]);
 
 // ---- Offerings ("The Offering": what the business actually sells. Shape is the
