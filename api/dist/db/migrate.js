@@ -87,7 +87,18 @@ function checkConfig() {
 }
 export async function runMigrations() {
     const migrationsFolder = fileURLToPath(new URL('../../drizzle', import.meta.url));
-    await migrate(db, { migrationsFolder });
+    try {
+        await migrate(db, { migrationsFolder });
+    }
+    catch (err) {
+        // A failed migration must NOT take the whole site down. One bad ALTER against
+        // real data used to crash-loop the boot and serve 503 for everything, static
+        // pages included. Log it loudly and carry on: a schema that is one migration
+        // behind is far better than a site that is entirely offline, and verifySchema
+        // below reports exactly what is missing so the gap is visible, not silent.
+        // eslint-disable-next-line no-console
+        console.error('klippy-api MIGRATION FAILED (booting anyway; schema may be behind):', err);
+    }
     checkConfig();
     const missing = await verifySchema();
     if (missing.length) {

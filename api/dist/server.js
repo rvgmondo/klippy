@@ -173,6 +173,9 @@ const host = '0.0.0.0';
 async function start() {
     // Auto-apply pending DB migrations, so a code deploy also updates the schema.
     const { runMigrations } = await import('./db/migrate.js');
+    // runMigrations no longer throws on a failed migration; it logs and continues so
+    // the server always comes up. The extra guard here is belt-and-braces: a totally
+    // unexpected error in migration setup still must not stop the app from listening.
     try {
         await runMigrations();
         // eslint-disable-next-line no-console
@@ -180,8 +183,7 @@ async function start() {
     }
     catch (err) {
         // eslint-disable-next-line no-console
-        console.error('klippy-api migration failed:', err);
-        process.exit(1);
+        console.error('klippy-api migration step errored (booting anyway):', err);
     }
     // Run the daily jobs in-process, so none of this needs an external cron.
     const { startScheduler } = await import('./lib/jobs.js');
