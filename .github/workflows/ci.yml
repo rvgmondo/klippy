@@ -1,0 +1,45 @@
+# Runs on every push and pull request: typecheck + tests for the API, and a
+# production build of both halves. This is the regression net the money and
+# multi-tenant code never had; a change that breaks the build or the money-rounding
+# tests fails here instead of on the live billing system.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install API deps
+        working-directory: api
+        run: npm ci
+      - name: Typecheck
+        working-directory: api
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: api
+        run: npm test
+      - name: Build API
+        working-directory: api
+        run: npm run build
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install web deps
+        working-directory: web
+        run: npm ci
+      - name: Build web
+        working-directory: web
+        run: npm run build
