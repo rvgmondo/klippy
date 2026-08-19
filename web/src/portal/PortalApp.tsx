@@ -31,7 +31,7 @@ const money = (currency: string, v: string | number) => fmt(v, currency);
  */
 export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () => void }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'documents' | 'hosting' | 'details'>('documents');
+  const [tab, setTab] = useState<'documents' | 'statement' | 'hosting' | 'details'>('documents');
   const accent = { background: 'var(--portal-accent, #0f172a)' };
 
   const { data } = useQuery({
@@ -118,7 +118,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         )}
 
         <nav className="mb-4 flex gap-1 border-b border-slate-200">
-          {([['documents', 'Invoices and quotes'], ['hosting', 'Hosting'], ['details', 'Your details']] as const)
+          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['hosting', 'Hosting'], ['details', 'Your details']] as const)
             .map(([id, labelText]) => (
               <button key={id} onClick={() => setTab(id)}
                 className={`-mb-px border-b-2 px-3 py-2 text-sm ${
@@ -133,6 +133,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
             payError={pay.error instanceof Error ? pay.error.message : ''} accent={accent}
             readOnly={!!me.preview} />
         )}
+        {tab === 'statement' && <Statement />}
         {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)} />}
         {tab === 'details' && (me.preview
           ? <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
@@ -144,6 +145,50 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
   );
 }
 
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+interface DocLine { id: number; description: string; detail: string | null; quantity: string; unitPrice: string; amount: string }
+
+/**
+ * The line breakdown for one document, fetched on demand.
+ *
+ * The portal used to show only a total and a Pay button, so a client accepted every
+ * figure blind and had to email to ask what a charge was for. This is the same detail
+ * that is on the PDF, in the page, one click away, so "what is this?" answers itself.
+ */
+function DocLines({ id, currency }: { id: number; currency: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['portal-doc', id],
+    queryFn: () => apiGet<{ lines: DocLine[] }>(`/portal/documents/${id}`),
+  });
+  if (isLoading) return <div className="mt-3 text-xs text-slate-400">Loading items...</div>;
+  const lines = data?.lines ?? [];
+  if (!lines.length) return <div className="mt-3 text-xs text-slate-400">No line items.</div>;
+  return (
+    <table className="mt-3 w-full text-xs">
+      <thead>
+        <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wide text-slate-400">
+          <th className="py-1 pr-2">Description</th>
+          <th className="py-1 px-2 text-right">Qty</th>
+          <th className="py-1 pl-2 text-right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {lines.map((l) => (
+          <tr key={l.id} className="border-b border-slate-100 align-top last:border-0">
+            <td className="py-1.5 pr-2 text-slate-700">
+              {l.description}
+              {l.detail && <div className="mt-0.5 whitespace-pre-line text-[11px] leading-snug text-slate-400">{l.detail}</div>}
+            </td>
+            <td className="py-1.5 px-2 text-right num text-slate-500">{Number(l.quantity)}</td>
+            <td className="py-1.5 pl-2 text-right num text-slate-700">{money(currency, l.amount)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
   docs: Doc[]; onPay: (id: number) => void; paying: boolean; payError: string;
   accent: React.CSSProperties; readOnly?: boolean;
@@ -151,6 +196,7 @@ function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(0);
   const [err, setErr] = useState('');
+  const [open, setOpen] = useState<number | null>(null);
 
   const decide = useMutation({
     mutationFn: (v: { id: number; decision: 'accepted' | 'declined' }) =>
@@ -181,12 +227,15 @@ function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
           </div>
 
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-            {d.type === 'invoice' && d.outstanding > 0 && (
-              <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800">
-                {money(d.currency, d.outstanding)} outstanding
-                {d.dueDate ? `, due ${d.dueDate}` : ''}
-              </span>
-            )}
+            {d.type === 'invoice' && d.outstanding > 0 && (() => {
+              const overdue = !!d.dueDate && d.dueDate < todayStr();
+              return (
+                <span className={`rounded-md px-2 py-0.5 ${overdue ? 'bg-red-100 font-medium text-red-800' : 'bg-amber-100 text-amber-800'}`}>
+                  {money(d.currency, d.outstanding)} outstanding
+                  {d.dueDate ? (overdue ? `, overdue since ${d.dueDate}` : `, due ${d.dueDate}`) : ''}
+                </span>
+              );
+            })()}
             {d.type === 'invoice' && d.outstanding <= 0 && d.status !== 'void' && (
               <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-800">Paid</span>
             )}
@@ -200,7 +249,12 @@ function Documents({ docs, onPay, paying, payError, accent, readOnly }: {
             )}
           </div>
 
+          {open === d.id && <DocLines id={d.id} currency={d.currency} />}
           <div className="mt-3 flex flex-wrap gap-2">
+            <button onClick={() => setOpen(open === d.id ? null : d.id)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">
+              {open === d.id ? 'Hide items' : 'View items'}
+            </button>
             <a href={`/api/v1/portal/documents/${d.id}/pdf`} target="_blank" rel="noreferrer"
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">
               Download PDF
@@ -314,6 +368,74 @@ function AwaitingDomain() {
           </p>
         </div>
       ))}
+    </div>
+  );
+}
+
+interface StatementLine { date: string; kind: string; ref: string; change: string; balance: string }
+
+/**
+ * A running-balance statement: every invoice, credit and payment, oldest first.
+ *
+ * The endpoint existed and nothing called it, so a client had no way to reconcile
+ * their account with their own books. Drawn in one currency at a time, because a
+ * running balance across two is not a number; a switcher appears only when the
+ * client has been billed in more than one.
+ */
+function Statement() {
+  const [cur, setCur] = useState<string | null>(null);
+  const { data, isLoading } = useQuery({
+    queryKey: ['portal-statement', cur],
+    queryFn: () => apiGet<{ statement: StatementLine[]; closingBalance: string; currency: string; currencies: string[] }>(
+      `/portal/statement${cur ? `?currency=${cur}` : ''}`),
+  });
+  if (isLoading) return <p className="text-sm text-slate-500">Loading...</p>;
+  const rows = data?.statement ?? [];
+  const currency = data?.currency ?? 'ZAR';
+  const others = data?.currencies ?? [];
+  const KIND: Record<string, string> = { invoice: 'Invoice', credit_note: 'Credit note', payment: 'Payment' };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-slate-800">Statement of account</h2>
+        {others.length > 1 && (
+          <select value={currency} onChange={(e) => setCur(e.target.value)}
+            className="rounded-lg border border-slate-300 px-2 py-1 text-xs">
+            {others.map((x) => <option key={x} value={x}>{x}</option>)}
+          </select>
+        )}
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-500">No activity yet.</p>
+      ) : (
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-[10px] uppercase tracking-wide text-slate-400">
+              <th className="py-1 pr-2">Date</th>
+              <th className="py-1 px-2">Detail</th>
+              <th className="py-1 px-2 text-right">Change</th>
+              <th className="py-1 pl-2 text-right">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((l, i) => (
+              <tr key={i} className="border-b border-slate-100 last:border-0">
+                <td className="py-1.5 pr-2 num text-slate-500">{l.date}</td>
+                <td className="py-1.5 px-2 text-slate-700">{KIND[l.kind] ?? l.kind} {l.ref}</td>
+                <td className={`py-1.5 px-2 text-right num ${Number(l.change) < 0 ? 'text-green-700' : 'text-slate-700'}`}>{money(currency, l.change)}</td>
+                <td className="py-1.5 pl-2 text-right num font-medium text-slate-800">{money(currency, l.balance)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-slate-300">
+              <td colSpan={3} className="py-2 pr-2 text-right font-medium text-slate-600">Balance owing</td>
+              <td className="py-2 pl-2 text-right num font-semibold text-slate-900">{money(currency, data?.closingBalance ?? 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      )}
     </div>
   );
 }

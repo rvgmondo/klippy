@@ -278,13 +278,24 @@ export async function portalRoutes(app: FastifyInstance) {
   app.get('/api/v1/portal/statement', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;
-    const docs = await db.select({
+    const allDocs = await db.select({
       id: documents.id, type: documents.type, number: documents.number,
       issueDate: documents.issueDate, total: documents.total, status: documents.status,
+      currency: documents.currency,
     }).from(documents)
       .where(and(mine(c), inArray(documents.type, ['invoice', 'credit_note']),
         inArray(documents.status, [...VISIBLE_STATUSES])))
       .orderBy(documents.issueDate, documents.id);
+
+    // A running balance only means something within ONE currency. Pick the most
+    // recent currency by default (or an asked-for one), and tell the client which
+    // others exist, so a client billed in two is never shown their sum.
+    const currencies = [...new Set(allDocs.map((d) => d.currency))].sort();
+    const wanted = (req.query as { currency?: string }).currency?.toUpperCase();
+    const latest = allDocs.reduce<typeof allDocs[number] | undefined>(
+      (best, d) => (!best || d.issueDate > best.issueDate ? d : best), undefined);
+    const currency = (wanted && currencies.includes(wanted)) ? wanted : (latest?.currency ?? 'ZAR');
+    const docs = allDocs.filter((d) => d.currency === currency);
 
     const ids = docs.map((d) => d.id);
     const pays = ids.length
@@ -313,7 +324,7 @@ export async function portalRoutes(app: FastifyInstance) {
       running += e.change;
       return { ...e, change: money(e.change), balance: money(running) };
     });
-    return { statement: lines, closingBalance: money(running) };
+    return { statement: lines, closingBalance: money(running), currency, currencies };
   });
 
   // ---- Paying ---------------------------------------------------------------

@@ -5,12 +5,14 @@ import { paymentSettings, documents, payments, events, subscriptions } from '../
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
-import { appUrl } from '../lib/mailer.js';
+import { appUrl, sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
+import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
+import { balanceOf } from '../lib/balances.js';
+import { formatMoney } from '../lib/currency.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
 import { credsFor, settingsFor } from '../lib/paymentSettings.js';
 import { onInvoicePaid } from '../lib/hosting.js';
 import { assertBusinessAccess } from '../lib/access.js';
-import { balanceOf } from '../lib/balances.js';
 import { isDuplicateKey } from '../lib/tenant.js';
 import { buildCheckout, verifyItnSignature, validateItnWithServer, signature, } from '../lib/payfast.js';
 import { payfastSupports } from '../lib/currency.js';
@@ -430,11 +432,42 @@ export async function paymentRoutes(app) {
             const paidRows = await db.select({ amount: payments.amount }).from(payments)
                 .where(tenantWhere(payments, doc.accountId, eq(payments.documentId, docId)));
             const paid = paidRows.reduce((s, p) => s + Number(p.amount), 0);
-            if (paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
+            const settled = paid + 0.001 >= Number(doc.total);
+            if (settled && doc.status !== 'paid') {
                 await db.update(documents).set({ status: 'paid' })
                     .where(tenantWhere(documents, doc.accountId, eq(documents.id, docId)));
                 // Set up whatever was sold. Never allowed to fail the payment.
                 await onInvoicePaid(doc.accountId, docId);
+            }
+            // Email the client a receipt. Without one, a client whose PayFast return was
+            // interrupted has no confirmation the payment landed and may pay again. Purely
+            // a notification: a send failure must never affect the recorded payment.
+            if (doc.clientEmail) {
+                try {
+                    const bal = await balanceOf(doc.accountId, docId, Number(doc.total));
+                    const brand = await emailBrandFor(doc.accountId, doc.businessId);
+                    const content = {
+                        heading: `Payment received for ${doc.number}`,
+                        body: [
+                            `Hi ${doc.clientName},`,
+                            `Thank you. We have received your payment of ${formatMoney(Number(body.amount_gross), doc.currency)} for ${doc.number}.`,
+                            settled ? 'This invoice is now fully paid.' : `The remaining balance is ${formatMoney(bal.outstanding, doc.currency)}.`,
+                        ],
+                        facts: [
+                            ['Invoice', doc.number],
+                            ['Paid', formatMoney(Number(body.amount_gross), doc.currency)],
+                            ['Reference', pfId || 'PayFast'],
+                        ],
+                    };
+                    await sendBusinessMail({
+                        accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
+                        to: doc.clientEmail,
+                        subject: `Payment received: ${doc.number}`,
+                        text: renderEmailText(brand, content),
+                        html: renderEmail(brand, content),
+                    });
+                }
+                catch { /* a receipt that fails to send must not disturb the payment */ }
             }
             // If this checkout asked PayFast to store the card, the reusable token comes
             // back on the ITN and this is the only place it is ever offered. Miss it and
