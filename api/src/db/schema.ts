@@ -838,6 +838,9 @@ export const expenses = mysqlTable('expenses', {
   description: varchar('description', { length: 200 }).notNull(),
   category: varchar('category', { length: 60 }),
   amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  // Input VAT contained in this expense, for the VAT return. Null when the cost had
+  // no VAT (or the amount was never split out); the VAT report treats null as zero.
+  vatAmount: decimal('vat_amount', { precision: 12, scale: 2 }),
   incurredOn: date('incurred_on', { mode: 'string' }).notNull(),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
@@ -1185,6 +1188,9 @@ export const deals = mysqlTable('deals', {
    */
   nextFollowUpAt: date('next_follow_up_at', { mode: 'string' }),
   followUpNote: varchar('follow_up_note', { length: 200 }),
+  // Why a deal was lost, captured when it is dragged to 'lost'. "Why we lose" is
+  // unlearnable without it, and fixing sales is exactly the founder's job.
+  lostReason: varchar('lost_reason', { length: 200 }),
   // Set when a won deal is turned into a delivery client.
   clientFolderId: int('client_folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
   wonAt: datetime('won_at'),

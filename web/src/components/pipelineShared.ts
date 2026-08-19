@@ -15,4 +15,9 @@ export interface Activity {
   id: number; kind: 'note' | 'call' | 'email' | 'meeting' | 'stage';
   body: string | null; occurredAt: string;
 }
-export interface Summary { openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number }
+export interface Summary {
+  openCount: number; pipelineValue: number; wonThisMonth: number; wonValueThisMonth: number;
+  wonCount: number; lostCount: number; winRate: number | null;
+  bySource: { source: string; deals: number; won: number; wonValue: number }[];
+  lostReasons: { reason: string; count: number }[];
+}

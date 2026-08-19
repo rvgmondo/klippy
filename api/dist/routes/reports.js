@@ -3,7 +3,7 @@ import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY } from '../lib/currency.js';
 import { mrrByCurrency } from '../lib/mrr.js';
 import { db } from '../db/client.js';
-import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, subscriptions } from '../db/schema.js';
+import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, subscriptions, documents, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, businessScope } from '../lib/access.js';
@@ -267,6 +267,104 @@ export async function reportRoutes(app) {
                 accuracyPct: estimateTotal > 0
                     ? Math.round(((actualTotal - estimateTotal) / estimateTotal) * 100) : null,
             },
+        };
+    });
+    /**
+     * A financial CSV export for a bookkeeper, so the numbers can leave the app at
+     * year-end and each VAT cycle. `kind` picks the table; a date range bounds it.
+     * The data always existed; it just had no way out.
+     */
+    app.get('/api/v1/reports/export', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({
+            kind: z.enum(['invoices', 'payments', 'expenses']),
+            from: dateStr, to: dateStr,
+        }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'kind, from and to (YYYY-MM-DD) are required.' });
+        const { kind, from, to } = q.data;
+        const esc = (v) => {
+            const str = v == null ? '' : String(v);
+            // Quote anything with a comma, quote or newline; double internal quotes. This
+            // is the whole of CSV correctness and the usual place exports get it wrong.
+            return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+        };
+        const toCsv = (header, rows) => [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n') + '\r\n';
+        let csv = '';
+        if (kind === 'invoices') {
+            const rows = await db.select({
+                number: documents.number, type: documents.type, issueDate: documents.issueDate,
+                dueDate: documents.dueDate, client: documents.clientName, vat: documents.clientVatNumber,
+                currency: documents.currency, subtotal: documents.subtotal, tax: documents.taxAmount,
+                total: documents.total, status: documents.status,
+            }).from(documents)
+                .where(tenantWhere(documents, accountId, inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
+            csv = toCsv(['Number', 'Type', 'Issue date', 'Due date', 'Client', 'Client VAT', 'Currency', 'Subtotal', 'Tax', 'Total', 'Status'], rows.map((r) => [r.number, r.type, r.issueDate, r.dueDate, r.client, r.vat, r.currency, r.subtotal, r.tax, r.total, r.status]));
+        }
+        else if (kind === 'payments') {
+            const rows = await db.select({
+                paidOn: payments.paidOn, amount: payments.amount, method: payments.method,
+                number: documents.number, client: documents.clientName, currency: documents.currency,
+            }).from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
+                .where(and(eq(payments.accountId, accountId), gte(payments.paidOn, from), lte(payments.paidOn, to)));
+            csv = toCsv(['Paid on', 'Amount', 'Method', 'Invoice', 'Client', 'Currency'], rows.map((r) => [r.paidOn, r.amount, r.method, r.number, r.client, r.currency]));
+        }
+        else {
+            const rows = await db.select({
+                incurredOn: expenses.incurredOn, description: expenses.description,
+                category: expenses.category, amount: expenses.amount,
+            }).from(expenses)
+                .where(and(eq(expenses.accountId, accountId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+            csv = toCsv(['Date', 'Description', 'Category', 'Amount'], rows.map((r) => [r.incurredOn, r.description, r.category, r.amount]));
+        }
+        reply.header('Content-Type', 'text/csv; charset=utf-8');
+        reply.header('Content-Disposition', `attachment; filename="klippy-${kind}-${from}-to-${to}.csv"`);
+        return reply.send(csv);
+    });
+    /**
+     * VAT summary for a period: output VAT (on invoices raised) and input VAT (on
+     * expenses that recorded a VAT amount), grouped by currency. A VAT-registered
+     * business needs both sides to file; the app held valid tax invoices but could
+     * compute neither, forcing a parallel spreadsheet every two months.
+     */
+    app.get('/api/v1/reports/vat', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
+        const { from, to } = q.data;
+        const invoices = await db.select({
+            currency: documents.currency, type: documents.type, tax: documents.taxAmount, total: documents.total,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
+        const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount })
+            .from(expenses)
+            .where(and(eq(expenses.accountId, accountId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+        const round = (n) => Math.round(n * 100) / 100;
+        const byCur = new Map();
+        for (const r of invoices) {
+            const sign = r.type === 'credit_note' ? -1 : 1;
+            const b = byCur.get(r.currency) ?? { outputVat: 0, sales: 0 };
+            b.outputVat += sign * Number(r.tax);
+            b.sales += sign * Number(r.total);
+            byCur.set(r.currency, b);
+        }
+        // Input VAT is not split by currency (expenses have no currency column yet); it
+        // is reported against the workspace currency, which is where expenses are kept.
+        const [acc] = await db.select({ currency: accounts.currency }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
+        const wsCur = acc?.currency || DEFAULT_CURRENCY;
+        const inputVat = round(exps.reduce((s, e) => s + Number(e.vat ?? 0), 0));
+        const output = [...byCur].map(([currency, b]) => ({
+            currency, sales: round(b.sales), outputVat: round(b.outputVat),
+        })).sort((a, b) => b.outputVat - a.outputVat);
+        const wsOutput = output.find((o) => o.currency === wsCur)?.outputVat ?? 0;
+        return {
+            from, to, currency: wsCur,
+            output,
+            inputVat,
+            // Net is only meaningful within one currency; computed for the workspace
+            // currency (output there minus input VAT, which is in the workspace currency).
+            netPayable: round(wsOutput - inputVat),
         };
     });
 }

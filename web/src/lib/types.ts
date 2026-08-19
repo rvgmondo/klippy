@@ -73,6 +73,7 @@ export interface Expense {
   description: string;
   category: string | null;
   amount: string;
+  vatAmount: string | null;
   incurredOn: string;
 }
 export type BusinessType = 'services' | 'products' | 'code' | 'content';

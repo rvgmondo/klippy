@@ -115,6 +115,7 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
   const isNew = !expense;
   const [description, setDescription] = useState(expense?.description ?? '');
   const [amount, setAmount] = useState(expense?.amount ?? '');
+  const [vat, setVat] = useState(expense?.vatAmount ?? '');
   const [category, setCategory] = useState(expense?.category ?? '');
   const [incurredOn, setIncurredOn] = useState(expense?.incurredOn ?? todayStr());
   const [folderId, setFolderId] = useState<string>(expense?.folderId != null ? String(expense.folderId) : '');
@@ -124,6 +125,7 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
     mutationFn: () => {
       const body = {
         description: description.trim(), amount: Number(amount) || 0,
+        vatAmount: vat.trim() ? Number(vat) : null,
         category: category.trim() || null, incurredOn,
         folderId: folderId ? Number(folderId) : null,
         ...(isNew ? { businessId } : {}),
@@ -147,11 +149,16 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
         <input autoFocus value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Adobe subscription"
           className="mb-3 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
 
-        <div className="mb-3 grid grid-cols-2 gap-2">
+        <div className="mb-3 grid grid-cols-3 gap-2">
           <div>
             <label className="mb-1 block text-xs text-slate-400">Amount</label>
             <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)}
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-slate-400" title="Input VAT contained in the amount, for the VAT return">VAT</label>
+            <input type="number" step="0.01" value={vat} onChange={(e) => setVat(e.target.value)} placeholder="0.00"
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500" />
           </div>
           <div>
             <label className="mb-1 block text-xs text-slate-400">Date</label>

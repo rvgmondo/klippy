@@ -42,6 +42,15 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
     queryFn: () => apiGet<Report>(`/reports/time?from=${from}&to=${to}${bizQ}`),
     retry: false,
   });
+  const vat = useQuery({
+    queryKey: ['vat', from, to],
+    queryFn: () => apiGet<{
+      currency: string;
+      output: { currency: string; sales: number; outputVat: number }[];
+      inputVat: number; netPayable: number;
+    }>(`/reports/vat?from=${from}&to=${to}`),
+    retry: false,
+  });
 
   const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-500';
   const cur = data?.currency ?? 'ZAR';
@@ -59,6 +68,40 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
             <label className="mb-1 block text-[11px] text-slate-500">To</label>
             <input type="date" className={field} value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
+        </div>
+
+        {/* For the bookkeeper: VAT for the period and one-click CSV exports. The data
+            always existed; it just could not leave the app. */}
+        <div className="mb-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <h3 className="mr-auto text-sm font-semibold text-slate-200">For your accountant</h3>
+            {(['invoices', 'payments', 'expenses'] as const).map((k) => (
+              <a key={k} href={`/api/v1/reports/export?kind=${k}&from=${from}&to=${to}`}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                Export {k} CSV
+              </a>
+            ))}
+          </div>
+          {vat.data && (
+            <div className="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+              {vat.data.output.length === 0 ? (
+                <span className="text-slate-500">No sales VAT in this period.</span>
+              ) : vat.data.output.map((o) => (
+                <div key={o.currency}>
+                  <span className="text-slate-500">Output VAT ({o.currency}): </span>
+                  <span className="num text-slate-100">{money(o.outputVat, o.currency)}</span>
+                </div>
+              ))}
+              <div>
+                <span className="text-slate-500">Input VAT ({vat.data.currency}): </span>
+                <span className="num text-slate-100">{money(vat.data.inputVat, vat.data.currency)}</span>
+              </div>
+              <div>
+                <span className="text-slate-500">Net VAT payable ({vat.data.currency}): </span>
+                <span className="num font-semibold text-slate-100">{money(vat.data.netPayable, vat.data.currency)}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {error ? (

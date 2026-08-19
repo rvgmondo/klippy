@@ -1,12 +1,13 @@
-import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import { formatMoney } from './currency.js';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions, documents, jobRuns, businesses, deals, events } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents, payments, accounts, jobRuns, businesses, deals, events } from '../db/schema.js';
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
+import { mrrByCurrency } from './mrr.js';
 import { runHostingSuspensions } from './hosting.js';
 import { pruneLoginTokens } from './portalAuth.js';
 /**
@@ -46,6 +47,12 @@ export const JOBS = [
         name: 'deal-follow-ups',
         label: 'Follow-up reminders',
         description: 'Emails you the deals you said you would chase today, and the ones you said you would chase and did not.',
+        hour: 7,
+    },
+    {
+        name: 'finance-digest',
+        label: 'Weekly money digest',
+        description: 'On Monday mornings, emails owners the week\'s money: invoiced, received, MRR, and what is still owed.',
         hour: 7,
     },
     {
@@ -105,6 +112,93 @@ export async function runDailyDigest() {
         sent++;
     }
     return `${sent} sent of ${recipients.length} considered`;
+}
+/**
+ * The Monday money digest.
+ *
+ * Runs in the daily sweep but only does anything on a Monday, so a founder gets one
+ * email a week that answers "how did the business do?" without opening anything:
+ * invoiced, received, current MRR, and what is still owed. Only to owners/admins who
+ * have the digest switched on, and grouped by workspace so the figures are computed
+ * once per account rather than once per recipient.
+ *
+ * Money is grouped by currency and never summed across, same rule as everywhere.
+ */
+export async function runFinanceDigest() {
+    // getUTCDay: 0 Sun, 1 Mon. Only Mondays send; other days record a clean skip.
+    if (new Date().getUTCDay() !== 1)
+        return 'Not Monday; nothing sent.';
+    const weekAgo = addDays(todayStr(), -7);
+    const recipients = await db.select({
+        id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,
+    }).from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(and(eq(users.isActive, true), eq(users.dailyDigest, true), eq(memberships.isActive, true), inArray(memberships.role, ['owner', 'admin'])));
+    // Group recipients by account so the money is computed once per workspace.
+    const byAccount = new Map();
+    for (const r of recipients) {
+        const list = byAccount.get(r.accountId) ?? [];
+        list.push(r);
+        byAccount.set(r.accountId, list);
+    }
+    const round = (n) => Math.round(n * 100) / 100;
+    let sent = 0;
+    for (const [accountId, people] of byAccount) {
+        const [acc] = await db.select({ currency: accounts.currency }).from(accounts)
+            .where(eq(accounts.id, accountId)).limit(1);
+        const wsCur = acc?.currency || 'ZAR';
+        // Invoiced and received in the last 7 days, grouped by the document currency.
+        const invRows = await db.select({ currency: documents.currency, total: documents.total })
+            .from(documents)
+            .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'), ne(documents.status, 'void'), ne(documents.status, 'draft'), gte(documents.issueDate, weekAgo)));
+        const payRows = await db.select({ amount: payments.amount, currency: documents.currency })
+            .from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
+            .where(and(eq(payments.accountId, accountId), gte(payments.paidOn, weekAgo)));
+        const owedRows = await db.select({ currency: documents.currency, total: documents.total })
+            .from(documents)
+            .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'), eq(documents.status, 'sent')));
+        const bucket = new Map();
+        const into = (c) => { let b = bucket.get(c); if (!b) {
+            b = { invoiced: 0, received: 0, owed: 0 };
+            bucket.set(c, b);
+        } return b; };
+        for (const r of invRows)
+            into(r.currency).invoiced += Number(r.total);
+        for (const r of payRows)
+            into(r.currency).received += Number(r.amount);
+        for (const r of owedRows)
+            into(r.currency).owed += Number(r.total);
+        const mrr = await mrrByCurrency(accountId);
+        for (const m of mrr)
+            into(m.currency); // ensure the currency shows even if quiet this week
+        const rows = [...bucket].map(([currency, b]) => {
+            const m = mrr.find((x) => x.currency === currency);
+            return { currency, invoiced: round(b.invoiced), received: round(b.received), owed: round(b.owed), mrr: m?.mrr ?? 0 };
+        });
+        if (!rows.length)
+            continue; // a workspace with no money activity gets no mail
+        const facts = [];
+        for (const r of rows) {
+            facts.push([`Invoiced (${r.currency})`, formatMoney(r.invoiced, r.currency)]);
+            facts.push([`Received (${r.currency})`, formatMoney(r.received, r.currency)]);
+            facts.push([`Outstanding (${r.currency})`, formatMoney(r.owed, r.currency)]);
+            if (r.mrr > 0)
+                facts.push([`MRR (${r.currency})`, formatMoney(r.mrr, r.currency)]);
+        }
+        const content = {
+            heading: 'Your week in money',
+            body: ['Here is where the business stood over the last seven days.'],
+            facts,
+            button: { label: 'Open Klippy', url: `${appUrl()}?v=reports` },
+        };
+        const brand = await emailBrandFor(accountId, null);
+        for (const u of people) {
+            await sendMail(u.email, 'Klippy: your weekly money digest', renderEmail(brand, content))
+                .then(() => { sent++; })
+                .catch(() => { });
+        }
+    }
+    return `${sent} finance digest(s) sent across ${byAccount.size} workspace(s)`;
 }
 export async function runSubscriptionBilling() {
     const today = todayStr();
@@ -361,6 +455,7 @@ const RUNNERS = {
     'bill-subscriptions': runSubscriptionBilling,
     'hosting-suspensions': runHostingSuspensions,
     'deal-follow-ups': runDealFollowUps,
+    'finance-digest': runFinanceDigest,
     'invoice-reminders': runInvoiceReminders,
 };
 /** Run one job now and record the outcome, whatever it is. */

@@ -18,6 +18,8 @@ const createSchema = z.object({
   description: z.string().trim().min(1).max(200),
   category: z.string().trim().max(60).nullable().optional(),
   amount: z.number().min(0).max(1_000_000_000),
+  // Input VAT contained in the amount, for the VAT return. Optional.
+  vatAmount: z.number().min(0).max(1_000_000_000).nullable().optional(),
   incurredOn: dateStr,
 });
 const updateSchema = createSchema.partial();
@@ -56,7 +58,8 @@ export async function expenseRoutes(app: FastifyInstance) {
     if (!businessId) return reply.code(400).send({ error: 'No business found for this account.' });
     const ins = await db.insert(expenses).values(withTenant(accountId, {
       businessId, folderId: d.folderId ?? null, description: d.description, category: d.category ?? null,
-      amount: money(d.amount), incurredOn: d.incurredOn, createdBy: userId,
+      amount: money(d.amount), vatAmount: d.vatAmount != null ? money(d.vatAmount) : null,
+      incurredOn: d.incurredOn, createdBy: userId,
     }));
     const [created] = await db.select().from(expenses)
       .where(tenantWhere(expenses, accountId, eq(expenses.id, Number(ins[0].insertId)))).limit(1);
@@ -77,6 +80,7 @@ export async function expenseRoutes(app: FastifyInstance) {
     const patch: Record<string, unknown> = { ...d };
     delete patch.businessId;
     if (d.amount !== undefined) patch.amount = money(d.amount);
+    if (d.vatAmount !== undefined) patch.vatAmount = d.vatAmount == null ? null : money(d.vatAmount);
     const res = await db.update(expenses).set(patch).where(tenantWhere(expenses, accountId, eq(expenses.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Expense not found.' });
     const [updated] = await db.select().from(expenses).where(tenantWhere(expenses, accountId, eq(expenses.id, id))).limit(1);

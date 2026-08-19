@@ -44,6 +44,30 @@ export async function dealRoutes(app) {
         monthStart.setUTCDate(1);
         monthStart.setUTCHours(0, 0, 0, 0);
         const wonThisMonth = rows.filter((d) => d.stage === 'won' && d.wonAt && d.wonAt >= monthStart);
+        // Win rate and what is actually working: the source field was dutifully filled
+        // in and read by zero reports. Closed = won + lost; win rate is won / closed.
+        const won = rows.filter((d) => d.stage === 'won');
+        const lost = rows.filter((d) => d.stage === 'lost');
+        const closed = won.length + lost.length;
+        const sourceMap = new Map();
+        for (const d of rows) {
+            const key = (d.source && d.source.trim()) || 'Unknown';
+            const e = sourceMap.get(key) ?? { deals: 0, won: 0, value: 0 };
+            e.deals += 1;
+            if (d.stage === 'won') {
+                e.won += 1;
+                e.value += Number(d.value);
+            }
+            sourceMap.set(key, e);
+        }
+        const bySource = [...sourceMap].map(([source, e]) => ({
+            source, deals: e.deals, won: e.won, wonValue: Math.round(e.value * 100) / 100,
+        })).sort((a, b) => b.wonValue - a.wonValue || b.deals - a.deals);
+        const lostReasons = [...lost.reduce((m, d) => {
+                const k = (d.lostReason && d.lostReason.trim()) || 'Not given';
+                return m.set(k, (m.get(k) ?? 0) + 1);
+            }, new Map())].map(([reason, count]) => ({ reason, count }))
+            .sort((a, b) => b.count - a.count);
         return {
             deals: rows,
             summary: {
@@ -51,6 +75,11 @@ export async function dealRoutes(app) {
                 pipelineValue: Math.round(open.reduce((s, d) => s + Number(d.value), 0) * 100) / 100,
                 wonThisMonth: wonThisMonth.length,
                 wonValueThisMonth: Math.round(wonThisMonth.reduce((s, d) => s + Number(d.value), 0) * 100) / 100,
+                wonCount: won.length,
+                lostCount: lost.length,
+                winRate: closed ? Math.round((won.length / closed) * 100) : null,
+                bySource,
+                lostReasons,
             },
         };
     });
@@ -129,7 +158,10 @@ export async function dealRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        const parsed = z.object({ stage, position: z.number().int().min(0).max(100000) }).safeParse(req.body);
+        const parsed = z.object({
+            stage, position: z.number().int().min(0).max(100000),
+            lostReason: z.string().trim().max(200).nullable().optional(),
+        }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
@@ -139,7 +171,14 @@ export async function dealRoutes(app) {
             return;
         await db.transaction(async (tx) => {
             const wonPatch = parsed.data.stage === 'won' && deal.stage !== 'won' ? { wonAt: new Date() } : {};
-            await tx.update(deals).set({ stage: parsed.data.stage, ...wonPatch })
+            // Moving a deal IS the follow-up action, so clear the reminder rather than let
+            // it rot into a permanent overdue that trains the operator to ignore the list.
+            const followUpPatch = deal.stage !== parsed.data.stage
+                ? { nextFollowUpAt: null, followUpNote: null } : {};
+            // Capture why, the moment it is lost, while the reason is fresh.
+            const lostPatch = parsed.data.stage === 'lost'
+                ? { lostReason: parsed.data.lostReason ?? deal.lostReason ?? null } : {};
+            await tx.update(deals).set({ stage: parsed.data.stage, ...wonPatch, ...followUpPatch, ...lostPatch })
                 .where(tenantWhere(deals, accountId, eq(deals.id, id)));
             const siblings = await tx.select({ id: deals.id }).from(deals)
                 .where(tenantWhere(deals, accountId, and(eq(deals.stage, parsed.data.stage), ne(deals.id, id))))

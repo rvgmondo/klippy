@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { confirmDialog, notify } from './ConfirmDialog';
+import { confirmDialog, notify, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent,
@@ -46,7 +46,8 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
   const [editing, setEditing] = useState<Deal | null>(null);
 
   const move = useMutation({
-    mutationFn: (v: { id: number; stage: Stage }) => apiPost(`/deals/${v.id}/move`, { stage: v.stage, position: 99999 }),
+    mutationFn: (v: { id: number; stage: Stage; lostReason?: string | null }) =>
+      apiPost(`/deals/${v.id}/move`, { stage: v.stage, position: 99999, lostReason: v.lostReason ?? null }),
     onSuccess: invalidate,
   });
   const convert = useMutation({
@@ -56,13 +57,22 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/deals/${id}`), onSuccess: invalidate });
 
-  function onDragEnd(e: DragEndEvent) {
+  async function onDragEnd(e: DragEndEvent) {
     const id = Number(e.active.id);
     const over = e.over?.id?.toString() ?? '';
     if (!over.startsWith('stage-')) return;
     const stage = over.slice(6) as Stage;
     const deal = deals.find((d) => d.id === id);
-    if (deal && deal.stage !== stage) move.mutate({ id, stage });
+    if (!deal || deal.stage === stage) return;
+    // Capture WHY the moment a deal is lost, while the reason is fresh. Blank is
+    // allowed; "why we lose" is unlearnable without at least the chance to record it.
+    if (stage === 'lost') {
+      const reason = await promptDialog('Why was this deal lost? (optional)', '', { confirmLabel: 'Mark lost' });
+      if (reason === null) return; // cancelled the drop
+      move.mutate({ id, stage, lostReason: reason.trim() || null });
+      return;
+    }
+    move.mutate({ id, stage });
   }
 
   const s = data?.summary;
@@ -79,6 +89,7 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
             <Stat label="Open deals" value={String(s.openCount)} />
             <Stat label="Pipeline value" value={money(s.pipelineValue)} accent />
             <Stat label="Won this month" value={`${s.wonThisMonth}, ${money(s.wonValueThisMonth)}`} />
+            {s.winRate != null && <Stat label="Win rate" value={`${s.winRate}%`} accent />}
           </div>
         )}
         <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
