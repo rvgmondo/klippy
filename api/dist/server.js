@@ -42,6 +42,7 @@ import { paymentRoutes } from './routes/payments.js';
 import { hostingRoutes } from './routes/hosting.js';
 import { portalRoutes, portalAdminRoutes } from './routes/portal.js';
 import { crmRoutes } from './routes/crm.js';
+import { VERSION } from './version.js';
 const isProd = process.env.NODE_ENV === 'production';
 export function buildServer() {
     const app = Fastify({
@@ -101,6 +102,10 @@ export function buildServer() {
         ok: true,
         service: 'klippy-api',
         time: new Date().toISOString(),
+        // Baked in at build time (see scripts/gen-version.mjs). `builtAt` is the
+        // reliable "is my latest build live?" signal: it matches the timestamp in the
+        // committed dist only when that exact build is deployed.
+        version: VERSION,
     }));
     app.register(authPlugin);
     app.register(authRoutes);
