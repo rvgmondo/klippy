@@ -103,9 +103,9 @@ export function ConfirmHost() {
   }, []);
 
   const toastStack = toasts.length ? createPortal(
-    <div className="pointer-events-none fixed bottom-4 left-1/2 z-[200] flex w-full max-w-sm -translate-x-1/2 flex-col gap-2 px-4">
+    <div aria-live="polite" role="status" className="pointer-events-none fixed bottom-4 left-1/2 z-[200] flex w-full max-w-sm -translate-x-1/2 flex-col gap-2 px-4">
       {toasts.map((t) => (
-        <div key={t.id}
+        <div key={t.id} role={t.tone === 'error' ? 'alert' : undefined}
           className={`pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-lg ${
             t.tone === 'error'
               ? 'border-red-500/40 bg-red-950 text-red-100'

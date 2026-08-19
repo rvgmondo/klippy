@@ -19,7 +19,7 @@ export async function commentRoutes(app) {
         }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-        const [task] = await db.select({ id: tasks.id, title: tasks.title, assignedTo: tasks.assignedTo })
+        const [task] = await db.select({ id: tasks.id, title: tasks.title, assignedTo: tasks.assignedTo, boardId: tasks.boardId })
             .from(tasks).where(tenantWhere(tasks, accountId, eq(tasks.id, parsed.data.taskId))).limit(1);
         if (!task)
             return reply.code(400).send({ error: 'Task not found.' });
@@ -36,7 +36,7 @@ export async function commentRoutes(app) {
             notify(task.assignedTo, {
                 title: `New comment from ${author?.name ?? 'someone'}`,
                 body: task.title,
-                url: appUrl(),
+                url: `${appUrl()}?v=board&board=${task.boardId}`,
                 tag: `task-${parsed.data.taskId}`,
             });
         }

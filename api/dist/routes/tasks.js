@@ -258,7 +258,7 @@ export async function taskRoutes(app) {
             notify(parsed.data.assignedTo, {
                 title: 'Assigned to you',
                 body: existing.title,
-                url: appUrl(),
+                url: `${appUrl()}?v=board&board=${existing.boardId}`,
                 tag: `task-${id}`,
             });
         }

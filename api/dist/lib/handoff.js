@@ -124,7 +124,7 @@ on('deal.won', 'notify-team', async (p, ctx) => {
         notify(id, {
             title: `Deal won: ${name}`,
             body: p.value > 0 ? `Worth ${money(p.value)}. Onboarding board and draft invoice are ready.` : 'Onboarding board is ready.',
-            url: appUrl(),
+            url: `${appUrl()}?v=pipeline`,
             tag: `deal-${p.dealId}`,
         });
     }

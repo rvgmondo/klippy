@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Timer, LogOut, Settings, Menu as MenuIcon, X } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
@@ -38,14 +38,72 @@ function loadBusiness(): BusinessSelection {
   return Number.isFinite(n) && n > 0 ? n : 'all';
 }
 
+const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'board', 'calendar', 'files',
+  'offerings', 'expenses', 'reports', 'billing', 'collections', 'settings'];
+
+/**
+ * The whole app used to be useState view-switching with no URL, so a push
+ * notification could not land anywhere but Home, the phone's back gesture exited
+ * the app, and nothing was bookmarkable. This reflects the current view / business /
+ * board in the query string and reads it back, without pulling in a router: enough
+ * to make deep links, the back button, and push navigation work.
+ */
+interface UrlState { view: View; businessId: BusinessSelection; boardId: number | null }
+
+function readUrlState(): UrlState {
+  const q = new URLSearchParams(window.location.search);
+  const v = q.get('v');
+  const view: View = v && (ALL_VIEWS as string[]).includes(v) ? (v as View) : 'home';
+  const b = q.get('b');
+  const businessId: BusinessSelection = b === 'all' ? 'all'
+    : (b && /^\d+$/.test(b) ? Number(b) : loadBusiness());
+  const bd = q.get('board');
+  const boardId = bd && /^\d+$/.test(bd) ? Number(bd) : null;
+  return { view, businessId, boardId };
+}
+
+function writeUrlState(st: UrlState, replace: boolean): void {
+  const q = new URLSearchParams(window.location.search);
+  q.set('v', st.view);
+  q.set('b', String(st.businessId));
+  if (st.view === 'board' && st.boardId != null) q.set('board', String(st.boardId));
+  else q.delete('board');
+  const url = `${window.location.pathname}?${q.toString()}`;
+  if (replace) window.history.replaceState(null, '', url);
+  else window.history.pushState(null, '', url);
+}
+
 export function Workspace() {
   const { user, account, logout } = useAuth();
-  const [boardId, setBoardId] = useState<number | null>(null);
-  const [view, setView] = useState<View>('home');
+  const initial = readUrlState();
+  const [boardId, setBoardId] = useState<number | null>(initial.boardId);
+  const [view, setView] = useState<View>(initial.view);
   const [showTimer, setShowTimer] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
-  const [businessId, setBusinessId] = useState<BusinessSelection>(loadBusiness);
+  const [businessId, setBusinessId] = useState<BusinessSelection>(initial.businessId);
   const selectBusiness = (v: BusinessSelection) => { setBusinessId(v); localStorage.setItem('klippy.business', String(v)); };
+
+  // Keep the URL in step with the view, so it is deep-linkable and the back button
+  // moves between views. The first run replaces (normalising the URL without adding
+  // a history entry); later changes push, so Back returns to the previous view.
+  const firstSync = useRef(true);
+  useEffect(() => {
+    writeUrlState({ view, businessId, boardId }, firstSync.current);
+    firstSync.current = false;
+  }, [view, businessId, boardId]);
+
+  // Back/forward (and the Android back gesture) restore the view from the URL
+  // instead of exiting the app.
+  useEffect(() => {
+    const onPop = () => {
+      const st = readUrlState();
+      setView(st.view);
+      setBusinessId(st.businessId);
+      setBoardId(st.boardId);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   // Nudge the daily jobs whenever the app is opened. Shared hosting stops an idle
   // server, so simply using Klippy (including the installed app on a phone) is what
@@ -119,7 +177,7 @@ export function Workspace() {
           <SearchBar />
         </div>
 
-        <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[52px] lg:pb-safe">
+        <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[calc(52px+env(safe-area-inset-bottom))] lg:pb-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}

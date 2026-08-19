@@ -16,7 +16,7 @@ export function ErrorNote({ error, onRetry, compact }: {
   const causeText = typeof cause === 'string' ? cause : null;
   if (compact) {
     return (
-      <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+      <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
         {message}
         {onRetry && (
           <button onClick={onRetry} className="ml-2 underline hover:text-red-200">Try again</button>
@@ -25,7 +25,7 @@ export function ErrorNote({ error, onRetry, compact }: {
     );
   }
   return (
-    <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+    <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
       <p className="text-sm font-medium text-red-300">This could not load.</p>
       <p className="mt-1 text-xs text-red-300/80">{message}</p>
       {causeText && (
