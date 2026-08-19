@@ -14,6 +14,7 @@ import { TodayView } from '../components/TodayView';
 import { OfferingsView } from '../components/OfferingsView';
 import { ExpensesView } from '../components/ExpensesView';
 import { PipelineView } from '../components/PipelineView';
+import { ContactsView } from '../components/ContactsView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
@@ -22,10 +23,10 @@ import { MobileTabBar } from '../components/MobileTabBar';
 import { SearchBar } from '../components/SearchBar';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'today' | 'pipeline' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'settings';
+type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'settings';
 
 const VIEW_LABELS: Record<View, string> = {
-  home: 'Home', pipeline: 'Pipeline', board: 'Board', calendar: 'Calendar',
+  home: 'Home', pipeline: 'Pipeline', contacts: 'Contacts', board: 'Board', calendar: 'Calendar',
   today: 'Today', files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
   collections: 'Collections', settings: 'Settings',
 };
@@ -38,7 +39,7 @@ function loadBusiness(): BusinessSelection {
   return Number.isFinite(n) && n > 0 ? n : 'all';
 }
 
-const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'board', 'calendar', 'files',
+const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files',
   'offerings', 'expenses', 'reports', 'billing', 'collections', 'settings'];
 
 /**
@@ -181,6 +182,7 @@ export function Workspace() {
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
+          {view === 'contacts' && <ContactsView businessId={businessId} />}
           {view === 'board' && <BoardView boardId={boardId} />}
           {view === 'calendar' && <CalendarView businessId={businessId} />}
           {view === 'files' && <FilesView />}

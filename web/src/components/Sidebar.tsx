@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {} from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, FolderPlus,
-  Home, Target, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, AlertTriangle, type LucideIcon,
+  Home, Target, Users, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, AlertTriangle, type LucideIcon,
 } from 'lucide-react';
 import { apiGet, apiPost} from '../lib/api';
 import { FolderList } from './FolderTree';
@@ -140,6 +140,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
           default so the boards below get the room. */}
       <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2">
         <NavButton nav={{ key: 'home', label: 'Home', icon: Home }} view={view} onNavigate={onNavigate} />
+        <NavButton nav={{ key: 'contacts', label: 'Contacts', icon: Users }} view={view} onNavigate={onNavigate} />
         {navGroups.map((g) => {
           // The group you are currently in is always open, so the active screen is
           // never hidden behind a collapsed header.
