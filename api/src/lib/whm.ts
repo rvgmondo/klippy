@@ -40,14 +40,22 @@ export function cleanHost(raw: string): string {
 }
 
 function call<T>(creds: WhmCreds, fn: string, params: Record<string, string>): Promise<WhmResult<T>> {
-  const qs = new URLSearchParams({ 'api.version': '1', ...params }).toString();
+  // POST the parameters in the request BODY, not the query string. createacct
+  // carries the freshly generated cPanel password, and a GET puts it straight into
+  // WHM's access logs (and any proxy in between). WHM's json-api accepts POST with a
+  // form-encoded body, so the secret never lands in a URL.
+  const form = new URLSearchParams({ 'api.version': '1', ...params }).toString();
   return new Promise((resolve) => {
     const req = request({
       host: cleanHost(creds.host),
       port: 2087,
-      path: `/json-api/${fn}?${qs}`,
-      method: 'GET',
-      headers: { Authorization: `whm ${creds.user}:${creds.token}` },
+      path: `/json-api/${fn}`,
+      method: 'POST',
+      headers: {
+        Authorization: `whm ${creds.user}:${creds.token}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(form),
+      },
       rejectUnauthorized: !creds.allowSelfSigned,
       timeout: 30000,
     }, (res) => {
@@ -95,6 +103,7 @@ function call<T>(creds: WhmCreds, fn: string, params: Record<string, string>): P
         : err.message;
       resolve({ ok: false, message: `Could not reach WHM: ${why}` });
     });
+    req.write(form);
     req.end();
   });
 }

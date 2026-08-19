@@ -28,6 +28,22 @@ async function authFromBearer(header) {
     return { userId: row.userId, accountId: row.accountId, role: row.role };
 }
 /**
+ * The current, live membership for a cookie session: role read fresh from the DB,
+ * and null the instant the user or their membership is deactivated. One indexed
+ * lookup per request, the same cost the Bearer path already pays.
+ */
+async function liveMembership(userId, accountId) {
+    const [row] = await db.select({
+        role: memberships.role, memberActive: memberships.isActive, userActive: users.isActive,
+    }).from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(and(eq(memberships.userId, userId), eq(memberships.accountId, accountId)))
+        .limit(1);
+    if (!row || !row.role || !row.memberActive || !row.userActive)
+        return null;
+    return { userId, accountId, role: row.role };
+}
+/**
  * Registers `app.requireAuth`, a preHandler that authenticates via the JWT
  * cookie (web app) or an API token (browser extension / integrations) and
  * populates `req.auth`. Every tenant-scoped route MUST list it in preHandler,
@@ -38,7 +54,20 @@ export const authPlugin = fp(async (app) => {
         const token = req.cookies?.[COOKIE_NAME];
         const payload = token ? verifyToken(token) : null;
         if (payload) {
-            req.auth = { userId: payload.uid, accountId: payload.aid, role: payload.role };
+            // Re-read the membership live, exactly as the Bearer path does. The JWT is
+            // valid for 7 days; without this check, deactivating, demoting, or
+            // password-resetting a member does nothing until it expires, so a fired or
+            // compromised employee keeps full access for up to a week. The current role
+            // is taken from the DB, not the token, so a demotion also takes effect at once.
+            const live = await liveMembership(payload.uid, payload.aid);
+            if (live) {
+                req.auth = live;
+                return;
+            }
+            // The token verifies but the membership is gone or suspended: treat as logged
+            // out and clear the cookie so the app stops presenting it.
+            void reply.clearCookie(COOKIE_NAME, { path: '/' });
+            await reply.code(401).send({ error: 'Your access to this workspace has changed. Please sign in again.' });
             return;
         }
         const viaToken = await authFromBearer(req.headers.authorization);

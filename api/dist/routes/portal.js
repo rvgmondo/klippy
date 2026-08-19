@@ -16,6 +16,7 @@ import { PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, pa
 import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
 import { assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
+import { authLimiter } from '../lib/rateLimit.js';
 /** The scope filter. Every read of a client-owned table goes through this. */
 const mine = (c) => and(eq(documents.accountId, c.user.accountId), eq(documents.folderId, c.user.folderId));
 /** What a client is allowed to see at all: issued documents, never drafts. */
@@ -66,7 +67,7 @@ export async function portalRoutes(app) {
      * Always answers the same, whether or not the address is on file. Anything else
      * turns this into a way to test whether a company is a client of a competitor.
      */
-    app.post('/api/v1/portal/login', async (req, reply) => {
+    app.post('/api/v1/portal/login', { preHandler: authLimiter('portal-login') }, async (req, reply) => {
         const parsed = z.object({ email: z.string().email().max(150) }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: 'Enter a valid email address.' });
@@ -104,7 +105,7 @@ export async function portalRoutes(app) {
         startSession(reply, user);
         return { ok: true };
     });
-    app.post('/api/v1/portal/password-login', async (req, reply) => {
+    app.post('/api/v1/portal/password-login', { preHandler: authLimiter('portal-password-login') }, async (req, reply) => {
         const parsed = z.object({
             email: z.string().email().max(150), password: z.string().min(1).max(200),
         }).safeParse(req.body);

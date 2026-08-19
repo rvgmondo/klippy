@@ -76,7 +76,18 @@ async function sendImage(reply, stored) {
             : ext === '.webp' ? 'image/webp'
                 : ext === '.gif' ? 'image/gif' : 'image/jpeg';
     reply.header('Content-Type', type);
-    reply.header('Cache-Control', 'private, max-age=300');
+    // Neutralise an uploaded SVG as a stored-XSS vector. An SVG served inline on the
+    // API origin can carry <script> that runs if the URL is opened directly. `sandbox`
+    // (with no allow-scripts) blocks that execution in a document context, and nosniff
+    // stops a browser second-guessing the type. Using the logo via <img src> is
+    // unaffected: images never run scripts when embedded that way. Belt and braces,
+    // SVG is also marked as an attachment so a direct hit downloads rather than renders.
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    if (ext === '.svg')
+        reply.header('Content-Disposition', 'attachment');
+    if (!reply.getHeader('Cache-Control'))
+        reply.header('Cache-Control', 'private, max-age=300');
     return reply.send(createReadStream(full));
 }
 /**

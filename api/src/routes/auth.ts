@@ -12,6 +12,7 @@ import {
 } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 import { publicAccount } from '../lib/publicAccount.js';
+import { authLimiter } from '../lib/rateLimit.js';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
@@ -43,7 +44,7 @@ async function uniqueSlug(base: string): Promise<string> {
 
 export async function authRoutes(app: FastifyInstance) {
   // ---- Signup: creates a new account + its owner user ----------------------
-  app.post('/api/v1/auth/signup', async (req, reply) => {
+  app.post('/api/v1/auth/signup', { preHandler: authLimiter('auth-signup') }, async (req, reply) => {
     const parsed = signupSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid input.' });
@@ -79,7 +80,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- Login ---------------------------------------------------------------
-  app.post('/api/v1/auth/login', async (req, reply) => {
+  app.post('/api/v1/auth/login', { preHandler: authLimiter('auth-login') }, async (req, reply) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Enter your email and password.' });
     const { email, password } = parsed.data;
@@ -128,7 +129,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- Forgot password: email a reset link ---------------------------------
-  app.post('/api/v1/auth/forgot', async (req, reply) => {
+  app.post('/api/v1/auth/forgot', { preHandler: authLimiter('auth-forgot') }, async (req, reply) => {
     const parsed = z.object({ email: z.string().trim().toLowerCase().email() }).safeParse(req.body);
     // Always respond the same way so emails can't be enumerated.
     const generic = { ok: true, message: 'If that email has an account, a reset link is on its way.' };
@@ -148,7 +149,7 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // ---- Reset password with the emailed token -------------------------------
-  app.post('/api/v1/auth/reset', async (req, reply) => {
+  app.post('/api/v1/auth/reset', { preHandler: authLimiter('auth-reset') }, async (req, reply) => {
     const parsed = z.object({
       token: z.string().min(10),
       password: z.string().min(8, 'Password must be at least 8 characters').max(200),

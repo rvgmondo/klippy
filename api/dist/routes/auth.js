@@ -8,6 +8,7 @@ import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 import { publicAccount } from '../lib/publicAccount.js';
+import { authLimiter } from '../lib/rateLimit.js';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const signupSchema = z.object({
     accountName: z.string().trim().min(1, 'Workspace name is required').max(150),
@@ -34,7 +35,7 @@ async function uniqueSlug(base) {
 }
 export async function authRoutes(app) {
     // ---- Signup: creates a new account + its owner user ----------------------
-    app.post('/api/v1/auth/signup', async (req, reply) => {
+    app.post('/api/v1/auth/signup', { preHandler: authLimiter('auth-signup') }, async (req, reply) => {
         const parsed = signupSchema.safeParse(req.body);
         if (!parsed.success) {
             return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid input.' });
@@ -66,7 +67,7 @@ export async function authRoutes(app) {
         return reply.code(201).send({ user: publicUser(user, 'owner', account.id), account: publicAccount(account) });
     });
     // ---- Login ---------------------------------------------------------------
-    app.post('/api/v1/auth/login', async (req, reply) => {
+    app.post('/api/v1/auth/login', { preHandler: authLimiter('auth-login') }, async (req, reply) => {
         const parsed = loginSchema.safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: 'Enter your email and password.' });
@@ -111,7 +112,7 @@ export async function authRoutes(app) {
         return reply.send({ user: publicUser(user, first.role, account.id), account: publicAccount(account) });
     });
     // ---- Forgot password: email a reset link ---------------------------------
-    app.post('/api/v1/auth/forgot', async (req, reply) => {
+    app.post('/api/v1/auth/forgot', { preHandler: authLimiter('auth-forgot') }, async (req, reply) => {
         const parsed = z.object({ email: z.string().trim().toLowerCase().email() }).safeParse(req.body);
         // Always respond the same way so emails can't be enumerated.
         const generic = { ok: true, message: 'If that email has an account, a reset link is on its way.' };
@@ -129,7 +130,7 @@ export async function authRoutes(app) {
         return reply.send(generic);
     });
     // ---- Reset password with the emailed token -------------------------------
-    app.post('/api/v1/auth/reset', async (req, reply) => {
+    app.post('/api/v1/auth/reset', { preHandler: authLimiter('auth-reset') }, async (req, reply) => {
         const parsed = z.object({
             token: z.string().min(10),
             password: z.string().min(8, 'Password must be at least 8 characters').max(200),

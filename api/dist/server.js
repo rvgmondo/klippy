@@ -64,8 +64,15 @@ export function buildServer() {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
+    // `origin: true` reflects ANY origin and, with credentials, lets any site read a
+    // logged-in user's data. That is fine in dev (convenient) but a footgun in prod
+    // triggered by one missing env var. In production with nothing configured, deny
+    // cross-origin instead of reflecting everything, and say so in the log.
+    if (isProd && !origins.length) {
+        app.log.error('CORS_ORIGIN is not set in production; cross-origin requests are DENIED. Set it to your site origin(s).');
+    }
     app.register(cors, {
-        origin: origins.length ? origins : true,
+        origin: origins.length ? origins : (isProd ? false : true),
         credentials: true,
     });
     /**
@@ -91,12 +98,25 @@ export function buildServer() {
         // line that actually identifies the problem ("Unknown column ...", "Table doesn't
         // exist ..."). Put the driver's own message in the reply so a report of a broken
         // page carries the cause with it.
-        reply.code(status).send({
-            error: status >= 500
-                ? `Something broke handling ${req.method} ${req.url}. ${err.message}`
-                : err.message,
-            ...(status >= 500 && err.sqlMessage ? { cause: err.sqlMessage, dbCode: err.code } : {}),
-        });
+        // In production a 500 returns a generic message plus an error id to quote in a
+        // report; the driver's own message (which names columns and tables) stays in the
+        // server log only, so the response is not a schema-reconnaissance oracle. In dev
+        // the full cause is returned inline, because that speed is the whole point locally.
+        if (status >= 500) {
+            const errorId = req.id;
+            if (isProd) {
+                req.log.error({ errorId }, 'returning generic 500 to client');
+                reply.code(status).send({ error: `Something went wrong. Quote reference ${errorId} if you report this.`, errorId });
+            }
+            else {
+                reply.code(status).send({
+                    error: `Something broke handling ${req.method} ${req.url}. ${err.message}`,
+                    ...(err.sqlMessage ? { cause: err.sqlMessage, dbCode: err.code } : {}),
+                });
+            }
+            return;
+        }
+        reply.code(status).send({ error: err.message });
     });
     app.get('/api/v1/health', async () => ({
         ok: true,
