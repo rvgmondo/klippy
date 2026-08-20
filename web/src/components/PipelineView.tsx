@@ -13,6 +13,7 @@ import {} from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { moneyRound } from '../lib/money';
 import { useUrlAction } from '../lib/urlAction';
+import { LeadFormModal } from './LeadFormModal';
 import { useCurrency } from '../lib/useCurrency';
 
 
@@ -49,6 +50,8 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
   const [adding, setAdding] = useState(false);
+  const [showLeadForm, setShowLeadForm] = useState(false);
+  const [showInsights, setShowInsights] = useState(false);
   useUrlAction('new', (v) => { if (v === 'deal') setAdding(true); });
   const [editing, setEditing] = useState<Deal | null>(null);
 
@@ -104,10 +107,74 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
             {s.winRate != null && <Stat label="Win rate" value={`${s.winRate}%`} accent />}
           </div>
         )}
-        <button onClick={() => setAdding(true)} className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
-          <Plus size={15} /> New deal
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {typeof businessId === 'number' && (
+            <button onClick={() => setShowLeadForm(true)}
+              title="A public form whose submissions land here as leads"
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+              Lead form
+            </button>
+          )}
+          {s && (s.wonCount + s.lostCount) > 0 && (
+            <button onClick={() => setShowInsights((v) => !v)}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+              {showInsights ? 'Hide insights' : 'Insights'}
+            </button>
+          )}
+          <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+            <Plus size={15} /> New deal
+          </button>
+        </div>
       </div>
+
+      {/* What is actually working. The source field was dutifully filled in and,
+          until now, read by zero screens; the same for why deals are lost. */}
+      {showInsights && s && (
+        <div className="grid gap-3 border-b border-slate-800 px-4 py-3 sm:grid-cols-2 sm:px-6">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Where deals come from</div>
+            {s.bySource.length === 0 ? (
+              <p className="text-xs text-slate-500">Set a source on your deals and this fills in.</p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wide text-slate-600">
+                    <th scope="col" className="pb-1">Source</th>
+                    <th scope="col" className="pb-1 text-right">Deals</th>
+                    <th scope="col" className="pb-1 text-right">Won</th>
+                    <th scope="col" className="pb-1 text-right">Won value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {s.bySource.slice(0, 6).map((r) => (
+                    <tr key={r.source} className="border-t border-slate-800/60">
+                      <td className="py-1 text-slate-300">{r.source}</td>
+                      <td className="num py-1 text-right text-slate-400">{r.deals}</td>
+                      <td className="num py-1 text-right text-slate-400">{r.won}</td>
+                      <td className="num py-1 text-right text-slate-200">{money(r.wonValue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Why deals are lost</div>
+            {s.lostReasons.length === 0 ? (
+              <p className="text-xs text-slate-500">When a deal is dragged to Lost you are asked why; the answers gather here.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {s.lostReasons.slice(0, 6).map((r) => (
+                  <div key={r.reason} className="flex items-baseline justify-between gap-3 border-t border-slate-800/60 pt-1.5 first:border-t-0 first:pt-0">
+                    <span className="min-w-0 truncate text-xs text-slate-300">{r.reason}</span>
+                    <span className="num shrink-0 text-xs text-slate-500">{r.count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <FollowUpStrip businessId={typeof businessId === 'number' ? businessId : undefined}
         onOpen={(dealId) => {
@@ -126,6 +193,9 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
       </DndContext>
 
       {adding && <DealEditor businessId={newBusinessId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
+      {showLeadForm && typeof businessId === 'number' && (
+        <LeadFormModal businessId={businessId} onClose={() => setShowLeadForm(false)} />
+      )}
       {editing && <DealEditor deal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
     </div>
   );

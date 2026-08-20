@@ -86,6 +86,21 @@ export function AccountPanel() {
         )}
       </form>
 
+      {isAdmin && (
+        <div className="border-t border-slate-800 pt-4">
+          <h3 className="mb-1 text-sm font-semibold text-slate-200">Your data</h3>
+          <p className="mb-3 text-xs text-slate-500">
+            Everything in this workspace as one JSON file: clients, boards, cards, time,
+            contacts, deals, documents, payments, offerings, subscriptions and expenses.
+            Keep a copy somewhere that is not this server.
+          </p>
+          <a href="/api/v1/account/export" download
+            className="inline-block rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">
+            Download everything (JSON)
+          </a>
+        </div>
+      )}
+
       {/* Render the delete button for owners only */}
       {isOwner && account?.id && (
         <div className="pt-4 border-t border-slate-800">

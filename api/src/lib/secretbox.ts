@@ -63,6 +63,23 @@ export function verifyPayToken(docId: number, token: string): boolean {
 }
 
 /**
+ * The public lead-form token for one business. Same recipe as the pay token: an
+ * HMAC under the server secret, so the form URL cannot be forged or enumerated by
+ * walking business ids, and nothing has to be stored to make it valid.
+ */
+export function signLeadToken(businessId: number): string | null {
+  const raw = process.env.PAYMENTS_SECRET;
+  if (!raw || raw.length < 16) return null;
+  return createHmac('sha256', raw).update(`lead:${businessId}`).digest('hex').slice(0, 32);
+}
+
+export function verifyLeadToken(businessId: number, token: string): boolean {
+  const expected = signLeadToken(businessId);
+  if (!expected || !token || token.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+}
+
+/**
  * The same idea for a logo in an email.
  *
  * An email client fetches images with no cookie, so a logo URL behind the session

@@ -407,11 +407,15 @@ export async function runInvoiceReminders(): Promise<string> {
     const overdueBy = -daysBetween(doc.dueDate!, today); // >0 means overdue
     // A chase with a button that takes the payment is worth far more than one
     // asking them to go and find the invoice. Null when PayFast is not set up.
-    const payLink = await payLinkFor(doc.accountId, doc.id).catch(() => null);
+    // Lazy on purpose: this used to run a full settings + signing round-trip for
+    // EVERY open invoice system-wide, before checking whether any reminder was due
+    // at all. Now it costs something only for the handful actually being sent.
+    const getPayLink = () => payLinkFor(doc.accountId, doc.id).catch(() => null);
 
     // Suspension supersedes a normal reminder: once far enough overdue and not yet
     // flagged, send the final notice and mark it, so the Collections list shows it.
     if (cfg.suspendAfter != null && overdueBy >= cfg.suspendAfter && !doc.suspendedAt) {
+      const payLink = await getPayLink();
       const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
       const content = {
         heading: `Invoice ${doc.number} is ${overdueBy} days overdue`,
@@ -452,6 +456,7 @@ export async function runInvoiceReminders(): Promise<string> {
     const subject = overdueBy > 0 ? `Overdue: invoice ${doc.number}`
       : overdueBy === 0 ? `Invoice ${doc.number} is due today`
         : `Reminder: invoice ${doc.number} is due soon`;
+    const payLink = await getPayLink();
     const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
     const content = {
       heading: subject,

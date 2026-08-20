@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Monitor, Moon, Sun, Check } from 'lucide-react';
 import { apiPatch } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { canInstall, onInstallable, promptInstall } from '../lib/install';
+import { notify } from './ConfirmDialog';
 import { ACCENTS, applyAppearance, type Accent, type Theme } from '../lib/theme';
 
 const SWATCH: Record<Accent, string> = {
@@ -75,6 +77,37 @@ export function AppearancePanel() {
       </div>
 
       {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
+      <InstallSection />
+
+    </div>
+  );
+}
+
+
+/**
+ * "Install Klippy on this device", shown only when the browser is actually
+ * offering it. The prompt event fires once and early; lib/install catches it so
+ * this button works whenever the person gets around to wanting it.
+ */
+function InstallSection() {
+  const [available, setAvailable] = useState(canInstall());
+  useEffect(() => onInstallable(() => setAvailable(true)), []);
+  if (!available) return null;
+  return (
+    <div className="mt-6 border-t border-slate-800 pt-4">
+      <h3 className="mb-1 text-sm font-semibold text-slate-200">Install the app</h3>
+      <p className="mb-3 text-xs text-slate-500">
+        Klippy on your desktop or home screen: its own window, push notifications, one tap away.
+      </p>
+      <button
+        onClick={async () => {
+          const r = await promptInstall();
+          if (r === 'accepted') notify('Installed. Look for Klippy on your device.');
+          else if (r === 'dismissed') setAvailable(canInstall());
+        }}
+        className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">
+        Install Klippy on this device
+      </button>
     </div>
   );
 }

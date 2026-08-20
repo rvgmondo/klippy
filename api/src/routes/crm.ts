@@ -157,6 +157,12 @@ export async function crmRoutes(app: FastifyInstance) {
       occurredAt: parsed.data.occurredAt ? new Date(parsed.data.occurredAt) : new Date(),
       createdBy: userId,
     }));
+    // Logging the call IS the follow-up. Leaving the reminder standing after the
+    // work was done let it rot into a permanent overdue, which trains the operator
+    // to ignore the follow-up list. The next chase date is set deliberately, not
+    // inherited from a promise already kept.
+    await db.update(deals).set({ nextFollowUpAt: null, followUpNote: null })
+      .where(tenantWhere(deals, accountId, eq(deals.id, id)));
     return reply.code(201).send({ ok: true });
   });
 

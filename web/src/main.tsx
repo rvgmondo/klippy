@@ -1,11 +1,24 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import { AuthProvider } from './lib/auth';
-import { Root } from './Root';
-import { PortalRoot, isPortalRequest } from './portal/PortalRoot';
 import { ConfirmHost } from './components/ConfirmDialog';
+
+/**
+ * The staff app and the client portal are two applications sharing one deploy.
+ * They used to share one 700kB bundle too, so a client opening a payment link
+ * downloaded the whole staff tool. Each side is now its own chunk, loaded only
+ * on the side of the fork that actually runs.
+ */
+const Root = lazy(() => import('./Root').then((m) => ({ default: m.Root })));
+const PortalRoot = lazy(() => import('./portal/PortalRoot').then((m) => ({ default: m.PortalRoot })));
+
+// Inlined from PortalRoot so deciding WHICH app to load does not load either.
+function isPortalRequest(): boolean {
+  const q = new URLSearchParams(window.location.search);
+  return q.has('portal') || window.location.pathname.startsWith('/portal');
+}
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ThemeSync, applyAppearance, readCachedAppearance } from './lib/theme';
@@ -30,12 +43,14 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       {portal ? (
-        <ErrorBoundary portal><PortalRoot /></ErrorBoundary>
+        <ErrorBoundary portal>
+          <Suspense fallback={null}><PortalRoot /></Suspense>
+        </ErrorBoundary>
       ) : (
         <ErrorBoundary>
           <AuthProvider>
             <ThemeSync />
-            <Root />
+            <Suspense fallback={null}><Root /></Suspense>
           </AuthProvider>
         </ErrorBoundary>
       )}
