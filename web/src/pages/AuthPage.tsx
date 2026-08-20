@@ -73,7 +73,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
         <form onSubmit={submit} className="space-y-3">
           {mode === 'signup' && (
             <>
-              <input className={input} placeholder="Workspace name (e.g. Mondobase)" value={accountName} onChange={(e) => setAccountName(e.target.value)} required />
+              <input className={input} placeholder="Your business name (e.g. Mondobase)" value={accountName} onChange={(e) => setAccountName(e.target.value)} required />
               <input className={input} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} required />
             </>
           )}

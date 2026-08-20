@@ -65,13 +65,13 @@ function loadOpenBiz(): Record<string, boolean> {
 }
 
 function NavButton({ nav, view, onNavigate, compact }: {
-  nav: { key: string; label: string; icon: LucideIcon }; view: string;
+  nav: { key: string; label: string; icon: LucideIcon; hint?: string }; view: string;
   onNavigate: (v: string) => void; compact?: boolean;
 }) {
   const Icon = nav.icon;
   const active = view === nav.key;
   return (
-    <button onClick={() => onNavigate(nav.key)}
+    <button onClick={() => onNavigate(nav.key)} title={nav.hint}
       className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 text-sm transition ${
         compact ? 'py-1.5' : 'py-2 font-medium'
       } ${active
@@ -98,7 +98,10 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   // screen that one of them needs would be worse than showing one it does not.
   const catalogue = useQuery({
     queryKey: ['modules'],
-    queryFn: () => apiGet<{ modules: { key: string; label: string; primitive: string }[] }>('/modules'),
+    queryFn: () => apiGet<{
+      primitives: { key: string; label: string; blurb: string }[];
+      modules: { key: string; label: string; primitive: string; hint?: string }[];
+    }>('/modules'),
     staleTime: 60 * 60 * 1000,
   });
   const enabled = new Set(
@@ -115,7 +118,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
     primitive,
     items: defs
       .filter((m) => m.primitive === primitive && (showAll || enabled.has(m.key)))
-      .map((m) => ({ key: m.key, label: m.label, icon: MODULE_ICON[m.key] ?? Home })),
+      .map((m) => ({ key: m.key, label: m.label, icon: MODULE_ICON[m.key] ?? Home, hint: m.hint })),
   })).filter((g) => g.items.length > 0);
 
   return (
@@ -156,7 +159,10 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
                 })}
                 className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800/40 hover:text-slate-300">
                 {open ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-                <span className="truncate">{PRIMITIVE_LABEL[g.primitive]}</span>
+                <span className="truncate"
+                  title={catalogue.data?.primitives.find((p) => p.key === g.primitive)?.blurb}>
+                  {PRIMITIVE_LABEL[g.primitive]}
+                </span>
                 {!open && (
                   <span className="ml-auto shrink-0 text-[10px] font-normal normal-case text-slate-600">
                     {g.items.length}

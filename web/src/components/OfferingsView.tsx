@@ -404,7 +404,9 @@ function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onSta
   });
 
   return (
-    <Modal onClose={onClose} variant="panel">
+    <Modal onClose={onClose} variant="panel"
+      confirmClose={() => (folderId || price.trim() || domain.trim()
+        ? confirmDialog('Close without starting this subscription?', { confirmLabel: 'Discard', danger: true }) : true)}>
       <form onSubmit={(e) => { e.preventDefault(); if (offeringId && folderId) start.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
@@ -514,7 +516,12 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
   });
 
   return (
-    <Modal onClose={onClose} variant="panel">
+    <Modal onClose={onClose} variant="panel"
+      confirmClose={() => {
+        const dirty = name !== (offering?.name ?? '') || description !== (offering?.description ?? '')
+          || price !== (offering?.price ?? '0') || unit !== (offering?.unit ?? '');
+        return dirty ? confirmDialog('Close without saving this offering?', { confirmLabel: 'Discard', danger: true }) : true;
+      }}>
       <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) save.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">

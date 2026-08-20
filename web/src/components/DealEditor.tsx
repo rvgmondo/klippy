@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '../lib/api';
@@ -69,7 +70,15 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
   const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
 
   return (
-    <Modal onClose={onClose} variant="panel">
+    <Modal onClose={onClose} variant="panel"
+      confirmClose={() => {
+        // The same guard the invoice editor got after real work was lost to a
+        // stray backdrop click: only ask when something typed would be lost.
+        const dirty = title !== (deal?.title ?? '') || company !== (deal?.company ?? '')
+          || contactName !== (deal?.contactName ?? '') || contactEmail !== (deal?.contactEmail ?? '')
+          || value !== (deal ? String(Number(deal.value)) : '') || notes !== (deal?.notes ?? '');
+        return dirty ? confirmDialog('Close without saving this deal?', { confirmLabel: 'Discard', danger: true }) : true;
+      }}>
       <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New deal' : 'Edit deal'}</h2>

@@ -60,7 +60,7 @@ const BUSINESS: Item[] = [
 ];
 
 const ACCOUNT: Item[] = [
-  { id: 'account', label: 'Account', icon: Building, hint: 'Account name and what you call clients' },
+  { id: 'account', label: 'Workspace', icon: Building, hint: 'Workspace name and what you call clients' },
   { id: 'account-brand', label: 'Fallback brand', icon: Palette, hint: 'Used by a business with no brand of its own' },
   { id: 'people', label: 'People', icon: Users, hint: 'Who can sign in' },
   { id: 'teams', label: 'Teams', icon: Users, hint: 'Group people for assignment' },
@@ -79,7 +79,12 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
     queryFn: () => apiGet<{ businesses: Business[] }>('/businesses'),
   });
   const focused = businessId === 'all' ? undefined : data?.businesses.find((b) => b.id === businessId);
-  const [section, setSection] = useState<SectionId>('profile');
+  // A deep link (?s=biz:brand) opens straight onto its section, so other screens
+  // can point at "the one place business settings live" instead of re-hosting them.
+  const [section, setSection] = useState<SectionId>(() => {
+    const s = new URLSearchParams(window.location.search).get('s');
+    return (s as SectionId) || 'profile';
+  });
 
   // Only account admins have anything to do in the account group.
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';

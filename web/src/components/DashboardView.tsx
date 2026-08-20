@@ -8,7 +8,6 @@ import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 import { BusinessNotes } from './BusinessNotes';
-import { BusinessSettings } from './BusinessSettings';
 import { ErrorNote } from './ErrorNote';
 import { moneyRound } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
@@ -62,7 +61,6 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   const businessesQ = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
-  const [showBizSettings, setShowBizSettings] = useState(false);
   // The focused business, when one is selected (needed for its notes).
   const focused = businessId === 'all' ? null : (businessesQ.data?.businesses ?? []).find((b) => b.id === businessId) ?? null;
 
@@ -90,8 +88,15 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
           </div>
           <div className="flex items-center gap-3">
             {focused && (
-              <button onClick={() => setShowBizSettings(true)}
-                title="Brand and invoicing for this business"
+              <button onClick={() => {
+                  // One door for business settings: the Settings screen. The modal
+                  // this used to open was a second copy of the same forms.
+                  const q = new URLSearchParams(window.location.search);
+                  q.set('s', 'biz:brand');
+                  window.history.replaceState(null, '', `${window.location.pathname}?${q.toString()}`);
+                  onNavigate?.('settings');
+                }}
+                title="Brand and invoicing for this business (in Settings)"
                 className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
                 <Palette size={14} />
                 <span className="hidden sm:inline">Business</span>
@@ -193,9 +198,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         <BusinessNotes businessId={focused.id} businessName={focused.name}
           initial={focused.notes ?? ''} onClose={() => setShowNotes(false)} />
       )}
-      {showBizSettings && focused && (
-        <BusinessSettings business={focused} onClose={() => setShowBizSettings(false)} />
-      )}
+
     </div>
   );
 }

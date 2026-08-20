@@ -43,7 +43,7 @@ export function AccountPanel() {
       <form onSubmit={save} className="space-y-4">
         {!isAdmin && <p className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">Only account admins can change these settings.</p>}
         <div>
-          <label className="mb-1 block text-xs font-medium text-slate-400">Account name</label>
+          <label className="mb-1 block text-xs font-medium text-slate-400">Workspace name</label>
           <input className={field} value={name} disabled={!isAdmin} onChange={(e) => setName(e.target.value)} placeholder="Mondobase" />
         </div>
         <div>

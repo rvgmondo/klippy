@@ -73,7 +73,7 @@ export function TeamsPanel() {
         {(teams.data?.teams ?? []).length === 0 && (
           <p className="text-sm text-slate-500">No teams yet.</p>
         )}
-        {(teams.data?.teams ?? []).map(async (t) => {
+        {(teams.data?.teams ?? []).map((t) => {
           const memberIds = new Set(t.members.map((m) => m.userId));
           const available = (people.data?.users ?? []).filter((p) => p.isActive && !memberIds.has(p.id));
           return (

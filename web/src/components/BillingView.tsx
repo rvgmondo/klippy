@@ -106,10 +106,17 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                   <td className="px-3 py-2 text-slate-300">{d.clientName}</td>
                   <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{d.issueDate}</td>
                   <td className="px-3 py-2">
-                    <select value={d.status} onChange={(e) => setStatus.mutate({ id: d.id, status: e.target.value as Status })}
-                      className={`rounded-md px-2 py-0.5 text-[11px] ${STATUS_COLOR[d.status]}`}>
-                      {(['draft', 'sent', 'accepted', 'paid', 'void'] as Status[]).map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
+                    {d.status === 'paid' || d.status === 'void' ? (
+                      // Paid and void are outcomes, not labels: paid is recorded in the
+                      // Payments modal (so a payment row exists) and void via delete.
+                      // Making them pickable here created two sources of truth.
+                      <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] ${STATUS_COLOR[d.status]}`}>{d.status}</span>
+                    ) : (
+                      <select value={d.status} onChange={(e) => setStatus.mutate({ id: d.id, status: e.target.value as Status })}
+                        className={`rounded-md px-2 py-0.5 text-[11px] ${STATUS_COLOR[d.status]}`}>
+                        {(['draft', 'sent', 'accepted'] as Status[]).map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right num text-slate-100">{money(d.total, d.currency)}</td>
                   <td className="px-3 py-2">
@@ -239,7 +246,7 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   const currency = existing.data?.document.currency ?? 'ZAR';
 
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async (opts?: { send?: boolean }) => {
       const body = {
         type, folderId, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
@@ -255,9 +262,19 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
           recurringMonths: l.offeringId ? (l.recurringMonths ?? null) : null,
         })),
       };
-      return isNew ? apiPost('/documents', body) : apiPut(`/documents/${id}`, body);
+      const saved = isNew
+        ? await apiPost<{ document: { id: number } }>('/documents', body)
+        : await apiPut<{ document: { id: number } }>(`/documents/${id}`, body);
+      // Sending used to live only behind a 14px mail icon on the row, a full
+      // screen away from where the document was written. Saving and sending is
+      // one intent, so it is one button.
+      if (opts?.send) {
+        const r = await apiPost<{ to: string }>(`/documents/${saved.document.id}/email`, {});
+        return { sentTo: r.to };
+      }
+      return { sentTo: null };
     },
-    onSuccess: onSaved,
+    onSuccess: (r) => { if (r.sentTo) notify(`Saved and sent to ${r.sentTo}.`); onSaved(); },
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not save.'),
   });
 
@@ -464,9 +481,16 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
         <textarea className={field + ' mt-3'} placeholder="Notes / payment terms (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
         {error && <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
         <div className="mt-4 flex gap-2">
-          <button onClick={() => clientName.trim() ? save.mutate() : setError('Client name is required.')} disabled={save.isPending}
+          <button onClick={() => clientName.trim() ? save.mutate(undefined) : setError('Client name is required.')} disabled={save.isPending}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
             {save.isPending ? 'Saving...' : 'Save'}
+          </button>
+          <button
+            onClick={() => clientName.trim() ? save.mutate({ send: true }) : setError('Client name is required.')}
+            disabled={save.isPending || !clientEmail.trim()}
+            title={clientEmail.trim() ? 'Save, then email it to the client with the PDF attached' : 'Add a client email first'}
+            className="rounded-lg border border-violet-600 px-4 py-2 text-sm font-medium text-violet-300 hover:bg-violet-600/10 disabled:opacity-40">
+            Save &amp; send
           </button>
           <button onClick={async () => { if (await confirmClose()) onClose(); }}
             className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200">Cancel</button>
