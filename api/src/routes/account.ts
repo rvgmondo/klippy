@@ -6,7 +6,9 @@ import { accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
 import { publicAccount } from '../lib/publicAccount.js';
-import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings } from '../db/schema.js';
+import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings } from '../db/schema.js';
+import { TEMPLATES } from '../lib/templates.js';
+import { inArray, isNull, or } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
 
 const nullableStr = (max: number) => z.string().trim().max(max).nullable().optional().or(z.literal(''));
@@ -179,4 +181,63 @@ export async function accountRoutes(app: FastifyInstance) {
       })),
     };
   });
+
+  /**
+   * Example data, honestly labelled and disposable.
+   *
+   * A fresh workspace is seeded with a working example (a sample client, deals,
+   * offerings) because a blank app is worse. But that example used to show
+   * FABRICATED MONEY as if it were the founder's own: an R44,500 pipeline from
+   * "Example Co", sample offerings feeding real MRR, with no label and no way out.
+   * These endpoints let Home say what is example and clear it in one click.
+   *
+   * Matching is by the EXACT names the seed templates use, derived from the
+   * templates themselves so the two can never drift, and never by pattern, so a
+   * real client someone happened to call "Sample..." plus anything renamed even
+   * slightly is left alone.
+   */
+  app.get('/api/v1/account/samples', async (req) => {
+    const { accountId } = authOf(req);
+    const names = sampleNames();
+    const [f, d, o] = await Promise.all([
+      db.select({ id: folders.id }).from(folders)
+        .where(and(eq(folders.accountId, accountId), isNull(folders.parentId), inArray(folders.name, names.folders))),
+      db.select({ id: deals.id }).from(deals)
+        .where(and(eq(deals.accountId, accountId), inArray(deals.company, names.companies))),
+      db.select({ id: offerings.id }).from(offerings)
+        .where(and(eq(offerings.accountId, accountId), inArray(offerings.name, names.offerings))),
+    ]);
+    return { present: f.length + d.length + o.length > 0, folders: f.length, deals: d.length, offerings: o.length };
+  });
+
+  app.post('/api/v1/account/clear-samples', async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can clear example data.' });
+    const names = sampleNames();
+    // Folders cascade to their boards and cards.
+    const f = await db.delete(folders)
+      .where(and(eq(folders.accountId, accountId), isNull(folders.parentId), inArray(folders.name, names.folders)));
+    const d = await db.delete(deals)
+      .where(and(eq(deals.accountId, accountId), inArray(deals.company, names.companies)));
+    const o = await db.delete(offerings)
+      .where(and(eq(offerings.accountId, accountId), inArray(offerings.name, names.offerings)));
+    return { ok: true, removed: { folders: f[0].affectedRows, deals: d[0].affectedRows, offerings: o[0].affectedRows } };
+  });
+}
+
+/** The exact names the seed uses, straight from the templates so they cannot drift. */
+function sampleNames() {
+  const foldersList: string[] = [];
+  const companies: string[] = [];
+  const offeringsList: string[] = [];
+  for (const t of Object.values(TEMPLATES)) {
+    for (const area of t.delivery) foldersList.push(area.name);
+    for (const dl of t.deals) if (dl.company) companies.push(dl.company);
+    for (const of2 of t.offerings) offeringsList.push(of2.name);
+  }
+  return {
+    folders: [...new Set(foldersList)],
+    companies: [...new Set(companies)],
+    offerings: [...new Set(offeringsList)],
+  };
 }

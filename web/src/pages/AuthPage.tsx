@@ -6,6 +6,8 @@ type Mode = 'login' | 'signup' | 'forgot' | 'reset';
 
 export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode; onBack?: () => void }) {
   const { login, signup } = useAuth();
+  const [blueprintKey, setBlueprintKey] = useState('');
+  const [currency, setCurrency] = useState('ZAR');
   const [mode, setMode] = useState<Mode>(initialMode);
   const [accountName, setAccountName] = useState('');
   const [name, setName] = useState('');
@@ -32,7 +34,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
     setError(null); setNotice(null); setBusy(true);
     try {
       if (mode === 'login') await login(email, password);
-      else if (mode === 'signup') await signup(accountName, name, email, password);
+      else if (mode === 'signup') await signup(accountName, name, email, password, { blueprint: blueprintKey || undefined, currency });
       else if (mode === 'forgot') {
         const res = await apiPost<{ message: string }>('/auth/forgot', { email });
         setNotice(res.message ?? 'Check your email for a reset link.');
@@ -75,6 +77,24 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
             <>
               <input className={input} placeholder="Your business name (e.g. Mondobase)" value={accountName} onChange={(e) => setAccountName(e.target.value)} required />
               <input className={input} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} required />
+              {/* What kind of business, so the FIRST one is set up like it, not as
+                  a generic default only a second business used to escape. */}
+              <select className={input} value={blueprintKey} onChange={(e) => setBlueprintKey(e.target.value)}
+                aria-label="What kind of business is it?">
+                <option value="">What kind of business? (pick the closest)</option>
+                <option value="agency">Agency or studio</option>
+                <option value="consultant">Consultant or freelancer</option>
+                <option value="hosting">Hosting or recurring services</option>
+                <option value="ecommerce">Shop or e-commerce</option>
+                <option value="saas">Software or SaaS</option>
+                <option value="creator">Content or creator</option>
+              </select>
+              <select className={input} value={currency} onChange={(e) => setCurrency(e.target.value)}
+                aria-label="What do you bill in?">
+                {['ZAR', 'USD', 'EUR', 'GBP', 'AUD', 'CAD', 'INR', 'NGN', 'KES'].map((c) => (
+                  <option key={c} value={c}>{c === 'ZAR' ? 'Billing in ZAR (South African Rand)' : `Billing in ${c}`}</option>
+                ))}
+              </select>
             </>
           )}
           {(mode === 'login' || mode === 'signup' || mode === 'forgot') && (

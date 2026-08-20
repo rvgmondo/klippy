@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders, businesses } from '../db/schema.js';
+import { folders, businesses, documents, deals, dealActivities } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -165,6 +165,57 @@ export async function folderRoutes(app) {
             }
         });
         return { ok: true };
+    });
+    /**
+     * One client's story in order: every document issued to them and every logged
+     * deal interaction, oldest last. The pieces all existed in their own modules;
+     * nothing showed them as one relationship. Read-only aggregation, no new tables.
+     */
+    app.get('/api/v1/folders/:id/timeline', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const [folder] = await db.select({ id: folders.id, name: folders.name, businessId: folders.businessId })
+            .from(folders).where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
+        if (!folder)
+            return reply.code(404).send({ error: 'Client not found.' });
+        if (!(await assertMaybeBusiness(req, reply, folder.businessId, 'viewer')))
+            return;
+        const docs = await db.select({
+            id: documents.id, number: documents.number, type: documents.type, status: documents.status,
+            issueDate: documents.issueDate, total: documents.total, currency: documents.currency,
+            decision: documents.decision, decisionAt: documents.decisionAt,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.folderId, id)))
+            .orderBy(desc(documents.issueDate)).limit(100);
+        const clientDeals = await db.select({ id: deals.id, title: deals.title }).from(deals)
+            .where(tenantWhere(deals, accountId, eq(deals.clientFolderId, id)));
+        const dealIds = clientDeals.map((d) => d.id);
+        const acts = dealIds.length
+            ? await db.select({
+                dealId: dealActivities.dealId, kind: dealActivities.kind,
+                body: dealActivities.body, occurredAt: dealActivities.occurredAt,
+            }).from(dealActivities)
+                .where(tenantWhere(dealActivities, accountId, inArray(dealActivities.dealId, dealIds)))
+                .orderBy(desc(dealActivities.occurredAt)).limit(100)
+            : [];
+        const dealName = new Map(clientDeals.map((d) => [d.id, d.title]));
+        const entries = [
+            ...docs.map((d) => ({
+                at: d.issueDate,
+                kind: `document:${d.type}`,
+                title: `${d.number} (${d.status})`,
+                detail: `${d.currency} ${d.total}${d.decision ? `, ${d.decision}` : ''}`,
+            })),
+            ...acts.map((a) => ({
+                at: a.occurredAt.toISOString().slice(0, 10),
+                kind: `deal:${a.kind}`,
+                title: dealName.get(a.dealId) ?? 'Deal',
+                detail: a.body ?? a.kind,
+            })),
+        ].sort((x, y) => (x.at < y.at ? 1 : x.at > y.at ? -1 : 0));
+        return { client: folder, entries };
     });
 }
 //# sourceMappingURL=folders.js.map

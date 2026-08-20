@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
+  DndContext, useDraggable, useDroppable, PointerSensor, TouchSensor, useSensor, useSensors,
   rectIntersection, type DragEndEvent, type CollisionDetection,
 } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus, Play, Square, Plus } from 'lucide-react';
@@ -107,7 +107,12 @@ export function TodayView({ businessId, onNavigate }: {
   const qc = useQueryClient();
   const [date, setDate] = useState(todayStr());
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Touch: press-and-hold begins a drag; a quick swipe scrolls the page.
+    // Without this, a finger could not scroll a board at all.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   // How long your working day is. A capacity bar measured against someone else's
   // 8 hours is worse than none, so this is yours and it sticks.

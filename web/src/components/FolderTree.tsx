@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+  DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors,
   type DragEndEvent, type DraggableAttributes, type DraggableSyntheticListeners,
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -29,7 +29,12 @@ export function FolderList({ folders, all, depth, selectedBoardId, onSelectBoard
   selectedBoardId: number | null; onSelectBoard: (id: number) => void;
 }) {
   const qc = useQueryClient();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Touch: press-and-hold begins a drag; a quick swipe scrolls the page.
+    // Without this, a finger could not scroll a board at all.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
   const reorder = useMutation({
     mutationFn: (orderedIds: number[]) => apiPost('/folders/reorder', { orderedIds }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
@@ -204,7 +209,12 @@ export function BoardList({ boards, folderId, depth, selectedBoardId, onSelectBo
   selectedBoardId: number | null; onSelectBoard: (id: number) => void;
 }) {
   const qc = useQueryClient();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Touch: press-and-hold begins a drag; a quick swipe scrolls the page.
+    // Without this, a finger could not scroll a board at all.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
   const reorder = useMutation({
     mutationFn: (orderedIds: number[]) => apiPost('/boards/reorder', { orderedIds }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['boards', folderId] }),

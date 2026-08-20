@@ -23,8 +23,13 @@ function resolve(theme: Theme): 'dark' | 'light' {
 
 export function applyAppearance(theme: Theme, accent: Accent) {
   const root = document.documentElement;
-  root.dataset.theme = resolve(theme);
+  const resolved = resolve(theme);
+  root.dataset.theme = resolved;
   root.dataset.accent = accent;
+  // The installed app's chrome (status bar, task switcher card) follows the theme
+  // instead of staying hard-coded dark and clashing for light-theme users.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', resolved === 'light' ? '#f4f5f7' : '#0e1013');
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ theme, accent })); } catch { /* ignore */ }
 }
 

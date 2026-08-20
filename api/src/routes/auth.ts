@@ -12,15 +12,22 @@ import {
 } from '../lib/auth.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 import { publicAccount } from '../lib/publicAccount.js';
+import { blueprint, provisionFrom } from '../lib/blueprints.js';
+import { isKnownCurrency } from '../lib/currency.js';
 import { authLimiter } from '../lib/rateLimit.js';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const signupSchema = z.object({
-  accountName: z.string().trim().min(1, 'Workspace name is required').max(150),
+  accountName: z.string().trim().min(1, 'Your business name is required').max(150),
   name: z.string().trim().min(1, 'Your name is required').max(100),
   email: z.string().trim().toLowerCase().email('Enter a valid email').max(150),
   password: z.string().min(8, 'Password must be at least 8 characters').max(200),
+  // What kind of business, so the FIRST business gets the tailoring the second
+  // always got: signup never asked, hard-coding every first business to
+  // 'services' while the 6-archetype picker sat one screen too deep.
+  blueprint: z.string().trim().max(40).optional(),
+  currency: z.string().trim().length(3).optional(),
 });
 
 const loginSchema = z.object({
@@ -50,6 +57,10 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid input.' });
     }
     const { accountName, name, email, password } = parsed.data;
+    const bp = blueprint(parsed.data.blueprint);
+    const prov = bp ? provisionFrom(bp) : null;
+    const currency = parsed.data.currency && isKnownCurrency(parsed.data.currency)
+      ? parsed.data.currency.toUpperCase() : undefined;
 
     // Email is globally unique for now (unambiguous email+password login).
     const [dupe] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
@@ -59,14 +70,14 @@ export async function authRoutes(app: FastifyInstance) {
     const passwordHash = await hashPassword(password);
 
     const result = await db.transaction(async (tx) => {
-      const accIns = await tx.insert(accounts).values({ name: accountName, slug });
+      const accIns = await tx.insert(accounts).values({ name: accountName, slug, ...(currency ? { currency } : {}) });
       const accountId = Number(accIns[0].insertId);
       const userIns = await tx.insert(users).values({
         name, email, passwordHash, lastLogin: new Date(),
       });
       const userId = Number(userIns[0].insertId);
       await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
-      await seedNewAccount(tx, accountId, userId, accountName);
+      await seedNewAccount(tx, accountId, userId, accountName, prov?.type, prov?.modules ?? null);
       return { accountId, userId };
     });
 

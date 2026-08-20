@@ -8,7 +8,7 @@ interface AuthState {
   account: Account | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  signup: (accountName: string, name: string, email: string, password: string) => Promise<void>;
+  signup: (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateAccount: (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural' | 'currency'>>) => Promise<void>;
@@ -39,8 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     apply(await apiPost<Session>('/auth/login', { email, password }));
   };
-  const signup = async (accountName: string, name: string, email: string, password: string) => {
-    apply(await apiPost<Session>('/auth/signup', { accountName, name, email, password }));
+  const signup = async (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => {
+    apply(await apiPost<Session>('/auth/signup', { accountName, name, email, password, ...extras }));
   };
   const logout = async () => {
     // Always clear the local session, even if the server call fails, so the

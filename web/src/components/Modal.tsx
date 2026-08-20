@@ -86,7 +86,14 @@ export function Modal({
   ) : variant === 'page' ? (
     <div {...backdrop('overflow-y-auto p-4')}>{children}</div>
   ) : variant === 'panel' ? (
-    <div {...backdrop('grid place-items-center p-4')}>{children}</div>
+    // On a phone a centred panel floats in a sliver of space above the keyboard.
+    // Below sm it becomes a full-height sheet: content gets the whole screen and
+    // scrolls, which is how every native editor behaves.
+    <div {...backdrop('grid p-0 max-sm:items-stretch sm:place-items-center sm:p-4')}>
+      <div className="max-sm:h-full max-sm:w-full max-sm:overflow-y-auto max-sm:bg-slate-950 max-sm:pb-safe max-sm:pt-safe sm:contents">
+        {children}
+      </div>
+    </div>
   ) : (
     <div {...backdrop('flex justify-center overflow-y-auto p-4')}>
       <div className={`my-auto w-full ${width} rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl`}>

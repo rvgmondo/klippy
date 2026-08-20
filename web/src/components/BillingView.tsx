@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard } from 'lucide-react';
+import { Plus, X, Pencil, Clock, DollarSign, MoreHorizontal, Trash2 } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
 import { EmptyState } from './ui';
 import { Modal } from './Modal';
+import { Menu } from './Menu';
 import { PrintView } from './InvoicePrintView';
 import { PaymentsModal } from './PaymentsModal';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -143,20 +144,28 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                   </td>
                   <td className="px-3 py-2 text-right num text-slate-100">{money(d.total, d.currency)}</td>
                   <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
-                      <button onClick={() => setPrinting(d.id)} title="Print / PDF" className="text-slate-500 hover:text-slate-200"><Printer size={15} /></button>
-                      <button onClick={async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); }} title="Email to client" className="text-slate-500 hover:text-slate-200"><Mail size={14} /></button>
-                      <button onClick={() => setEditing(d.id)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
+                    {/* Seven bare 15px icons, 4px apart, two destructive, was an
+                        accessibility failure and a fat-finger trap on a phone. The
+                        two everyday actions stay one tap; the rest live in a menu. */}
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setEditing(d.id)} title="Edit"
+                        className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Pencil size={14} /></button>
                       {d.type === 'invoice' && (
-                        <button onClick={() => setPaying(d)} title="Payments" className="text-slate-500 hover:text-green-300"><DollarSign size={14} /></button>
+                        <button onClick={() => setPaying(d)} title="Payments"
+                          className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-green-300"><DollarSign size={14} /></button>
                       )}
-                      {d.type === 'invoice' && d.status !== 'paid' && payfastOn && (
-                        <button onClick={() => payOnline(d.id)} title="Open PayFast checkout" className="text-slate-500 hover:text-[var(--accent)]"><CreditCard size={14} /></button>
-                      )}
-                      {d.type === 'quote' && (
-                        <button onClick={() => convert.mutate(d.id)} title="Convert to invoice" className="text-slate-500 hover:text-violet-300"><ArrowRightLeft size={14} /></button>
-                      )}
-                      <button onClick={async () => { if (await confirmDialog(`Delete ${d.number}?`, { danger: true })) del.mutate(d.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                      <Menu align="right"
+                        trigger={<span className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
+                        items={[
+                          { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
+                          { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
+                          ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
+                            ? [{ label: 'Open PayFast checkout', onClick: () => payOnline(d.id) }] : []),
+                          ...(d.type === 'quote'
+                            ? [{ label: 'Convert to invoice', onClick: () => convert.mutate(d.id) }] : []),
+                          { label: d.status === 'draft' ? 'Delete' : 'Void', danger: true, onClick: async () => { if (await confirmDialog(d.status === 'draft' ? `Delete ${d.number}?` : `Void ${d.number}? The number is kept, the amount drops out of balances.`, { danger: true })) del.mutate(d.id); } },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>

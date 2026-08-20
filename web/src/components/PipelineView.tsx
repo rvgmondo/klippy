@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { confirmDialog, notify, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, useDraggable, useDroppable, PointerSensor, useSensor, useSensors, type DragEndEvent,
+  DndContext, useDraggable, useDroppable, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
 import { Plus, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
@@ -29,7 +29,12 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   // Deal values read in the currency the selected business bills in.
   const cur = useCurrency(businessId);
   const money = (v: number | string) => moneyRound(v, cur);
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Touch: press-and-hold begins a drag; a quick swipe scrolls the page.
+    // Without this, a finger could not scroll a board at all.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
 
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });

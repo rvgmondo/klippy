@@ -101,13 +101,16 @@ export async function seedNewBusiness(
 
 /** Signup: create the account's first business (defaults to services) and seed it. */
 export async function seedNewAccount(
-  tx: Tx, accountId: number, userId: number, businessName = 'My Business', type: BusinessType = 'services',
+  tx: Tx, accountId: number, userId: number, businessName = 'My Business',
+  type: BusinessType = 'services', modules: string[] | null = null,
 ) {
   // secondaryTypes written explicitly: a JSON column DEFAULT needs MySQL 8.0.13+,
   // and a strict-mode server rejects an insert that omits a NOT NULL column whose
   // default it will not honour. Signup must not depend on that.
   const bizIns = await tx.insert(businesses).values({
     accountId, name: businessName, type, secondaryTypes: [], position: 0, createdBy: userId,
+    // The blueprint's module set, when signup chose one; null keeps the type default.
+    modules,
   });
   const businessId = Number(bizIns[0].insertId);
   await seedNewBusiness(tx, accountId, userId, businessId, type);

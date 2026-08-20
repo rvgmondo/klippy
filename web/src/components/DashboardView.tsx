@@ -1,9 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { apiGet } from '../lib/api';
+import { apiGet, apiPost } from '../lib/api';
 import { TodayBriefing } from './TodayBriefing';
 import { SkeletonTile } from './ui';
+import { confirmDialog, notify } from './ConfirmDialog';
+import { setUrlParams } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -60,6 +62,14 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   });
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const businessesQ = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
+  const samples = useQuery({ queryKey: ['samples'], queryFn: () => apiGet<{ present: boolean }>('/account/samples') });
+  const invoices = useQuery({ queryKey: ['documents', 'invoice-count'], queryFn: () => apiGet<{ documents: unknown[] }>('/documents?type=invoice') });
+  const qcAll = useQueryClient();
+  const clearSamples = useMutation({
+    mutationFn: () => apiPost('/account/clear-samples', {}),
+    onSuccess: () => { qcAll.clear(); notify('Example data cleared. What you see now is yours.'); },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not clear the examples.', 'error'),
+  });
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const [showNotes, setShowNotes] = useState(false);
   // The focused business, when one is selected (needed for its notes).
@@ -124,6 +134,43 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         {/* A failed load used to render as a wall of zeros, which is worse than an
             error when the numbers are money. */}
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
+
+        {/* Example data says so. The fresh dashboard used to show a fabricated
+            pipeline and sample MRR as if they were the founder's own numbers. */}
+        {samples.data?.present && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent-quiet)] p-3 text-sm text-slate-200">
+            <span className="min-w-0 flex-1">
+              Some of what you see is <b>example data</b> (a sample client, deals and offerings) so
+              the app is not empty. The money figures include it until you clear it.
+            </span>
+            <button
+              onClick={async () => {
+                if (await confirmDialog('Remove the example client, deals and offerings? Anything you created or renamed stays.', { confirmLabel: 'Clear examples' })) clearSamples.mutate();
+              }}
+              disabled={clearSamples.isPending}
+              className="shrink-0 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50">
+              {clearSamples.isPending ? 'Clearing...' : 'Clear it and start fresh'}
+            </button>
+          </div>
+        )}
+
+        {/* Until the first invoice exists, the shortest path to it stays on Home. */}
+        {invoices.data && invoices.data.documents.length === 0 && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+            <p className="text-sm font-medium text-slate-200">Get to your first invoice</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => { const q = new URLSearchParams(window.location.search); q.set('s', 'biz:invoicing'); window.history.replaceState(null, '', `${window.location.pathname}?${q.toString()}`); onNavigate?.('settings'); }}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+                1. Add your business details
+              </button>
+              <button onClick={() => { setUrlParams({ new: 'invoice' }); onNavigate?.('billing'); }}
+                className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90">
+                2. Raise your first invoice
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-slate-500">You can add the client while writing the invoice.</p>
+          </div>
+        )}
 
         {/* What needs you today, and the one thing holding the business back. */}
         <TodayBriefing businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />

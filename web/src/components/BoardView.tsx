@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { confirmDialog, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  DndContext, DragOverlay, PointerSensor, useSensor, useSensors, closestCorners,
+  DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors, closestCorners,
   type DragStartEvent, type DragOverEvent, type DragEndEvent,
 } from '@dnd-kit/core';
 import {
@@ -11,6 +11,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Plus, Flag, MoreHorizontal, GripVertical, Copy } from 'lucide-react';
 import { setUrlParams } from '../lib/urlAction';
+import { ClientTimeline } from './ClientTimeline';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { BoardListView } from './BoardListView';
 import { BoardActions } from './BoardActions';
@@ -38,7 +39,12 @@ function initials(name: string): string {
 
 export function BoardView({ boardId, onNavigate }: { boardId: number | null; onNavigate?: (v: string) => void }) {
   const qc = useQueryClient();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    // Touch: press-and-hold begins a drag; a quick swipe scrolls the page.
+    // Without this, a finger could not scroll a board at all.
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
   const [showActions, setShowActions] = useState(false);
   // Board or list. Remembered, because it is a preference about how someone
@@ -77,6 +83,7 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
     if (!cur || cur.pillar === 'operations') return null;   // internal areas are not billed
     return cur;
   }, [data?.board.folderId, foldersQ.data]);
+  const [showTimeline, setShowTimeline] = useState(false);
   const launch = (view: string, params: Record<string, string>) => {
     setUrlParams(params);
     onNavigate?.(view);
@@ -219,6 +226,10 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
               className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-[var(--accent)] hover:text-[var(--accent)]">
               Start subscription
             </button>
+            <button onClick={() => setShowTimeline(true)}
+              className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800">
+              History
+            </button>
           </div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -270,6 +281,10 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
           ) : null}
         </DragOverlay>
       </DndContext>
+      )}
+
+      {showTimeline && client && (
+        <ClientTimeline folderId={client.id} name={client.name} onClose={() => setShowTimeline(false)} />
       )}
 
       {showActions && (
