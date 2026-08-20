@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
-import { CommandCentre } from './CommandCentre';
+import { TodayBriefing } from './TodayBriefing';
 import { useAuth } from '../lib/auth';
 import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -125,7 +125,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
 
         {/* What needs you today, and the one thing holding the business back. */}
-        <CommandCentre businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />
+        <TodayBriefing businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />
 
         {/* Pillar bento */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">

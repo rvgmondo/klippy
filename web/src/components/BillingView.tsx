@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Printer, Trash2, X, Pencil, ArrowRightLeft, Clock, DollarSign, Mail, CreditCard } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
+import type { Folder } from '../lib/types';
+import { useUrlAction, takeUrlParam } from '../lib/urlAction';
 import { Modal } from './Modal';
 import { PrintView } from './InvoicePrintView';
 import { PaymentsModal } from './PaymentsModal';
@@ -19,6 +21,17 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<DocType>('invoice');
   const [editing, setEditing] = useState<number | 'new' | null>(null);
+  const [initialFolder, setInitialFolder] = useState<number | null>(null);
+
+  // The palette and the client action row hand this view an intent through the
+  // URL: open a fresh invoice or quote, optionally already pointed at a client.
+  useUrlAction('new', (v) => {
+    if (v !== 'invoice' && v !== 'quote') return;
+    const f = takeUrlParam('folder');
+    setInitialFolder(f ? Number(f) : null);
+    setTab(v);
+    setEditing('new');
+  });
   const [printing, setPrinting] = useState<number | null>(null);
   const [paying, setPaying] = useState<DocSummary | null>(null);
   const bizParam = businessId === 'all' ? '' : `&businessId=${businessId}`;
@@ -143,14 +156,14 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
         </div>
       </div>
 
-      {editing && <Editor id={editing} type={tab} businessId={newBusinessId} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
+      {editing && <Editor id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
     </div>
   );
 }
 
-function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'; type: DocType; businessId?: number; onClose: () => void; onSaved: () => void }) {
+function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { id: number | 'new'; type: DocType; businessId?: number; initialFolderId?: number | null; onClose: () => void; onSaved: () => void }) {
   const isNew = id === 'new';
   const existing = useQuery({
     queryKey: ['document', id], enabled: !isNew,
@@ -158,6 +171,21 @@ function Editor({ id, type, businessId, onClose, onSaved }: { id: number | 'new'
   });
 
   const [folderId, setFolderId] = useState<number | null>(null);
+
+  // Handed a client by the action row or the palette: point the document at them
+  // and pull their billing details, exactly as picking them by hand would.
+  const foldersQ = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
+  useEffect(() => {
+    if (id !== 'new' || !initialFolderId || folderId !== null) return;
+    const f = foldersQ.data?.folders.find((x) => x.id === initialFolderId);
+    if (!f) return;
+    setFolderId(f.id);
+    setClientName(f.name);
+    setClientEmail(f.billingEmail ?? '');
+    setClientAddress(f.billingAddress ?? '');
+    setClientVat(f.billingVatNumber ?? '');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [foldersQ.data, initialFolderId, id]);
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientAddress, setClientAddress] = useState('');

@@ -8,6 +8,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
+import { useUrlAction } from '../lib/urlAction';
 
 const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'services', label: 'Services' }, { value: 'products', label: 'Products' },
@@ -27,6 +28,13 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
   const money = (v: string | number) => fmt(v, cur);
   const [editing, setEditing] = useState<Offering | 'new' | null>(null);
   const [startingSub, setStartingSub] = useState(false);
+  const [subFolder, setSubFolder] = useState<number | null>(null);
+  useUrlAction('new', () => setEditing('new'));
+  useUrlAction('sub', (v) => {
+    const n = Number(v);
+    setSubFolder(Number.isFinite(n) && n > 1 ? n : null);
+    setStartingSub(true);
+  });
   const [pricing, setPricing] = useState<Subscription | null>(null);
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
@@ -307,8 +315,9 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
         <StartSubscriptionModal
           businessId={newBusinessId}
           recurringOfferings={recurringOfferings}
-          onClose={() => setStartingSub(false)}
-          onStarted={() => { setStartingSub(false); invalidateSubs(); }}
+          initialFolderId={subFolder}
+          onClose={() => { setStartingSub(false); setSubFolder(null); }}
+          onStarted={() => { setStartingSub(false); setSubFolder(null); invalidateSubs(); }}
         />
       )}
     </div>
@@ -372,14 +381,15 @@ function SubscriptionPriceModal({ subscription, currency, onClose, onSaved }: {
   );
 }
 
-function StartSubscriptionModal({ businessId, recurringOfferings, onClose, onStarted }: {
+function StartSubscriptionModal({ businessId, recurringOfferings, initialFolderId, onClose, onStarted }: {
   businessId?: number;
   recurringOfferings: Offering[];
+  initialFolderId?: number | null;
   onClose: () => void;
   onStarted: () => void;
 }) {
   const [offeringId, setOfferingId] = useState<string>(recurringOfferings[0] ? String(recurringOfferings[0].id) : '');
-  const [folderId, setFolderId] = useState('');
+  const [folderId, setFolderId] = useState(initialFolderId ? String(initialFolderId) : '');
   const cur = useCurrency(businessId ?? 'all');
   const [intervalMonths, setIntervalMonths] = useState(1);
   const [domain, setDomain] = useState('');

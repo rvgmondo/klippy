@@ -12,6 +12,7 @@ import { DealEditor } from './DealEditor';
 import {} from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { moneyRound } from '../lib/money';
+import { useUrlAction } from '../lib/urlAction';
 import { useCurrency } from '../lib/useCurrency';
 
 
@@ -23,7 +24,7 @@ const STAGES: { key: Stage; label: string; color: string }[] = [
   { key: 'lost', label: 'Lost', color: '#ef4444' },
 ];
 
-export function PipelineView({ businessId, onGoToClients }: { businessId: BusinessSelection; onGoToClients?: () => void }) {
+export function PipelineView({ businessId, onOpenClient }: { businessId: BusinessSelection; onOpenClient?: (folderId: number) => void }) {
   const qc = useQueryClient();
   // Deal values read in the currency the selected business bills in.
   const cur = useCurrency(businessId);
@@ -43,6 +44,7 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
   const [adding, setAdding] = useState(false);
+  useUrlAction('new', (v) => { if (v === 'deal') setAdding(true); });
   const [editing, setEditing] = useState<Deal | null>(null);
 
   const move = useMutation({
@@ -51,8 +53,13 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
     onSuccess: invalidate,
   });
   const convert = useMutation({
-    mutationFn: (id: number) => apiPost<{ name: string }>(`/deals/${id}/convert`),
-    onSuccess: (r) => { invalidate(); qc.invalidateQueries({ queryKey: ['folders'] }); notify(`${r.name} is now a client under Delivery.`); },
+    mutationFn: (id: number) => apiPost<{ name: string; folderId: number | null }>(`/deals/${id}/convert`),
+    onSuccess: (r) => {
+      invalidate(); qc.invalidateQueries({ queryKey: ['folders'] });
+      notify(`${r.name} is now a client under Delivery.`);
+      // Land on the client that was just created, not on a blank Boards screen.
+      if (r.folderId) onOpenClient?.(r.folderId);
+    },
     onError: (e) => notify(e instanceof Error ? e.message : 'Could not convert.', 'error'),
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/deals/${id}`), onSuccess: invalidate });
@@ -108,7 +115,7 @@ export function PipelineView({ businessId, onGoToClients }: { businessId: Busine
           {STAGES.map((st) => (
             <StageLane key={st.key} stage={st} deals={deals.filter((d) => d.stage === st.key)}
               money={money} onOpen={setEditing}
-              onConvert={(id) => convert.mutate(id)} onDelete={(id) => del.mutate(id)} onGoToClients={onGoToClients} />
+              onConvert={(id) => convert.mutate(id)} onDelete={(id) => del.mutate(id)} onOpenClient={onOpenClient} />
           ))}
         </div>
       </DndContext>
@@ -181,9 +188,9 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
-function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onGoToClients }: {
+function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onOpenClient }: {
   stage: { key: Stage; label: string; color: string }; deals: Deal[]; money: (v: number | string) => string;
-  onOpen: (d: Deal) => void; onConvert: (id: number) => void; onDelete: (id: number) => void; onGoToClients?: () => void;
+  onOpen: (d: Deal) => void; onConvert: (id: number) => void; onDelete: (id: number) => void; onOpenClient?: (folderId: number) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.key}` });
   const total = deals.reduce((s, d) => s + Number(d.value), 0);
@@ -196,7 +203,7 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onGoToCli
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {deals.map((d) => (
-          <DealCard key={d.id} deal={d} money={money} onOpen={onOpen} onConvert={onConvert} onDelete={onDelete} onGoToClients={onGoToClients} />
+          <DealCard key={d.id} deal={d} money={money} onOpen={onOpen} onConvert={onConvert} onDelete={onDelete} onOpenClient={onOpenClient} />
         ))}
       </div>
     </div>
@@ -214,9 +221,9 @@ function followUpState(deal: Deal, today: string): { label: string; overdue: boo
   return { label: `follow up ${deal.nextFollowUpAt}`, overdue: false };
 }
 
-function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
+function DealCard({ deal, money, onOpen, onConvert, onDelete, onOpenClient }: {
   deal: Deal; money: (v: number | string) => string; onOpen: (d: Deal) => void;
-  onConvert: (id: number) => void; onDelete: (id: number) => void; onGoToClients?: () => void;
+  onConvert: (id: number) => void; onDelete: (id: number) => void; onOpenClient?: (folderId: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: deal.id });
   const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined;
@@ -233,7 +240,7 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onGoToClients }: {
           trigger={<span className="text-slate-500 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
           items={[
             ...(deal.clientFolderId
-              ? [{ label: 'Open client (Delivery)', onClick: () => onGoToClients?.() }]
+              ? [{ label: 'Open client (Delivery)', onClick: () => onOpenClient?.(deal.clientFolderId!) }]
               : [{ label: 'Convert to client', onClick: async () => { if (await confirmDialog(`Turn "${deal.company || deal.title}" into a Delivery client?`)) onConvert(deal.id); } }]),
             { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog('Delete this deal?', { danger: true })) onDelete(deal.id); } },
           ]}

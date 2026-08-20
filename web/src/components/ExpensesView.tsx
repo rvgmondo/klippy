@@ -8,6 +8,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
+import { useUrlAction } from '../lib/urlAction';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -18,6 +19,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
   const cur = useCurrency(businessId);
   const money = (v: string | number) => fmt(v, cur);
   const [editing, setEditing] = useState<Expense | 'new' | null>(null);
+  useUrlAction('new', () => setEditing('new'));
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 

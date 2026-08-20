@@ -40,7 +40,7 @@ const URGENCY_STYLE: Record<Urgency, string> = {
  * due dates. This looks across money, work and pipeline together, so silence here
  * genuinely means there is nothing to do.
  */
-export function CommandCentre({ businessId, onNavigate }: {
+export function TodayBriefing({ businessId, onNavigate }: {
   businessId: BusinessSelection;
   onNavigate: (view: string) => void;
 }) {

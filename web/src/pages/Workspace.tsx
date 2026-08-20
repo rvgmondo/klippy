@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Timer, LogOut, Settings, Menu as MenuIcon, X } from 'lucide-react';
+import { Timer, LogOut, Settings, Menu as MenuIcon, X, Search } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
 import { Sidebar } from '../components/Sidebar';
@@ -20,7 +20,8 @@ import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { SettingsView } from '../components/SettingsView';
 import { MobileTabBar } from '../components/MobileTabBar';
-import { SearchBar } from '../components/SearchBar';
+import { CommandPalette } from '../components/CommandPalette';
+import { apiGet } from '../lib/api';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
 type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'settings';
@@ -81,6 +82,32 @@ export function Workspace() {
   const [view, setView] = useState<View>(initial.view);
   const [showTimer, setShowTimer] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Cmd/Ctrl-K opens the palette from anywhere. The one shortcut worth learning.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Land on a client's actual board. The old path set the Boards view with no
+  // board selected, which is a blank screen with a shrug on it.
+  const openClient = async (folderId: number) => {
+    try {
+      const r = await apiGet<{ boards: { id: number }[] }>(`/boards?folderId=${folderId}`);
+      const first = r.boards?.[0]?.id ?? null;
+      setBoardId(first);
+      setView('board');
+    } catch {
+      setView('board');
+    }
+  };
   const [businessId, setBusinessId] = useState<BusinessSelection>(initial.businessId);
   const selectBusiness = (v: BusinessSelection) => { setBusinessId(v); localStorage.setItem('klippy.business', String(v)); };
 
@@ -150,7 +177,12 @@ export function Workspace() {
           <span className="truncate text-sm font-semibold text-slate-100 lg:hidden">{viewLabel(view)}</span>
 
           <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-3">
-            <div className="hidden min-w-0 flex-1 sm:block sm:max-w-xs"><SearchBar /></div>
+            <button onClick={() => setPaletteOpen(true)}
+              className="hidden min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-500 hover:border-slate-600 hover:text-slate-400 sm:flex sm:max-w-xs">
+              <Search size={14} className="shrink-0" />
+              <span className="truncate">Search everything...</span>
+              <kbd className="ml-auto shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px]">Ctrl K</kbd>
+            </button>
             <TimerChip />
             <button onClick={() => setShowTimer(true)} title="Focus timer"
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
@@ -175,15 +207,18 @@ export function Workspace() {
 
         {/* Search on the smallest screens sits under the bar so it stays usable */}
         <div className="border-b border-slate-800 px-2 py-2 sm:hidden">
-          <SearchBar />
+          <button onClick={() => setPaletteOpen(true)}
+            className="flex w-full items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-500">
+            <Search size={14} className="shrink-0" /> Search everything...
+          </button>
         </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[calc(52px+env(safe-area-inset-bottom))] lg:pb-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
-          {view === 'pipeline' && <PipelineView businessId={businessId} onGoToClients={() => setView('board')} />}
+          {view === 'pipeline' && <PipelineView businessId={businessId} onOpenClient={openClient} />}
           {view === 'contacts' && <ContactsView businessId={businessId} />}
-          {view === 'board' && <BoardView boardId={boardId} />}
+          {view === 'board' && <BoardView boardId={boardId} onNavigate={(v) => setView(v as View)} />}
           {view === 'calendar' && <CalendarView businessId={businessId} />}
           {view === 'files' && <FilesView />}
           {view === 'offerings' && <OfferingsView businessId={businessId} />}
@@ -197,6 +232,11 @@ export function Workspace() {
 
       <MobileTabBar view={view} businessId={businessId}
         onNavigate={(v) => setView(v as View)} onOpenMore={() => setNavOpen(true)} />
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
+        onNavigate={(v) => setView(v as View)}
+        onSelectBoard={(id) => { setBoardId(id); setView('board'); }}
+        onBusinessChange={selectBusiness} />
 
       {showTimer && <FocusTimer onClose={() => setShowTimer(false)} />}
     </div>

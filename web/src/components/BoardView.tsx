@@ -10,10 +10,11 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Plus, Flag, MoreHorizontal, GripVertical, Copy } from 'lucide-react';
+import { setUrlParams } from '../lib/urlAction';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { BoardListView } from './BoardListView';
 import { BoardActions } from './BoardActions';
-import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser } from '../lib/types';
+import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser, Folder as FolderT } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
 import { Menu } from './Menu';
@@ -35,7 +36,7 @@ function initials(name: string): string {
   return name.split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 }
 
-export function BoardView({ boardId }: { boardId: number | null }) {
+export function BoardView({ boardId, onNavigate }: { boardId: number | null; onNavigate?: (v: string) => void }) {
   const qc = useQueryClient();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const [openTaskId, setOpenTaskId] = useState<number | null>(null);
@@ -61,6 +62,25 @@ export function BoardView({ boardId }: { boardId: number | null }) {
     retry: false,
   });
   const { data: usersData } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<{ users: TeamUser[] }>('/users') });
+
+  // The client this board belongs to, resolved by walking the folder chain to its
+  // root. The client folder IS the billing entity, so its board is where "raise an
+  // invoice for them" naturally starts; until now every money task began in a
+  // module and re-picked the client from a dropdown.
+  const foldersQ = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: FolderT[] }>('/folders') });
+  const client = useMemo(() => {
+    const fid = data?.board.folderId;
+    const all = foldersQ.data?.folders ?? [];
+    if (!fid || !all.length) return null;
+    let cur = all.find((f) => f.id === fid);
+    for (let i = 0; i < 50 && cur?.parentId != null; i++) cur = all.find((f) => f.id === cur!.parentId);
+    if (!cur || cur.pillar === 'operations') return null;   // internal areas are not billed
+    return cur;
+  }, [data?.board.folderId, foldersQ.data]);
+  const launch = (view: string, params: Record<string, string>) => {
+    setUrlParams(params);
+    onNavigate?.(view);
+  };
   const userMap = useMemo(() => new Map((usersData?.users ?? []).map((u) => [u.id, u])), [usersData]);
   const labelsByTask = useMemo(() => {
     const m = new Map<number, CardLabel[]>();
@@ -184,6 +204,23 @@ export function BoardView({ boardId }: { boardId: number | null }) {
       <div className="border-b border-slate-800 px-6 py-3">
         <h2 className="font-display text-lg font-semibold text-slate-100">{data.board.name}</h2>
         {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
+        {client && onNavigate && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">{client.name}:</span>
+            <button onClick={() => launch('billing', { new: 'invoice', folder: String(client.id) })}
+              className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-[var(--accent)] hover:text-[var(--accent)]">
+              Raise invoice
+            </button>
+            <button onClick={() => launch('billing', { new: 'quote', folder: String(client.id) })}
+              className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-[var(--accent)] hover:text-[var(--accent)]">
+              New quote
+            </button>
+            <button onClick={() => launch('offerings', { sub: String(client.id) })}
+              className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-[var(--accent)] hover:text-[var(--accent)]">
+              Start subscription
+            </button>
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <BoardFilters value={filters} onChange={setFilters} />
           <button onClick={() => setShowActions(true)} title="Copy this board, or start one from a template"
