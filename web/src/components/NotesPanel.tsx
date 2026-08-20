@@ -3,6 +3,7 @@ import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Copy, Check, Lightbulb, Bug, Wrench, HelpCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { fieldClass } from './ui';
 
 type Kind = 'idea' | 'bug' | 'improvement' | 'question';
 type Status = 'open' | 'planned' | 'done' | 'dropped';
@@ -56,7 +57,7 @@ export function NotesPanel() {
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
   const visible = notes.filter((n) => showDone || (n.status !== 'done' && n.status !== 'dropped'));
 
   return (

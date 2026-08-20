@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Play, Square, Plus, Trash2 } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
 import { useRunningTimer } from './TimerChip';
+import { fieldInlineClass } from './ui';
 
 interface Entry {
   id: number;
@@ -47,7 +48,7 @@ export function TimeSection({ taskId }: { taskId: number }) {
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/time-entries/${id}`), onSuccess: invalidate });
 
-  const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldInlineClass;
 
   return (
     <div>

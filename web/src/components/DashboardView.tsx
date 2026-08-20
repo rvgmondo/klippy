@@ -3,6 +3,7 @@ import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette
 import { useState, type ReactNode } from 'react';
 import { apiGet } from '../lib/api';
 import { TodayBriefing } from './TodayBriefing';
+import { SkeletonTile } from './ui';
 import { useAuth } from '../lib/auth';
 import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -51,7 +52,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   const cur = useCurrency(businessId);
   const money = (v: number) => moneyRound(v, cur);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
-  const { data, error, refetch } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`), retry: false });
+  const { data, error, refetch, isLoading } = useQuery({ queryKey: ['dashboard', businessId], queryFn: () => apiGet<Dashboard>(`/dashboard${bizQ}`), retry: false });
   const deals = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ summary: DealSummary }>(`/deals${bizQ}`) });
   const money_ = useQuery({
     queryKey: ['dashboard-money', businessId],
@@ -127,7 +128,13 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         {/* What needs you today, and the one thing holding the business back. */}
         <TodayBriefing businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />
 
-        {/* Pillar bento */}
+        {/* Pillar bento. While the numbers are still counting, shimmer instead of
+            flashing zeros: "R 0 revenue" on open reads as bad news, not a wait. */}
+        {isLoading ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <SkeletonTile /><SkeletonTile /><SkeletonTile />
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <PillarCard
             icon={<Target size={15} />} name="Sales" accent
@@ -144,6 +151,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             status={`${opsFolders.length} area${opsFolders.length === 1 ? '' : 's'}`} hero={String(d?.operations.open ?? 0)} heroLabel="Open work"
             subs={[['Due today', String(d?.operations.dueToday ?? 0)], ['Overdue', String(d?.operations.overdue ?? 0)], ['This week', fmtHours(d?.operations.weekSeconds ?? 0)]]} />
         </div>
+        )}
 
         {/* Businesses and the rest */}
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

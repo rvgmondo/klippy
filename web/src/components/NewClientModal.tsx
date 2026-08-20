@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { apiPatch, apiPost } from '../lib/api';
 import { Modal } from './Modal';
 import type { Folder } from '../lib/types';
+import { fieldClass } from './ui';
 
 /**
  * Adding a client, with the details that make everything else work.
@@ -62,7 +63,7 @@ export function NewClientModal({ businessId, businessName, pillar, label, onClos
     onError: (e) => setErr(e instanceof Error ? e.message : 'Could not add that client.'),
   });
 
-  const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]';
+  const field = fieldClass;
   const lbl = 'mb-1 block text-xs font-medium text-slate-400';
 
   return (

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPatch, apiDelete } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
+import { fieldClass } from './ui';
 
 interface Configured {
   merchantId: string; hasMerchantKey: boolean; hasPassphrase: boolean;
@@ -73,7 +74,7 @@ export function PaymentsPanel({ businessId }: { businessId?: number } = {}) {
   if (error) return <ErrorNote error={error} onRetry={() => refetch()} />;
   if (!data) return <p className="text-sm text-slate-500">Loading...</p>;
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]';
+  const field = fieldClass;
   const label = 'mb-1 block text-xs font-medium text-slate-400';
 
   return (

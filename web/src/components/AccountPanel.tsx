@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { useAuth } from '../lib/auth';
 import { useCurrencyOptions } from '../lib/useCurrency';
+import { fieldClass } from './ui';
 
 /**
  * The account everyone in it shares: its name, what top-level folders are called,
@@ -36,7 +37,7 @@ export function AccountPanel() {
     } finally { setBusy(false); }
   }
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 disabled:opacity-50';
+  const field = fieldClass;
 
   return (
     <div className="space-y-8">

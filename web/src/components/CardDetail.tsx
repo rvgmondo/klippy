@@ -9,6 +9,7 @@ import { Modal } from './Modal';
 import { FilesSection } from './FilesSection';
 import { LabelsSection } from './LabelsSection';
 import { ErrorNote } from './ErrorNote';
+import { fieldClass } from './ui';
 
 /** A UTC timestamp as the local value a datetime-local input expects. */
 function toLocalInput(iso: string): string {
@@ -60,7 +61,7 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
   const t = data?.task;
   const doneSubs = data?.subtasks.filter((s) => s.isCompleted).length ?? 0;
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldClass;
 
   return (
     <Modal onClose={onClose} variant="drawer">

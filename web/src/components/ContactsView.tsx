@@ -5,6 +5,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { confirmDialog, notify } from './ConfirmDialog';
+import { fieldClass } from './ui';
 
 /**
  * The people you deal with, as a place of their own.
@@ -151,7 +152,7 @@ function ContactEditor({ contact, businessId, onClose, onSaved }: {
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not save.'),
   });
 
-  const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
   const label = 'mb-1 block text-xs text-slate-400';
 
   return (

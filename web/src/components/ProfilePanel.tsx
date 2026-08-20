@@ -3,6 +3,7 @@ import { apiPatch } from '../lib/api';
 import { pushSupported, enablePush, disablePush, currentSubscription, sendTestPush } from '../lib/push';
 import { useEffect } from 'react';
 import { useAuth } from '../lib/auth';
+import { fieldClass } from './ui';
 
 export function ProfilePanel() {
   const { user, account, refresh } = useAuth();
@@ -14,7 +15,7 @@ export function ProfilePanel() {
   const [busy, setBusy] = useState(false);
   const [digest, setDigest] = useState(user?.dailyDigest ?? true);
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
 
   async function saveName(e: FormEvent) {
     e.preventDefault();

@@ -17,6 +17,8 @@ import { TeamsPanel } from './TeamsPanel';
 import { LabelsPanel } from './LabelsPanel';
 import { TokensPanel } from './TokensPanel';
 import { NotesPanel } from './NotesPanel';
+import { ConnectionsPanel } from './ConnectionsPanel';
+import { AccessGrid } from './AccessGrid';
 import { AutomationPanel } from './AutomationPanel';
 import { PaymentsPanel } from './PaymentsPanel';
 import { HostingPanel } from './HostingPanel';
@@ -37,7 +39,7 @@ import { PdfDesignPanel } from './PdfDesignPanel';
 type SectionId =
   | 'profile' | 'appearance'
   | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting'
-  | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'automation'
+  | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'connections' | 'automation'
   | 'labels' | 'tokens' | 'notes';
 
 interface Item { id: SectionId; label: string; icon: LucideIcon; hint?: string }
@@ -66,6 +68,7 @@ const ACCOUNT: Item[] = [
   { id: 'teams', label: 'Teams', icon: Users, hint: 'Group people for assignment' },
   { id: 'payments', label: 'Payments', icon: CreditCard, hint: 'PayFast and online payment links' },
   { id: 'hosting', label: 'Hosting', icon: Server, hint: 'Create cPanel accounts when hosting invoices are paid' },
+  { id: 'connections', label: 'Connections', icon: Server, hint: 'Where each business banks, hosts and sends from' },
   { id: 'automation', label: 'Automation', icon: Zap, hint: 'Scheduled jobs and when they last ran' },
   { id: 'labels', label: 'Labels', icon: Tag, hint: 'Card labels shared across boards' },
   { id: 'tokens', label: 'API tokens', icon: KeyRound, hint: 'For scripts and integrations' },
@@ -78,7 +81,12 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
     queryKey: ['businesses'],
     queryFn: () => apiGet<{ businesses: Business[] }>('/businesses'),
   });
-  const focused = businessId === 'all' ? undefined : data?.businesses.find((b) => b.id === businessId);
+  // The console configures ANY business, not only the globally-focused one. The
+  // old rule hid the whole per-business group in "All businesses" view behind a
+  // "Focus a business" hint, forcing a sidebar round-trip per business.
+  const [settingsBiz, setSettingsBiz] = useState<number | null>(businessId === 'all' ? null : businessId);
+  const bizList = data?.businesses ?? [];
+  const focused = bizList.find((b) => b.id === (settingsBiz ?? bizList[0]?.id));
   // A deep link (?s=biz:brand) opens straight onto its section, so other screens
   // can point at "the one place business settings live" instead of re-hosting them.
   const [section, setSection] = useState<SectionId>(() => {
@@ -103,10 +111,17 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
         <div className="mb-5">
           <h1 className="font-display text-2xl font-bold text-slate-100">Settings</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            {focused
-              ? <>Your preferences, {focused.name}'s identity, and the account you share.</>
-              : <>Your preferences and the account you share. Focus a business to edit its brand and invoicing.</>}
+            Your preferences, each business's identity, and the workspace you share.
           </p>
+          {bizList.length > 1 && (
+            <label className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+              Business to configure
+              <select value={focused?.id ?? ''} onChange={(e) => setSettingsBiz(Number(e.target.value))}
+                className="rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-xs text-slate-100 outline-none focus:border-[var(--accent)]">
+                {bizList.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </label>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
@@ -165,10 +180,11 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     case 'appearance': return <AppearancePanel />;
     case 'account': return <AccountPanel />;
     case 'account-brand': return <BrandingPanel />;
-    case 'people': return <PeoplePanel />;
+    case 'people': return <><PeoplePanel /><AccessGrid /></>;
     case 'teams': return <TeamsPanel />;
     case 'payments': return <PaymentsPanel />;
     case 'hosting': return <HostingPanel />;
+    case 'connections': return <ConnectionsPanel />;
     case 'automation': return <AutomationPanel />;
     case 'labels': return <LabelsPanel />;
     case 'tokens': return <TokensPanel />;

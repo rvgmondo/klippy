@@ -7,6 +7,7 @@ import type { Business } from '../lib/types';
 import { fontsFor, loadFont } from '../lib/fonts';
 import { useCurrencyOptions } from '../lib/useCurrency';
 import { useAuth } from '../lib/auth';
+import { fieldClass } from './ui';
 
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
 
@@ -137,7 +138,7 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     onSuccess: () => { setHasLogo(false); setLogoBust(Date.now()); qc.invalidateQueries({ queryKey: ['businesses'] }); },
   });
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]';
+  const field = fieldClass;
   const label = 'mb-1 block text-xs font-medium text-slate-400';
 
   return (

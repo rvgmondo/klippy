@@ -3,6 +3,7 @@ import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Copy, Check } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
+import { fieldInlineClass } from './ui';
 
 interface Token { id: number; name: string; lastUsedAt: string | null; createdAt: string }
 
@@ -21,7 +22,7 @@ export function TokensPanel() {
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/tokens/${id}`), onSuccess: invalidate });
 
-  const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldInlineClass;
 
   return (
     <div className="space-y-5">

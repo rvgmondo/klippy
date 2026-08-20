@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Upload, Trash2 } from 'lucide-react';
 import { apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { fieldClass } from './ui';
 
 export function BrandingPanel() {
   const { account, user, updateAccount, refresh } = useAuth();
@@ -15,7 +16,7 @@ export function BrandingPanel() {
   const [v, setV] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 disabled:opacity-50';
+  const field = fieldClass;
 
   async function saveName() {
     setBusy(true);

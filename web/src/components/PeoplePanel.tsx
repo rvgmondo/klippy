@@ -6,6 +6,7 @@ import { apiGet, apiPost, apiPatch } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { TeamUser } from '../lib/types';
 import { Menu } from './Menu';
+import { fieldClass } from './ui';
 
 export function PeoplePanel() {
   const qc = useQueryClient();
@@ -42,7 +43,7 @@ export function PeoplePanel() {
   });
   const patch = useMutation({ mutationFn: (v: { id: number; body: Record<string, unknown> }) => apiPatch(`/users/${v.id}`, v.body), onSuccess: invalidate });
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldClass;
 
   return (
     <div>

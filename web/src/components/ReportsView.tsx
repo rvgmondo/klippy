@@ -4,6 +4,7 @@ import { apiGet } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { ErrorNote } from './ErrorNote';
 import { money } from '../lib/money';
+import { fieldInlineClass } from './ui';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
@@ -52,7 +53,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
     retry: false,
   });
 
-  const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-1.5 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldInlineClass;
   const cur = data?.currency ?? 'ZAR';
 
   return (

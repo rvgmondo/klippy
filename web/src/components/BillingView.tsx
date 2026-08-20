@@ -6,10 +6,12 @@ import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
+import { EmptyState } from './ui';
 import { Modal } from './Modal';
 import { PrintView } from './InvoicePrintView';
 import { PaymentsModal } from './PaymentsModal';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { fieldClass } from './ui';
 import {
   money, STATUS_COLOR, type TreeFolder, type DocType, type Status, type DocSummary,
   type Line, type DiscountType, type FullDoc,
@@ -111,7 +113,15 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
             </thead>
             <tbody>
               {docs.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500">No {tab}s yet.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-4">
+                  <EmptyState
+                    title={tab === 'invoice' ? 'No invoices yet' : 'No quotes yet'}
+                    body={tab === 'invoice'
+                      ? 'Raise your first invoice, or pull one straight from tracked time.'
+                      : 'A quote a client accepts becomes an invoice in one click.'}
+                    actionLabel={tab === 'invoice' ? 'New invoice' : 'New quote'}
+                    onAction={() => setEditing('new')} />
+                </td></tr>
               )}
               {docs.map((d) => (
                 <tr key={d.id} className="group border-t border-slate-800">
@@ -306,7 +316,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not save.'),
   });
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
 
   /**
    * Has anything been typed that would be lost?

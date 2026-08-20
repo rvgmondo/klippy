@@ -21,6 +21,7 @@ import { TimerChip } from '../components/TimerChip';
 import { SettingsView } from '../components/SettingsView';
 import { MobileTabBar } from '../components/MobileTabBar';
 import { CommandPalette } from '../components/CommandPalette';
+import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
 import type { BusinessSelection } from '../components/BusinessSwitcher';
 
@@ -76,7 +77,7 @@ function writeUrlState(st: UrlState, replace: boolean): void {
 }
 
 export function Workspace() {
-  const { user, account, logout } = useAuth();
+  const { user, logout } = useAuth();
   const initial = readUrlState();
   const [boardId, setBoardId] = useState<number | null>(initial.boardId);
   const [view, setView] = useState<View>(initial.view);
@@ -188,9 +189,13 @@ export function Workspace() {
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
               <Timer size={14} /> <span className="hidden sm:inline">Focus</span>
             </button>
-            <div className="hidden text-right lg:block">
-              <div className="text-xs font-medium text-slate-200">{user?.name}</div>
-              <div className="text-[11px] text-slate-500">{account?.name}</div>
+            <div className="hidden items-center gap-2 lg:flex">
+              <div className="text-right">
+                <div className="text-xs font-medium text-slate-200">{user?.name}</div>
+              </div>
+              {/* The workspace switcher was fully built and imported nowhere. A person
+                  in two workspaces had no way to move between them. */}
+              <WorkspaceSwitcher />
             </div>
             <button onClick={() => setView('settings')} title="Settings"
               className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-slate-800 hover:text-slate-200 ${

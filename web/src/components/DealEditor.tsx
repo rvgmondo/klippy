@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '../lib/api';
 import { Modal } from './Modal';
 import type { Deal, Contact, Activity } from './pipelineShared';
+import { fieldClass } from './ui';
 
 export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; businessId?: number; onClose: () => void; onSaved: () => void }) {
   const isNew = !deal;
@@ -67,7 +68,7 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not save.'),
   });
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
 
   return (
     <Modal onClose={onClose} variant="panel"

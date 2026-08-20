@@ -5,6 +5,7 @@ import { apiGet, apiPost, apiDelete } from '../lib/api';
 import { Modal } from './Modal';
 import { promptDialog } from './ConfirmDialog';
 import { money, type DocSummary } from './billingShared';
+import { fieldInlineClass } from './ui';
 
 interface Payment { id: number; amount: string; paidOn: string; method: string | null; note: string | null }
 interface Credit { id: number; number: string; total: string; issueDate: string; notes: string | null }
@@ -42,7 +43,7 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
     mutationFn: (reason: string) => apiPost(`/documents/${doc.id}/credit-note`, { reason: reason || undefined }),
     onSuccess: invalidate,
   });
-  const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldInlineClass;
 
   return (
     <Modal onClose={onClose} size="sm" labelledBy="payments-title">

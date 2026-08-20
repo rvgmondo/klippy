@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import type { Board, BoardFull, Folder, Priority } from '../lib/types';
+import { fieldClass } from './ui';
 
 /**
  * Create a card from the calendar: pick a board, we drop it in that board's
@@ -54,7 +55,7 @@ export function QuickAddTask({ dueDate, onClose }: { dueDate: string; onClose: (
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not create the card.'),
   });
 
-  const field = 'w-full rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500';
+  const field = fieldClass;
   const noBoards = boards.isFetched && (boards.data?.length ?? 0) === 0;
 
   return (

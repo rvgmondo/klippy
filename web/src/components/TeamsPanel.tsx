@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, X } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { fieldInlineClass } from './ui';
 
 interface TeamMember { userId: number; name: string | null; email: string | null }
 interface Team { id: number; name: string; color: string; members: TeamMember[] }
@@ -38,7 +39,7 @@ export function TeamsPanel() {
     onSuccess: invalidate,
   });
 
-  const field = 'rounded-lg bg-slate-900/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500';
+  const field = fieldInlineClass;
 
   if (!isAdmin) {
     return <p className="text-sm text-slate-400">Only workspace admins can manage teams.</p>;

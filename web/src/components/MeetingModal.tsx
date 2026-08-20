@@ -6,6 +6,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
+import { fieldClass } from './ui';
 
 export interface CalendarEvent {
   id: number; title: string; kind: 'meeting' | 'call' | 'deadline' | 'other';
@@ -99,7 +100,7 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
     onSuccess: done,
   });
 
-  const field = 'w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]';
+  const field = fieldClass;
   const label = 'mb-1 block text-[11px] text-slate-400';
 
   return (

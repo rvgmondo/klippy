@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Printer, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { money } from '../lib/money';
+import { fieldCompactClass } from './ui';
 
 interface Entry {
   date: string; kind: 'invoice' | 'credit_note' | 'payment' | 'refund';
@@ -45,7 +46,7 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
 
   const cur = data?.currency ?? 'ZAR';
   const others = data?.currencies ?? [];
-  const field = 'rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 outline-none';
+  const field = fieldCompactClass;
 
   return (
     <Modal onClose={onClose} variant="page">
