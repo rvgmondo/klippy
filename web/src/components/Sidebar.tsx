@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import { promptDialog} from './ConfirmDialog';
+import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import {} from '@dnd-kit/utilities';
 import {
   ChevronRight, ChevronDown, FolderPlus,
-  Home, Target, Users, CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, Wallet, AlertTriangle, type LucideIcon,
+  Home, Briefcase, Target, Wallet, Settings, Users,
+  CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle,
+  type LucideIcon,
 } from 'lucide-react';
-import { apiGet, apiPost} from '../lib/api';
+import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
 import { NewClientModal } from './NewClientModal';
 import { useAuth } from '../lib/auth';
-import {} from './Menu';
 import { BusinessSwitcher, type BusinessSelection } from './BusinessSwitcher';
 import type { Business, Folder as TFolder } from '../lib/types';
 
@@ -24,39 +24,52 @@ interface Props {
 }
 
 /**
- * Navigation is grouped by the four primitives every business runs on: bring work
- * in, do the work, handle the money, run the machine. A flat list of ten screens
- * never told you which part of the business you were standing in.
+ * THE SPINE. One partition of the product, in the founder's plain voice, used
+ * everywhere: Home, Work, Sales, Money, Admin.
  *
- * Which modules appear is decided per business (see Settings > Modules), so a
- * copywriter is not made to look at stock levels. Home sits above the groups
- * because it spans all four.
+ * The app used to offer four competing maps of the same business at once: four
+ * "primitives" in this sidebar, three "engines" on Home, two "pillars" in the
+ * folder tree, three scopes in Settings. Each was defensible alone; together they
+ * meant the user was re-orienting on every screen. These five words are now the
+ * only top-level grouping, rendered as an always-visible rail so nothing hides
+ * behind collapsed disclosure triangles (which used to bury 9 of 11 modules).
+ *
+ * The active area owns the second column. The client/board tree lives only inside
+ * Work, so the module list and the folder tree stop fighting over one column.
  */
+export const AREAS: {
+  key: string; label: string; icon: LucideIcon; blurb: string;
+  defaultView: string; views: string[]; modules: string[];
+}[] = [
+  { key: 'home', label: 'Home', icon: Home, blurb: 'The one overview', defaultView: 'home', views: ['home'], modules: [] },
+  {
+    key: 'work', label: 'Work', icon: Briefcase, blurb: 'Do the work',
+    defaultView: 'today', views: ['today', 'board', 'calendar', 'reports', 'files'],
+    modules: ['today', 'calendar', 'reports', 'files'],
+  },
+  {
+    key: 'sales', label: 'Sales', icon: Target, blurb: 'Bring work in',
+    defaultView: 'pipeline', views: ['pipeline', 'offerings', 'contacts'],
+    modules: ['pipeline', 'offerings'],
+  },
+  {
+    key: 'money', label: 'Money', icon: Wallet, blurb: 'Handle the money',
+    defaultView: 'billing', views: ['billing', 'collections', 'expenses'],
+    modules: ['billing', 'collections', 'expenses'],
+  },
+  { key: 'admin', label: 'Admin', icon: Settings, blurb: 'Run the machine', defaultView: 'settings', views: ['settings'], modules: [] },
+];
+
+export function areaOf(view: string) {
+  return AREAS.find((a) => a.views.includes(view)) ?? AREAS[0]!;
+}
+
 const MODULE_ICON: Record<string, LucideIcon> = {
   pipeline: Target, offerings: Package,
   today: CalendarCheck, calendar: CalendarDays, reports: BarChart3,
   billing: Receipt, collections: AlertTriangle, expenses: Wallet,
-  files: HardDrive,
+  files: HardDrive, contacts: Users,
 };
-
-const PRIMITIVE_ORDER = ['acquisition', 'fulfillment', 'finance', 'admin'] as const;
-const PRIMITIVE_LABEL: Record<string, string> = {
-  acquisition: 'Acquisition', fulfillment: 'Fulfillment', finance: 'Finance', admin: 'Admin',
-};
-
-/**
- * Groups collapse, and stay collapsed.
- *
- * Grouping the modules by primitive made the sidebar readable but cost real estate:
- * the nav took two thirds of the height and squeezed the boards tree, which is the
- * part you are in all day, into a sliver. Collapsed groups keep the structure
- * visible while handing the space back to the work. The group holding wherever you
- * are opens itself, so the current screen is never hidden.
- */
-const NAV_OPEN_KEY = 'klippy.navGroups';
-function loadOpenGroups(): Record<string, boolean> {
-  try { return JSON.parse(localStorage.getItem(NAV_OPEN_KEY) ?? '{}'); } catch { return {}; }
-}
 
 /** Which businesses are expanded in the tree, by id. */
 const BIZ_OPEN_KEY = 'klippy.openBusinesses';
@@ -89,13 +102,13 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   const bizData = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
   const businesses = bizData.data?.businesses ?? [];
 
-  // Which businesses to show: all of them, or just the selected one.
+  // Which businesses to show in the tree: all of them, or just the selected one.
   const shown = businessId === 'all' ? businesses : businesses.filter((b) => b.id === businessId);
   const showHeaders = businessId === 'all' && businesses.length > 1;
 
-  // The module catalogue tells us what exists and where it belongs; the business
-  // tells us what it uses. Viewing all businesses shows the union, since hiding a
-  // screen that one of them needs would be worse than showing one it does not.
+  // The module catalogue tells us what exists; the business tells us what it uses.
+  // Viewing all businesses shows the union, since hiding a screen one of them needs
+  // would be worse than showing one it does not.
   const catalogue = useQuery({
     queryKey: ['modules'],
     queryFn: () => apiGet<{
@@ -113,86 +126,96 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   // Until the catalogue loads, or for a business with nothing resolved yet, fall
   // back to showing everything rather than an empty sidebar.
   const showAll = defs.length === 0 || enabled.size === 0;
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(loadOpenGroups);
-  const navGroups = PRIMITIVE_ORDER.map((primitive) => ({
-    primitive,
-    items: defs
-      .filter((m) => m.primitive === primitive && (showAll || enabled.has(m.key)))
-      .map((m) => ({ key: m.key, label: m.label, icon: MODULE_ICON[m.key] ?? Home, hint: m.hint })),
-  })).filter((g) => g.items.length > 0);
+  const hintOf = (key: string) => defs.find((m) => m.key === key)?.hint;
+
+  const area = areaOf(view);
+  // The active area's second-level items, filtered to this business's modules.
+  // Contacts is not a module (the people behind deals and clients are always
+  // there), so it is appended to Sales rather than gated.
+  const items = area.modules
+    .filter((k) => showAll || enabled.has(k))
+    .map((k) => ({
+      key: k,
+      label: defs.find((m) => m.key === k)?.label ?? k[0]!.toUpperCase() + k.slice(1),
+      icon: MODULE_ICON[k] ?? Home,
+      hint: hintOf(k),
+    }));
+  if (area.key === 'sales') {
+    items.push({ key: 'contacts', label: 'Contacts', icon: Users, hint: 'The people behind your deals and clients.' });
+  }
 
   return (
-    <aside className="flex h-full w-full shrink-0 flex-col border-r border-slate-800 bg-slate-950/40">
-      <div className="flex h-14 items-center gap-2 border-b border-slate-800 px-4">
-        {account?.hasLogo ? (
-          <img src="/api/v1/account/logo" alt="" className="h-7 w-7 shrink-0 rounded-lg object-contain" />
-        ) : (
-          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[var(--accent)] text-sm font-bold text-[var(--accent-ink)]">
-            {(account?.brandName || 'Klippy')[0]!.toUpperCase()}
-          </div>
-        )}
-        <span className="truncate font-semibold text-slate-100">{account?.brandName || 'Klippy'}</span>
-      </div>
-
-      {/* Business switcher */}
-      <div className="border-b border-slate-800 px-2 py-2">
-        <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
-      </div>
-
-      {/* Primary navigation, grouped by the four primitives and collapsed by
-          default so the boards below get the room. */}
-      <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2">
-        <NavButton nav={{ key: 'home', label: 'Home', icon: Home }} view={view} onNavigate={onNavigate} />
-        <NavButton nav={{ key: 'contacts', label: 'Contacts', icon: Users }} view={view} onNavigate={onNavigate} />
-        {navGroups.map((g) => {
-          // The group you are currently in is always open, so the active screen is
-          // never hidden behind a collapsed header.
-          const hasActive = g.items.some((i) => i.key === view);
-          const open = hasActive || (openGroups[g.primitive] ?? false);
-          return (
-            <div key={g.primitive}>
-              <button
-                onClick={() => setOpenGroups((o) => {
-                  const next = { ...o, [g.primitive]: !open };
-                  try { localStorage.setItem(NAV_OPEN_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-                  return next;
-                })}
-                className="flex w-full items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 hover:bg-slate-800/40 hover:text-slate-300">
-                {open ? <ChevronDown size={11} className="shrink-0" /> : <ChevronRight size={11} className="shrink-0" />}
-                <span className="truncate"
-                  title={catalogue.data?.primitives.find((p) => p.key === g.primitive)?.blurb}>
-                  {PRIMITIVE_LABEL[g.primitive]}
-                </span>
-                {!open && (
-                  <span className="ml-auto shrink-0 text-[10px] font-normal normal-case text-slate-600">
-                    {g.items.length}
-                  </span>
-                )}
-              </button>
-              {open && (
-                <div className="space-y-0.5 pb-0.5">
-                  {g.items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} compact />)}
-                </div>
-              )}
+    <aside className="flex h-full w-full shrink-0 border-r border-slate-800 bg-slate-950/40">
+      {/* The area rail: five words, always visible. An app switcher done right,
+          five areas rather than forty apps. */}
+      <div className="flex w-16 shrink-0 flex-col gap-1 border-r border-slate-800 bg-slate-950/70 px-1.5 pb-3 pt-2">
+        <div className="mb-1 grid place-items-center py-1">
+          {account?.hasLogo ? (
+            <img src="/api/v1/account/logo" alt="" className="h-8 w-8 rounded-lg object-contain" />
+          ) : (
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-[var(--accent)] text-sm font-bold text-[var(--accent-ink)]">
+              {(account?.brandName || 'Klippy')[0]!.toUpperCase()}
             </div>
+          )}
+        </div>
+        {AREAS.map((a) => {
+          const Icon = a.icon;
+          const active = a.key === area.key;
+          return (
+            <button key={a.key} onClick={() => onNavigate(active ? view : a.defaultView)} title={a.blurb}
+              className={`flex flex-col items-center gap-1 rounded-lg py-2 text-[10px] font-medium transition ${
+                active
+                  ? 'bg-[var(--accent-quiet)] text-violet-300'
+                  : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>
+              <Icon size={18} className="shrink-0" />
+              {a.label}
+            </button>
           );
         })}
       </div>
 
-      {/* The boards tree: the part you are in all day, so it gets the height. */}
-      <div className="shrink-0 px-3.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-        {account?.folderLabelPlural || 'Clients'} and boards
-      </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-        {shown.length === 0 && (
-          <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
+      {/* The active area's own column. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-800 px-3">
+          <span className="truncate font-semibold text-slate-100">{account?.brandName || 'Klippy'}</span>
+        </div>
+
+        {/* The business you are in: a persistent context that follows you between
+            areas, so Work to Money is a glance, not a re-orientation. */}
+        <div className="border-b border-slate-800 px-2 py-2">
+          <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
+        </div>
+
+        {items.length > 0 && (
+          <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2">
+            {items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} />)}
+          </div>
         )}
-        {shown.map((biz, i) => (
-          <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders} defaultOpen={i === 0}
-            folderLabelSingular={account?.folderLabelSingular} folderLabelPlural={account?.folderLabelPlural}
-            selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
-        ))}
-      </nav>
+
+        {area.key === 'work' ? (
+          <>
+            {/* The boards tree lives only inside Work, so the module list and the
+                folder tree stop fighting over one column. */}
+            <div className="shrink-0 px-3.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+              {account?.folderLabelPlural || 'Clients'} and boards
+            </div>
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+              {shown.length === 0 && (
+                <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
+              )}
+              {shown.map((biz, i) => (
+                <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders} defaultOpen={i === 0}
+                  folderLabelSingular={account?.folderLabelSingular} folderLabelPlural={account?.folderLabelPlural}
+                  selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
+              ))}
+            </nav>
+          </>
+        ) : (
+          <div className="flex-1 px-4 py-4 text-[11px] leading-relaxed text-slate-600">
+            {area.blurb}.
+          </div>
+        )}
+      </div>
     </aside>
   );
 }

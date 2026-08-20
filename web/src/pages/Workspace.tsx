@@ -121,7 +121,7 @@ export function Workspace() {
 
       {/* Sidebar: fixed drawer under lg, static column at lg+ */}
       <div
-        className={`fixed inset-y-0 left-0 z-40 w-64 transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 w-[19rem] transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
           navOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

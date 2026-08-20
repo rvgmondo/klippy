@@ -130,17 +130,17 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
         {/* Pillar bento */}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <PillarCard
-            icon={<Target size={15} />} name="Acquisition" accent
+            icon={<Target size={15} />} name="Sales" accent
             status="Bring buyers in" hero={money(ds?.pipelineValue ?? 0)} heroLabel="Pipeline value"
             onOpen={onNavigate ? () => onNavigate('pipeline') : undefined}
             subs={[['Open deals', String(ds?.openCount ?? 0)], ['Won / mo', String(ds?.wonThisMonth ?? 0)], ['Won value', money(ds?.wonValueThisMonth ?? 0)]]} />
           <PillarCard
-            icon={<Truck size={15} />} name="Delivery"
+            icon={<Truck size={15} />} name="Client work"
             status={`${d?.delivery.open ?? 0} open`} hero={String(d?.delivery.open ?? 0)} heroLabel="Open work"
             onOpen={onNavigate ? () => onNavigate('reports') : undefined}
             subs={[['Due today', String(d?.delivery.dueToday ?? 0)], ['Overdue', String(d?.delivery.overdue ?? 0)], ['This week', fmtHours(d?.delivery.weekSeconds ?? 0)]]} />
           <PillarCard
-            icon={<Settings2 size={15} />} name="Operations"
+            icon={<Settings2 size={15} />} name="Internal work"
             status={`${opsFolders.length} area${opsFolders.length === 1 ? '' : 's'}`} hero={String(d?.operations.open ?? 0)} heroLabel="Open work"
             subs={[['Due today', String(d?.operations.dueToday ?? 0)], ['Overdue', String(d?.operations.overdue ?? 0)], ['This week', fmtHours(d?.operations.weekSeconds ?? 0)]]} />
         </div>
