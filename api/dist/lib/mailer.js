@@ -23,15 +23,20 @@ function getTransport() {
     });
     return transport;
 }
-export async function sendMail(to, subject, text) {
+export async function sendMail(to, subject, text, html, attachments) {
     const t = getTransport();
     const from = process.env.SMTP_FROM ?? 'Klippy <no-reply@localhost>';
     if (!t) {
         // eslint-disable-next-line no-console
-        console.log(`[mailer:not-configured] would send to ${to}: ${subject}\n${text}`);
+        console.log(`[mailer:not-configured] would send to ${to}: ${subject}`
+            + `${attachments?.length ? ` (attachments: ${attachments.map((a) => a.filename).join(', ')})` : ''}\n${text}`);
         return;
     }
-    await t.sendMail({ from, to, subject, text });
+    await t.sendMail({
+        from, to, subject, text,
+        ...(html ? { html } : {}),
+        ...(attachments?.length ? { attachments } : {}),
+    });
 }
 // ---- Per-business sending ---------------------------------------------------
 /** Custom SMTP transports, cached by a signature so a settings change rebuilds. */

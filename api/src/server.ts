@@ -30,6 +30,7 @@ import { reportRoutes } from './routes/reports.js';
 import { trashRoutes } from './routes/trash.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { quoteRoutes } from './routes/quotes.js';
+import { calendarFeedRoutes } from './routes/calendarFeed.js';
 import { pushRoutes } from './routes/push.js';
 import { documentRoutes } from './routes/documents.js';
 import { dealRoutes } from './routes/deals.js';
@@ -163,6 +164,7 @@ export function buildServer() {
   app.register(trashRoutes);
   app.register(notificationRoutes);
   app.register(quoteRoutes);
+  app.register(calendarFeedRoutes);
   app.register(pushRoutes);
   app.register(documentRoutes);
   app.register(dealRoutes);

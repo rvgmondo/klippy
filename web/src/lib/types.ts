@@ -132,6 +132,7 @@ export interface Folder {
   notes: string | null;
   imagePath?: string | null;
   hourlyRate?: string | null;
+  monthlyHoursBudget?: string | null;
   /** Where this client's invoices and payment reminders are sent. */
   billingEmail?: string | null;
   /** Billing details the client maintains themselves in their portal. */

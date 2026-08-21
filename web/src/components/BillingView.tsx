@@ -254,12 +254,16 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TreeFolder[] }>('/folders') });
   const clients = (folders.data?.folders ?? []).filter((f) => f.parentId === null);
 
+  // Remembered when lines were pulled from tracked time, and sent with the save
+  // so the server can stamp those entries as billed by this invoice.
+  const [pulledTime, setPulledTime] = useState<{ folderId: number; from: string; to: string } | null>(null);
   const pull = useMutation({
     mutationFn: () => apiGet<{ clientName: string; lines: Line[]; totalHours: number }>(
       `/documents/from-time?folderId=${timeFolder}&from=${timeFrom}&to=${timeTo}`),
     onSuccess: (r) => {
       if (r.lines.length === 0) { setError(`No tracked time for that client between ${timeFrom} and ${timeTo}.`); return; }
       setError(null);
+      if (typeof timeFolder === 'number') setPulledTime({ folderId: timeFolder, from: timeFrom, to: timeTo });
       if (!clientName.trim()) setClientName(r.clientName);
       // Merge onto any real lines already entered.
       setLines((prev) => {
@@ -321,6 +325,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
         issueDate, dueDate: dueDate || null,
         taxRate, discountType, discountValue: Number(discountValue) || 0, notes: notes.trim() || null,
         ...(isNew && businessId ? { businessId } : {}),
+        ...(isNew && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
           description: l.description.trim(),
           detail: l.detail?.trim() || null,

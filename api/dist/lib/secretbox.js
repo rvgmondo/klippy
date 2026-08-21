@@ -104,6 +104,19 @@ export function verifyQuoteToken(docId, token) {
         return false;
     return timingSafeEqual(Buffer.from(expect), Buffer.from(token));
 }
+/** Signed personal calendar-feed token: HMAC over account and user. */
+export function signCalToken(accountId, userId) {
+    const key = process.env.PAYMENTS_SECRET;
+    if (!key)
+        return null;
+    return createHmac('sha256', key).update(`cal:${accountId}:${userId}`).digest('hex').slice(0, 32);
+}
+export function verifyCalToken(accountId, userId, token) {
+    const expect = signCalToken(accountId, userId);
+    if (!expect || !token || token.length !== expect.length)
+        return false;
+    return timingSafeEqual(Buffer.from(expect), Buffer.from(token));
+}
 export function signLogoToken(kind, id) {
     const raw = process.env.PAYMENTS_SECRET;
     if (!raw || raw.length < 16)

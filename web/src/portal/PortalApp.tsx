@@ -31,7 +31,7 @@ const money = (currency: string, v: string | number) => fmt(v, currency);
  */
 export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () => void }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'documents' | 'statement' | 'hosting' | 'details'>('documents');
+  const [tab, setTab] = useState<'documents' | 'statement' | 'report' | 'hosting' | 'details'>('documents');
   const accent = { background: 'var(--portal-accent, #0f172a)' };
 
   const { data } = useQuery({
@@ -118,7 +118,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         )}
 
         <nav className="mb-4 flex gap-1 border-b border-slate-200">
-          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['hosting', 'Hosting'], ['details', 'Your details']] as const)
+          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['report', 'Work report'], ['hosting', 'Hosting'], ['details', 'Your details']] as const)
             .map(([id, labelText]) => (
               <button key={id} onClick={() => setTab(id)}
                 className={`-mb-px border-b-2 px-3 py-2 text-sm ${
@@ -134,6 +134,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
             readOnly={!!me.preview} />
         )}
         {tab === 'statement' && <Statement />}
+        {tab === 'report' && <WorkReport />}
         {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)} />}
         {tab === 'details' && (me.preview
           ? <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
@@ -590,6 +591,65 @@ function Details({ me, accent }: { me: PortalMe; accent: React.CSSProperties }) 
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * What the business actually did this month: cards finished and hours worked,
+ * straight from the boards and timers. The standing answer to "what am I
+ * paying for?".
+ */
+function WorkReport() {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const { data, isLoading } = useQuery({
+    queryKey: ['portal-report', month],
+    queryFn: () => apiGet<{
+      month: string;
+      boards: { name: string; hours: number }[];
+      completed: { title: string; on: string | null; board: string | null }[];
+      totalHours: number;
+    }>(`/portal/report?month=${month}`),
+  });
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-900">Work this month</h2>
+        <input type="month" value={month} onChange={(e) => setMonth(e.target.value)}
+          className="rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700" />
+      </div>
+      {isLoading && <p className="py-4 text-center text-xs text-slate-400">Loading.</p>}
+      {data && data.boards.length === 0 && data.completed.length === 0 && (
+        <p className="py-6 text-center text-sm text-slate-500">No work recorded for {data.month}.</p>
+      )}
+      {data && data.totalHours > 0 && (
+        <div className="mb-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Hours worked</div>
+          <div className="text-2xl font-semibold num">{data.totalHours}h</div>
+          <div className="mt-2 space-y-1">
+            {data.boards.map((b) => (
+              <div key={b.name} className="flex items-baseline justify-between text-sm">
+                <span className="text-slate-700">{b.name}</span>
+                <span className="num text-slate-500">{b.hours}h</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {data && data.completed.length > 0 && (
+        <div>
+          <div className="mb-1 text-xs uppercase tracking-wide text-slate-500">Finished</div>
+          <ul className="space-y-1">
+            {data.completed.map((cItem, i) => (
+              <li key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate text-slate-700">{cItem.title}</span>
+                <span className="num shrink-0 text-xs text-slate-400">{cItem.on ?? ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

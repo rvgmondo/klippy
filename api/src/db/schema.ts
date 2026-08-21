@@ -333,6 +333,10 @@ export const folders = mysqlTable('folders', {
   // print, so letting them fix it is worth more than guarding it.
   billingVatNumber: varchar('billing_vat_number', { length: 60 }),
   billingAddress: text('billing_address'),
+  // A retainer's monthly allowance in hours. Purely informational arithmetic:
+  // the reports compare tracked hours against it so "we are over on this client"
+  // is a fact on a screen instead of a month-end surprise.
+  monthlyHoursBudget: decimal('monthly_hours_budget', { precision: 6, scale: 2 }),
   // Which business pillar this top-level folder belongs to.
   pillar: mysqlEnum('pillar', ['delivery', 'operations']).default('delivery').notNull(),
   isArchived: boolean('is_archived').default(false).notNull(),
@@ -436,6 +440,11 @@ export const timeEntries = mysqlTable('time_entries', {
   durationSeconds: int('duration_seconds', { unsigned: true }),
   note: varchar('note', { length: 255 }),
   isManual: boolean('is_manual').default(false).notNull(),
+  // The invoice this time went out on. Stamped when an invoice is raised from
+  // tracked time, which is what lets "unbilled work" be a query instead of a
+  // guess. ON DELETE SET NULL: voiding the invoice frees the hours again.
+  billedDocumentId: int('billed_document_id', { unsigned: true })
+    .references(() => documents.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
 }, (t) => [
   index('idx_time_account_task').on(t.accountId, t.taskId),

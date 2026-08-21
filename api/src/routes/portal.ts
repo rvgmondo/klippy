@@ -1,12 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { money } from '../lib/money.js';
 import { z } from 'zod';
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY, formatMoney, payfastSupports } from '../lib/currency.js';
 import { db } from '../db/client.js';
 import {
   documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers,
-  memberships, users, events, offerings,
+  memberships, users, events, offerings, boards, tasks, timeEntries,
 } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
@@ -375,6 +375,77 @@ export async function portalRoutes(app: FastifyInstance) {
    * final here: changing your mind is a conversation, not a button, and letting a
    * quote flip back and forth would make the record worthless.
    */
+  /**
+   * What did we actually do for you this month?
+   *
+   * The client-facing answer to the invoice: cards finished and hours worked on
+   * their boards, by month. Businesses send this by hand today (or worse, do not,
+   * and field the "what am I paying for?" call instead). Read-only, from data the
+   * timers and boards already hold.
+   */
+  app.get('/api/v1/portal/report', async (req, reply) => {
+    const c = await require(req, reply);
+    if (!c) return;
+    const q = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'Bad month.' });
+    const month = q.data.month ?? new Date().toISOString().slice(0, 7);
+    const start = new Date(`${month}-01T00:00:00.000Z`);
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+
+    // The client's whole subtree, same rollup as everywhere else.
+    const allFolders = await db.select({ id: folders.id, parentId: folders.parentId })
+      .from(folders).where(eq(folders.accountId, c.user.accountId));
+    const subtree = new Set<number>([c.user.folderId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of allFolders) {
+        if (f.parentId != null && subtree.has(f.parentId) && !subtree.has(f.id)) { subtree.add(f.id); grew = true; }
+      }
+    }
+    const boardRows = await db.select({ id: boards.id, name: boards.name }).from(boards)
+      .where(and(eq(boards.accountId, c.user.accountId),
+        inArray(boards.folderId, [...subtree]), isNull(boards.deletedAt)));
+    if (!boardRows.length) return { month, boards: [], completed: [], totalHours: 0 };
+    const boardIds = boardRows.map((b) => b.id);
+    const nameOf = new Map(boardRows.map((b) => [b.id, b.name]));
+
+    const time = await db.select({
+      boardId: tasks.boardId,
+      seconds: sql<number>`COALESCE(SUM(${timeEntries.durationSeconds}),0)`,
+    }).from(timeEntries)
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .where(and(eq(timeEntries.accountId, c.user.accountId),
+        inArray(tasks.boardId, boardIds),
+        gte(timeEntries.startTime, start), lt(timeEntries.startTime, end)))
+      .groupBy(tasks.boardId);
+
+    const done = await db.select({
+      id: tasks.id, title: tasks.title, completedAt: tasks.completedAt, boardId: tasks.boardId,
+    }).from(tasks)
+      .where(and(eq(tasks.accountId, c.user.accountId),
+        inArray(tasks.boardId, boardIds), eq(tasks.isCompleted, true),
+        gte(tasks.completedAt, start), lt(tasks.completedAt, end)))
+      .orderBy(desc(tasks.completedAt))
+      .limit(100);
+
+    const hoursOf = (secs: number) => Math.round((secs / 3600) * 10) / 10;
+    const boardsOut = time
+      .map((t) => ({ name: nameOf.get(t.boardId) ?? 'Work', hours: hoursOf(Number(t.seconds)) }))
+      .filter((b) => b.hours > 0)
+      .sort((a, b) => b.hours - a.hours);
+    return {
+      month,
+      boards: boardsOut,
+      completed: done.map((d) => ({
+        title: d.title,
+        on: d.completedAt?.toISOString().slice(0, 10) ?? null,
+        board: nameOf.get(d.boardId) ?? null,
+      })),
+      totalHours: hoursOf(time.reduce((s2, t) => s2 + Number(t.seconds), 0)),
+    };
+  });
+
   app.post('/api/v1/portal/quotes/:id/decision', async (req, reply) => {
     const c = await require(req, reply);
     if (!c) return;

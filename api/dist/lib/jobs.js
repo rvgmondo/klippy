@@ -10,6 +10,7 @@ import { attemptAutoDebit } from './autoDebit.js';
 import { mrrByCurrency } from './mrr.js';
 import { runHostingSuspensions } from './hosting.js';
 import { pruneLoginTokens } from './portalAuth.js';
+import { buildAccountExport } from './export.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -23,6 +24,12 @@ import { pruneLoginTokens } from './portalAuth.js';
  */
 const todayStr = () => new Date().toISOString().slice(0, 10);
 export const JOBS = [
+    {
+        name: 'backup-email',
+        label: 'Weekly backup',
+        description: 'On Sunday mornings, emails each workspace owner a full JSON export of their workspace. A backup that exists before the day it is needed.',
+        hour: 5,
+    },
     {
         name: 'bill-subscriptions',
         label: 'Recurring billing',
@@ -461,8 +468,49 @@ export async function runInvoiceReminders() {
     return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid`;
 }
 /** dateStr + n days, as YYYY-MM-DD. */
+/**
+ * The Sunday backup: every workspace, exported to JSON and emailed to its
+ * owners. Shared cPanel hosting is exactly the environment where "the server ate
+ * the database" is a real Tuesday; after this, the worst case is a week old.
+ */
+export async function runBackupEmail() {
+    // getUTCDay: 0 is Sunday. Other days record a clean skip.
+    if (new Date().getUTCDay() !== 0)
+        return 'Not Sunday; nothing sent.';
+    const owners = await db.select({
+        accountId: memberships.accountId, email: users.email, name: users.name,
+        accountName: accounts.name,
+    }).from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .innerJoin(accounts, eq(accounts.id, memberships.accountId))
+        .where(and(eq(memberships.role, 'owner'), eq(memberships.isActive, true), eq(users.isActive, true), eq(accounts.status, 'active')));
+    const byAccount = new Map();
+    for (const o of owners) {
+        const list = byAccount.get(o.accountId) ?? [];
+        list.push(o);
+        byAccount.set(o.accountId, list);
+    }
+    let sent = 0;
+    const today = new Date().toISOString().slice(0, 10);
+    for (const [accountId, list] of byAccount) {
+        try {
+            const data = await buildAccountExport(accountId);
+            const json = JSON.stringify(data);
+            const attachment = { filename: `klippy-backup-${today}.json`, content: Buffer.from(json, 'utf-8') };
+            for (const o of list) {
+                await sendMail(o.email, `Your weekly Klippy backup (${o.accountName})`, `Hi ${o.name},\n\nAttached is this week's full export of ${o.accountName}: clients, boards, cards, time, contacts, deals, documents, payments, offerings, subscriptions and expenses.\n\nKeep a copy somewhere that is not this server. That is the whole point of it.`, undefined, [attachment]);
+                sent++;
+            }
+        }
+        catch {
+            // One workspace failing must not stop the rest.
+        }
+    }
+    return sent ? `Sent ${sent} backup email(s).` : 'No owners to send backups to.';
+}
 const RUNNERS = {
     'daily-digest': runDailyDigest,
+    'backup-email': runBackupEmail,
     'bill-subscriptions': runSubscriptionBilling,
     'hosting-suspensions': runHostingSuspensions,
     'deal-follow-ups': runDealFollowUps,

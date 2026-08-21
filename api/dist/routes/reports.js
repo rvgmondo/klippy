@@ -474,5 +474,119 @@ export async function reportRoutes(app) {
         }).sort((a, b) => b.expected - a.expected);
         return { start: today, weeks: WEEKS, currencies };
     });
+    /**
+     * Work done but never invoiced, and retainers against their monthly allowance.
+     *
+     * Unbilled: every finished time entry with no billedDocumentId, rolled up to
+     * the client and priced at the inherited hourly rate. This number only became
+     * possible when invoices raised from time started stamping the entries they
+     * covered; before that "did we ever bill those hours?" was archaeology.
+     *
+     * Retainers: clients with a monthly hours budget get this month's tracked
+     * hours next to it, so "we are over on this client" is a fact, not a feeling.
+     */
+    app.get('/api/v1/reports/unbilled', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'Bad query.' });
+        const onlyBusiness = q.data.businessId;
+        const allowed = await accessibleBusinessIds(req);
+        const canBiz = (bid) => allowed === null || bid == null || allowed.has(bid);
+        const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+        const workspaceCurrency = account?.currency || DEFAULT_CURRENCY;
+        const bizRows = await db.select({ id: businesses.id, currency: businesses.currency })
+            .from(businesses).where(tenantWhere(businesses, accountId));
+        const curOf = (bid) => (bid != null ? bizRows.find((b) => b.id === bid)?.currency : null) || workspaceCurrency;
+        const allFolders = await db.select({
+            id: folders.id, parentId: folders.parentId, name: folders.name,
+            hourlyRate: folders.hourlyRate, businessId: folders.businessId,
+            monthlyHoursBudget: folders.monthlyHoursBudget, deletedAt: folders.deletedAt,
+        }).from(folders).where(tenantWhere(folders, accountId));
+        const byId = new Map(allFolders.map((f) => [f.id, f]));
+        const rootOf = (folderId) => {
+            let cur = byId.get(folderId);
+            for (let i = 0; i < 100 && cur?.parentId != null; i++)
+                cur = byId.get(cur.parentId) ?? cur;
+            return cur;
+        };
+        const rateFor = (folderId) => {
+            let cur = byId.get(folderId);
+            for (let i = 0; i < 100 && cur; i++) {
+                if (cur.hourlyRate != null)
+                    return Number(cur.hourlyRate);
+                if (cur.parentId == null)
+                    break;
+                cur = byId.get(cur.parentId);
+            }
+            return null;
+        };
+        const monthStart = new Date();
+        monthStart.setUTCDate(1);
+        monthStart.setUTCHours(0, 0, 0, 0);
+        const entries = await db.select({
+            seconds: timeEntries.durationSeconds,
+            startTime: timeEntries.startTime,
+            billed: timeEntries.billedDocumentId,
+            folderId: boards.folderId,
+        }).from(timeEntries)
+            .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+            .innerJoin(boards, eq(boards.id, tasks.boardId))
+            .where(tenantWhere(timeEntries, accountId, isNotNull(timeEntries.durationSeconds)));
+        const perClient = new Map();
+        for (const e of entries) {
+            const root = rootOf(e.folderId);
+            if (!root || root.deletedAt)
+                continue;
+            if (!canBiz(root.businessId ?? null))
+                continue;
+            if (onlyBusiness !== undefined && root.businessId !== onlyBusiness)
+                continue;
+            let c = perClient.get(root.id);
+            if (!c) {
+                c = {
+                    name: root.name, currency: curOf(root.businessId), rate: rateFor(root.id),
+                    budget: root.monthlyHoursBudget != null ? Number(root.monthlyHoursBudget) : null,
+                    unbilledSeconds: 0, monthSeconds: 0,
+                };
+                perClient.set(root.id, c);
+            }
+            const secs = Number(e.seconds ?? 0);
+            if (e.billed == null)
+                c.unbilledSeconds += secs;
+            if (e.startTime >= monthStart)
+                c.monthSeconds += secs;
+        }
+        // Budgeted clients with no time at all this month still belong on the list.
+        for (const f of allFolders) {
+            if (f.parentId != null || f.monthlyHoursBudget == null || f.deletedAt)
+                continue;
+            if (!canBiz(f.businessId ?? null))
+                continue;
+            if (onlyBusiness !== undefined && f.businessId !== onlyBusiness)
+                continue;
+            if (!perClient.has(f.id)) {
+                perClient.set(f.id, {
+                    name: f.name, currency: curOf(f.businessId), rate: rateFor(f.id),
+                    budget: Number(f.monthlyHoursBudget), unbilledSeconds: 0, monthSeconds: 0,
+                });
+            }
+        }
+        const round2b = (n) => Math.round(n * 100) / 100;
+        const clients = [...perClient.entries()].map(([folderId, c]) => {
+            const unbilledHours = round2b(c.unbilledSeconds / 3600);
+            const monthHours = round2b(c.monthSeconds / 3600);
+            return {
+                folderId, name: c.name, currency: c.currency, rate: c.rate,
+                unbilledHours,
+                unbilledAmount: c.rate == null ? null : round2b(unbilledHours * c.rate),
+                monthHours,
+                budgetHours: c.budget,
+                overBudget: c.budget != null && monthHours > c.budget,
+            };
+        }).filter((c) => c.unbilledHours > 0 || c.budgetHours != null)
+            .sort((a, b) => (b.unbilledAmount ?? 0) - (a.unbilledAmount ?? 0) || b.unbilledHours - a.unbilledHours);
+        return { clients };
+    });
 }
 //# sourceMappingURL=reports.js.map

@@ -25,6 +25,7 @@ const updateSchema = z.object({
     notes: z.string().max(5000).nullable().optional(),
     isArchived: z.boolean().optional(),
     hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
+    monthlyHoursBudget: z.number().nonnegative().max(10000).nullable().optional(),
     billingEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
     // The client's own billing details. Editable here as well as by the client in
     // their portal, since whoever knows the right answer should be able to fix it.
@@ -116,6 +117,9 @@ export async function folderRoutes(app) {
             return;
         // MySQL DECIMAL columns are string-typed in Drizzle.
         const patch = { ...parsed.data };
+        if (parsed.data.monthlyHoursBudget !== undefined) {
+            patch.monthlyHoursBudget = parsed.data.monthlyHoursBudget === null ? null : String(parsed.data.monthlyHoursBudget);
+        }
         if (parsed.data.hourlyRate !== undefined) {
             patch.hourlyRate = parsed.data.hourlyRate === null ? null : String(parsed.data.hourlyRate);
         }

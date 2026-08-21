@@ -109,6 +109,10 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
     mutationFn: (rate: number | null) => apiPatch(`/folders/${folder.id}`, { hourlyRate: rate }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
+  const setBudget = useMutation({
+    mutationFn: (h: number | null) => apiPatch(`/folders/${folder.id}`, { monthlyHoursBudget: h }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
   const setPillar = useMutation({
     mutationFn: (pillar: 'delivery' | 'operations') => apiPatch(`/folders/${folder.id}`, { pillar }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
@@ -169,6 +173,14 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
               if (v === null) return;
               const t = v.trim();
               setRate.mutate(t === '' ? null : Number(t));
+            } }] : []),
+            /* A retainer's monthly allowance. Reports compare tracked hours to it. */
+            ...(depth === 0 ? [{ label: folder.monthlyHoursBudget != null ? `Retainer: ${Number(folder.monthlyHoursBudget)}h/month (change)` : 'Set retainer hours', onClick: async () => {
+              const cur = folder.monthlyHoursBudget != null ? String(Number(folder.monthlyHoursBudget)) : '';
+              const v = await promptDialog('Hours included per month for this client (blank to clear)', cur);
+              if (v === null) return;
+              const t = v.trim();
+              setBudget.mutate(t === '' ? null : Number(t));
             } }] : []),
             // Without a billing email a recurring invoice can only ever be a draft
             // someone has to send by hand, and nothing can be chased automatically.

@@ -71,6 +71,8 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           </div>
         </div>
 
+        <UnbilledSection businessId={businessId} />
+
         {/* For the bookkeeper: VAT for the period and one-click CSV exports. The data
             always existed; it just could not leave the app. */}
         <div className="mb-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
@@ -326,6 +328,70 @@ function Tile({ label, value, accent, warn, hint }: { label: string; value: stri
       <div className="mb-1 text-xs text-slate-400">{label}</div>
       <div className={`num text-2xl font-semibold ${warn ? 'text-red-400' : accent ? 'text-violet-300' : 'text-slate-100'}`}>{value}</div>
       {hint && <div className="mt-1 num text-[11px] text-slate-500">{hint}</div>}
+    </div>
+  );
+}
+
+interface UnbilledClient {
+  folderId: number; name: string; currency: string; rate: number | null;
+  unbilledHours: number; unbilledAmount: number | null;
+  monthHours: number; budgetHours: number | null; overBudget: boolean;
+}
+
+/**
+ * Work done but never invoiced, and retainers against their monthly allowance.
+ * Unbilled hours only became knowable once invoices raised from tracked time
+ * started stamping the entries they covered.
+ */
+function UnbilledSection({ businessId }: { businessId: BusinessSelection }) {
+  const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
+  const { data } = useQuery({
+    queryKey: ['unbilled', businessId],
+    queryFn: () => apiGet<{ clients: UnbilledClient[] }>(`/reports/unbilled${bizQ}`),
+  });
+  if (!data || data.clients.length === 0) return null;
+  return (
+    <div className="mb-5 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+      <h3 className="mb-1 text-sm font-semibold text-slate-200">Unbilled work and retainers</h3>
+      <p className="mb-3 text-xs text-slate-500">
+        Hours never put on an invoice, priced at each client's rate, and retainers against their monthly allowance.
+        Raising an invoice from tracked time marks those hours billed.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-500">
+              <th className="px-3 pb-2">Client</th>
+              <th className="px-3 pb-2 text-right">Unbilled</th>
+              <th className="px-3 pb-2 text-right">Worth</th>
+              <th className="px-3 pb-2 text-right">This month</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.clients.map((c) => (
+              <tr key={c.folderId} className="border-t border-slate-800">
+                <td className="px-3 py-2 text-slate-200">{c.name}</td>
+                <td className="px-3 py-2 text-right num text-slate-300">{c.unbilledHours}h</td>
+                <td className="px-3 py-2 text-right num text-slate-100">
+                  {c.unbilledAmount != null ? money(c.unbilledAmount, c.currency) : (
+                    <span className="text-[11px] text-slate-500" title="Set a billing rate on the client to price this">no rate</span>
+                  )}
+                </td>
+                <td className="px-3 py-2 text-right num">
+                  {c.budgetHours != null ? (
+                    <span className={c.overBudget ? 'font-medium text-red-300' : 'text-slate-300'}
+                      title={c.overBudget ? 'Over the monthly allowance' : 'Within the monthly allowance'}>
+                      {c.monthHours}h of {c.budgetHours}h
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">{c.monthHours}h</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

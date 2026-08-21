@@ -3,7 +3,7 @@ import { money } from '../lib/money.js';
 import { DEFAULT_CURRENCY, formatMoney, roundMoney } from '../lib/currency.js';
 import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
-import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, sql, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -39,6 +39,16 @@ const docType = z.enum(['quote', 'invoice']);
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
 const bodySchema = z.object({
+  /**
+   * Present when this invoice was raised from tracked time. After the document
+   * is created, every finished entry for that client in the range is stamped
+   * with the invoice id, which is what turns "unbilled work" into a query.
+   */
+  fromTime: z.object({
+    folderId: z.number().int().positive(),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  }).optional(),
   type: docType,
   businessId: z.number().int().positive().optional(),
   folderId: z.number().int().positive().nullable().optional(),
@@ -519,6 +529,34 @@ export async function documentRoutes(app: FastifyInstance) {
       }
       return newId;
     });
+
+    if (d.type === 'invoice' && d.fromTime) {
+      const { folderId: ftFolder, from: ftFrom, to: ftTo } = d.fromTime;
+      // The same subtree walk the from-time preview used, so the stamped set is
+      // exactly the set that was billed.
+      const allFolders2 = await db.select({ id: folders.id, parentId: folders.parentId })
+        .from(folders).where(tenantWhere(folders, accountId));
+      const subtree2 = new Set<number>([ftFolder]);
+      let grew2 = true;
+      while (grew2) {
+        grew2 = false;
+        for (const f of allFolders2) {
+          if (f.parentId != null && subtree2.has(f.parentId) && !subtree2.has(f.id)) { subtree2.add(f.id); grew2 = true; }
+        }
+      }
+      const boardIds = (await db.select({ id: boards.id }).from(boards)
+        .where(tenantWhere(boards, accountId, inArray(boards.folderId, [...subtree2])))).map((b) => b.id);
+      if (boardIds.length) {
+        await db.update(timeEntries).set({ billedDocumentId: docId })
+          .where(tenantWhere(timeEntries, accountId, and(
+            isNotNull(timeEntries.durationSeconds),
+            isNull(timeEntries.billedDocumentId),
+            sql`${timeEntries.taskId} IN (SELECT id FROM tasks WHERE board_id IN (${sql.join(boardIds.map((b) => sql`${b}`), sql`, `)}))`,
+            gte(timeEntries.startTime, new Date(`${ftFrom}T00:00:00.000Z`)),
+            lte(timeEntries.startTime, new Date(`${ftTo}T23:59:59.999Z`)),
+          )));
+      }
+    }
     const [created] = await db.select().from(documents)
       .where(tenantWhere(documents, accountId, eq(documents.id, docId))).limit(1);
     return reply.code(201).send({ document: created });

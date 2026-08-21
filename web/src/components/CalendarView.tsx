@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, CalendarPlus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss } from 'lucide-react';
 import { apiGet } from '../lib/api';
+import { notify } from './ConfirmDialog';
 import type { CalendarTask, Priority } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { QuickAddTask } from './QuickAddTask';
@@ -29,6 +30,17 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
   // Meetings live beside tasks: a task has a due date, a meeting has a time.
   const [meetingDate, setMeetingDate] = useState<string | null>(null);
   const [openEvent, setOpenEvent] = useState<CalendarEvent | null>(null);
+  // A URL Google/Outlook/Apple Calendar can subscribe to, so Klippy's dates
+  // appear inside the calendar the person already looks at.
+  const copyFeed = async () => {
+    try {
+      const r = await apiGet<{ url: string }>('/calendar/feed-url');
+      await navigator.clipboard.writeText(r.url);
+      notify('Feed link copied. In Google or Outlook, add a calendar "from URL" and paste it.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not build the link.', 'error');
+    }
+  };
 
   const range = useMemo(() => computeRange(view, cursor), [view, cursor]);
   const { data } = useQuery({
@@ -74,6 +86,10 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
           <button onClick={() => setMeetingDate(iso(new Date()))}
             className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90">
             <CalendarPlus size={14} /> <span className="hidden sm:inline">Meeting</span>
+          </button>
+          <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
+            className="grid h-8 w-8 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800">
+            <Rss size={13} />
           </button>
           <h2 className="ml-2 font-display text-lg font-semibold text-slate-100">{titleFor(view, cursor)}</h2>
         </div>
