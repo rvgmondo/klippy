@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronRight, ChevronDown, FolderPlus,
   Home, Briefcase, Target, Wallet, Settings, Users,
-  CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle,
+  CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle, TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -54,8 +54,8 @@ export const AREAS: {
   },
   {
     key: 'money', label: 'Money', icon: Wallet, blurb: 'Handle the money',
-    defaultView: 'billing', views: ['billing', 'collections', 'expenses'],
-    modules: ['billing', 'collections', 'expenses'],
+    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses'],
+    modules: ['billing', 'collections', 'cashflow', 'expenses'],
   },
   { key: 'admin', label: 'Admin', icon: Settings, blurb: 'Run the machine', defaultView: 'settings', views: ['settings'], modules: [] },
 ];
@@ -67,7 +67,7 @@ export function areaOf(view: string) {
 const MODULE_ICON: Record<string, LucideIcon> = {
   pipeline: Target, offerings: Package,
   today: CalendarCheck, calendar: CalendarDays, reports: BarChart3,
-  billing: Receipt, collections: AlertTriangle, expenses: Wallet,
+  billing: Receipt, collections: AlertTriangle, cashflow: TrendingUp, expenses: Wallet,
   files: HardDrive, contacts: Users,
 };
 

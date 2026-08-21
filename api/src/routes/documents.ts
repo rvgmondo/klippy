@@ -8,7 +8,7 @@ import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { balanceOf } from '../lib/balances.js';
+import { balanceOf, balancesFor } from '../lib/balances.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
@@ -20,6 +20,8 @@ import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/acces
 import { nextNumberFor } from '../lib/numbering.js';
 import { addDays } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
+import { buildStatement } from '../lib/statement.js';
+import { renderStatementPdf } from '../lib/pdf.js';
 
 const lineSchema = z.object({
   description: z.string().trim().min(1).max(500),
@@ -210,6 +212,120 @@ export async function documentRoutes(app: FastifyInstance) {
   });
 
   /**
+   * Chase everything owed, in one pass, grouped per client.
+   *
+   * Collections used to be one invoice at a time, and the manual email button sent
+   * the STANDARD invoice email (not overdue-framed) without stamping
+   * lastReminderOn, so the scheduler chased the same invoice again anyway. A client
+   * owing three invoices got three separate wrongly-framed emails. This sends ONE
+   * email per client per currency listing everything owed with a pay link each,
+   * attaches their statement, and stamps every included invoice so the automated
+   * reminders and this button stop talking over each other.
+   */
+  app.post('/api/v1/collections/chase', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const parsed = z.object({
+      ids: z.array(z.number().int().positive()).max(500).optional(),
+      businessId: z.number().int().positive().optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await db.select({
+      id: documents.id, number: documents.number, clientName: documents.clientName,
+      clientEmail: documents.clientEmail, businessId: documents.businessId,
+      folderId: documents.folderId, currency: documents.currency,
+      total: documents.total, dueDate: documents.dueDate,
+    }).from(documents)
+      .where(tenantWhere(documents, accountId,
+        eq(documents.type, 'invoice'),
+        eq(documents.status, 'sent'),
+        isNotNull(documents.dueDate),
+        lt(documents.dueDate, today),
+        parsed.data.ids?.length ? inArray(documents.id, parsed.data.ids) : undefined,
+        parsed.data.businessId ? eq(documents.businessId, parsed.data.businessId) : undefined,
+        await businessScope(req, documents.businessId),
+      ));
+    if (!rows.length) return { sent: 0, covered: 0, skipped: 0, detail: 'Nothing overdue matched.' };
+
+    const balances = await balancesFor(accountId, rows);
+    const owedRows = rows.filter((r) => (balances.get(r.id)?.outstanding ?? Number(r.total)) > 0.001);
+
+    // One email per (client, currency). Grouped by folder when the invoice knows
+    // its client record, otherwise by the email address on the invoice.
+    const groups = new Map<string, typeof owedRows>();
+    for (const r of owedRows) {
+      if (!r.clientEmail) continue;
+      const key = `${r.folderId ?? r.clientEmail}:${r.currency}`;
+      const g = groups.get(key) ?? [];
+      g.push(r);
+      groups.set(key, g);
+    }
+    const skipped = owedRows.filter((r) => !r.clientEmail).length;
+
+    let sent = 0;
+    let covered = 0;
+    for (const group of groups.values()) {
+      const first = group[0]!;
+      const owedTotal = group.reduce((s2, r) => s2 + (balances.get(r.id)?.outstanding ?? Number(r.total)), 0);
+      const facts: [string, string][] = [];
+      for (const r of group) {
+        const owed = balances.get(r.id)?.outstanding ?? Number(r.total);
+        facts.push([`${r.number} (was due ${r.dueDate})`, formatMoney(owed, r.currency)]);
+      }
+      facts.push(['Total owing', formatMoney(owedTotal, first.currency)]);
+
+      // A pay link per invoice, each charging its own outstanding balance.
+      const links: string[] = [];
+      for (const r of group) {
+        const link = await payLinkFor(accountId, r.id).catch(() => null);
+        if (link) links.push(`Pay ${r.number}: ${link}`);
+      }
+
+      // Their statement rides along, so "what is this about?" answers itself.
+      let attachment: { filename: string; content: Buffer } | undefined;
+      if (first.folderId) {
+        const st = await buildStatement(accountId, first.folderId, { currency: first.currency }).catch(() => null);
+        if (st) {
+          const pdf2 = await renderStatementPdf(accountId, st).catch(() => null);
+          if (pdf2) attachment = { filename: pdf2.filename, content: pdf2.buffer };
+        }
+      }
+
+      const emailBrand = await emailBrandFor(accountId, first.businessId);
+      const content = {
+        heading: group.length === 1
+          ? `Invoice ${first.number} is overdue`
+          : `${group.length} invoices are overdue`,
+        body: [
+          `Hi ${first.clientName},`,
+          group.length === 1
+            ? `Invoice ${first.number} has passed its due date and is still outstanding.`
+            : 'The following invoices have passed their due dates and are still outstanding.',
+          ...(links.length ? ['You can settle online:', ...links] : []),
+          'If any of these have already been paid, please let us know so we can update our records.',
+        ],
+        facts,
+      };
+      try {
+        await sendBusinessMail({
+          accountId, businessId: first.businessId, purpose: 'invoice',
+          to: first.clientEmail!,
+          subject: content.heading,
+          text: renderEmailText(emailBrand, content),
+          html: renderEmail(emailBrand, content),
+          attachments: attachment ? [attachment] : undefined,
+        });
+        await db.update(documents).set({ lastReminderOn: today })
+          .where(tenantWhere(documents, accountId, inArray(documents.id, group.map((r) => r.id))));
+        sent++;
+        covered += group.length;
+      } catch { /* one bad address must not stop the rest */ }
+    }
+    return { sent, covered, skipped };
+  });
+
+  /**
    * A client statement: every invoice, credit note and payment for one client over
    * a date range, oldest first, with a running balance. This is what you send when
    * someone asks "what do we actually owe you", and what you check before chasing.
@@ -226,95 +342,62 @@ export async function documentRoutes(app: FastifyInstance) {
       from: dateStr.optional(), to: dateStr.optional(),
       currency: z.string().trim().length(3).optional(),
     }).safeParse(req.query);
-    const from = q.success ? q.data.from : undefined;
-    const to = q.success ? q.data.to : undefined;
-    const wantCurrency = q.success ? q.data.currency?.toUpperCase() : undefined;
+    const opts = q.success ? q.data : {};
 
-    const [client] = await db.select({ id: folders.id, name: folders.name, businessId: folders.businessId })
+    const [client] = await db.select({ id: folders.id, businessId: folders.businessId })
       .from(folders).where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
     if (!client) return reply.code(404).send({ error: 'Client not found.' });
     if (!(await assertMaybeBusiness(req, reply, client.businessId, 'viewer'))) return;
 
-    const allDocs = await db.select({
-      id: documents.id, type: documents.type, number: documents.number, issueDate: documents.issueDate,
-      dueDate: documents.dueDate, total: documents.total, status: documents.status, currency: documents.currency,
-    }).from(documents)
-      .where(tenantWhere(documents, accountId,
-        eq(documents.folderId, folderId),
-        inArray(documents.type, ['invoice', 'credit_note']),
-        ne(documents.status, 'void'),
-        ne(documents.status, 'draft'),      // a draft has not been issued to anyone
-        from ? gte(documents.issueDate, from) : undefined,
-        to ? lte(documents.issueDate, to) : undefined,
-      ));
+    const st = await buildStatement(accountId, folderId, opts);
+    if (!st) return reply.code(404).send({ error: 'Client not found.' });
+    return st;
+  });
 
-    // A running balance only means something within ONE currency. If this client
-    // has been billed in more than one, the statement is produced per currency and
-    // the caller is told which others exist rather than being handed a total that
-    // silently added dollars to rand.
-    const currencies = [...new Set(allDocs.map((d) => d.currency))].sort();
-    // Default to whatever the most recent document was raised in, not to whichever
-    // code sorts first. Someone opening a statement wants the account they are
-    // currently being billed on; alphabetical order is a coin toss.
-    const latest = allDocs.reduce<typeof allDocs[number] | undefined>(
-      (best, d) => (!best || d.issueDate > best.issueDate ? d : best), undefined);
-    const currency = (wantCurrency && currencies.includes(wantCurrency))
-      ? wantCurrency
-      : (latest?.currency ?? await currencyFor(accountId, client.businessId));
-    const docs = allDocs.filter((d) => d.currency === currency);
+  /**
+   * Email the statement to the client as a PDF, which is what "send me a statement"
+   * actually means. It used to exist only on screen: month-end meant opening the
+   * modal, printing to PDF, and emailing by hand, per client, per business.
+   */
+  app.post('/api/v1/statements/:id/email', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const folderId = intId(req);
+    if (!folderId) return reply.code(400).send({ error: 'Bad id.' });
+    const parsed = z.object({
+      from: dateStr.optional(), to: dateStr.optional(),
+      currency: z.string().trim().length(3).optional(),
+      message: z.string().trim().max(2000).optional(),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
 
-    // Payments belong to those documents, so pull them by document id.
-    const docIds = docs.map((d) => d.id);
-    const payRows = docIds.length
-      ? await db.select({
-          id: payments.id, documentId: payments.documentId, amount: payments.amount,
-          paidOn: payments.paidOn, method: payments.method,
-        }).from(payments)
-          .where(tenantWhere(payments, accountId,
-            inArray(payments.documentId, docIds),
-            from ? gte(payments.paidOn, from) : undefined,
-            to ? lte(payments.paidOn, to) : undefined,
-          ))
-      : [];
-    const numberOf = new Map(docs.map((d) => [d.id, d.number]));
+    const [client] = await db.select({ id: folders.id, businessId: folders.businessId, billingEmail: folders.billingEmail, name: folders.name })
+      .from(folders).where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
+    if (!client) return reply.code(404).send({ error: 'Client not found.' });
+    if (!(await assertMaybeBusiness(req, reply, client.businessId))) return;
+    if (!client.billingEmail) return reply.code(400).send({ error: 'This client has no billing email. Add one on the client first.' });
 
-    type Entry = { date: string; kind: 'invoice' | 'credit_note' | 'payment' | 'refund'; ref: string; detail: string | null; charge: number; credit: number };
-    const entries: Entry[] = [
-      ...docs.map((d): Entry => d.type === 'invoice'
-        ? { date: d.issueDate, kind: 'invoice', ref: d.number, detail: d.dueDate ? `due ${d.dueDate}` : null, charge: Number(d.total), credit: 0 }
-        : { date: d.issueDate, kind: 'credit_note', ref: d.number, detail: 'credit note', charge: 0, credit: Number(d.total) }),
-      ...payRows.map((p): Entry => {
-        const amt = Number(p.amount);
-        const against = numberOf.get(p.documentId) ?? '';
-        return amt < 0
-          ? { date: p.paidOn, kind: 'refund', ref: against, detail: `refund${p.method ? ` (${p.method})` : ''}`, charge: -amt, credit: 0 }
-          : { date: p.paidOn, kind: 'payment', ref: against, detail: `payment${p.method ? ` (${p.method})` : ''}`, charge: 0, credit: amt };
-      }),
-    ];
-    // Charges before credits on the same day, so the running balance reads right.
-    const rank = { invoice: 0, refund: 1, credit_note: 2, payment: 3 };
-    entries.sort((a, b) => a.date.localeCompare(b.date) || rank[a.kind] - rank[b.kind]);
+    const st = await buildStatement(accountId, folderId, parsed.data);
+    if (!st) return reply.code(404).send({ error: 'Client not found.' });
+    const pdf = await renderStatementPdf(accountId, st);
 
-    const round = (n: number) => Math.round(n * 100) / 100;
-    let balance = 0;
-    const rows = entries.map((e) => {
-      balance = round(balance + e.charge - e.credit);
-      return { ...e, charge: round(e.charge), credit: round(e.credit), balance };
-    });
-
-    return {
-      client: { id: client.id, name: client.name, businessId: client.businessId },
-      from: from ?? null, to: to ?? null,
-      currency,
-      currencies,
-      entries: rows,
-      summary: {
-        invoiced: round(entries.reduce((s, e) => s + (e.kind === 'invoice' ? e.charge : 0), 0)),
-        credited: round(entries.reduce((s, e) => s + (e.kind === 'credit_note' ? e.credit : 0), 0)),
-        received: round(entries.reduce((s, e) => s + (e.kind === 'payment' ? e.credit : 0) - (e.kind === 'refund' ? e.charge : 0), 0)),
-        balance: round(balance),
-      },
+    const emailBrand = await emailBrandFor(accountId, client.businessId);
+    const content = {
+      heading: 'Your statement of account',
+      body: [
+        `Hi ${client.name},`,
+        parsed.data.message?.trim() || 'Please find your statement of account attached.',
+        `The balance owing is ${formatMoney(st.summary.balance, st.currency)}.`,
+      ],
     };
+    await sendBusinessMail({
+      accountId, businessId: client.businessId, purpose: 'invoice',
+      to: client.billingEmail,
+      subject: `Statement of account: ${client.name}`,
+      text: renderEmailText(emailBrand, content),
+      html: renderEmail(emailBrand, content),
+      attachments: [{ filename: pdf.filename, content: pdf.buffer }],
+    });
+    return { ok: true, to: client.billingEmail };
   });
 
   // The document as a PDF file, the same one that gets attached to its email.

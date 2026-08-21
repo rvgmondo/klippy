@@ -58,6 +58,7 @@ export const MODULES: ModuleDef[] = [
   // Finance
   { key: 'billing', label: 'Billing', primitive: 'finance', core: true, hint: 'Quotes, invoices and payments.' },
   { key: 'collections', label: 'Collections', primitive: 'finance', hint: 'Who is overdue and who has been flagged.' },
+  { key: 'cashflow', label: 'Cash flow', primitive: 'finance', hint: 'What money should arrive over the next eight weeks.' },
   { key: 'expenses', label: 'Expenses', primitive: 'finance', hint: 'What the business spends, against what it earns.' },
 
   // Admin

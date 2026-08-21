@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Home, Target, Wallet, Settings, Users, Receipt, Package,
-  CalendarDays, CalendarCheck, BarChart3, HardDrive, AlertTriangle,
+  CalendarDays, CalendarCheck, BarChart3, HardDrive, AlertTriangle, TrendingUp,
   Plus, Building2, SquareKanban, FileText, Search, type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -80,7 +80,8 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
       ['home', 'Home', Home], ['today', 'Today', CalendarCheck], ['calendar', 'Calendar', CalendarDays],
       ['reports', 'Reports', BarChart3], ['files', 'Files', HardDrive],
       ['pipeline', 'Pipeline', Target], ['offerings', 'Offerings', Package], ['contacts', 'Contacts', Users],
-      ['billing', 'Billing', Receipt], ['collections', 'Collections', AlertTriangle], ['expenses', 'Expenses', Wallet],
+      ['billing', 'Billing', Receipt], ['collections', 'Collections', AlertTriangle],
+      ['cashflow', 'Cash flow', TrendingUp], ['expenses', 'Expenses', Wallet],
       ['settings', 'Settings', Settings],
     ];
     for (const [view, label, icon] of goto) {

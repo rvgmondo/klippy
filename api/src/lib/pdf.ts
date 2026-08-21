@@ -226,3 +226,103 @@ export async function renderSamplePdf(
   pdf.end();
   return done;
 }
+
+/**
+ * A client statement as a PDF: the ledger a client reconciles against, branded
+ * like every other document the business sends. Fed by lib/statement.ts so the
+ * on-screen statement, this PDF and the chase attachment always agree.
+ */
+export async function renderStatementPdf(
+  accountId: number,
+  st: import('./statement.js').Statement,
+): Promise<RenderedDoc> {
+  const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+  const [business] = st.client.businessId != null
+    ? await db.select().from(businesses)
+      .where(tenantWhere(businesses, accountId, eq(businesses.id, st.client.businessId))).limit(1)
+    : [undefined];
+  const brand = business?.brandName || business?.name || account?.brandName || account?.name || 'Statement';
+  const accent = business?.invoiceAccent || account?.invoiceAccent || '#6366f1';
+  const [ar, ag, ab] = hexToRgb(accent);
+  const money2 = (n: number) => formatMoney(n, st.currency);
+
+  const pdf = new PDFDocument({ size: 'A4', margin: 46 });
+  const done = toBuffer(pdf);
+  const left = 46;
+  const width = 595.28 - 92;
+
+  // Header band, matching the document family's simplest look.
+  pdf.rect(0, 0, 595.28, 5).fill([ar, ag, ab] as unknown as string);
+  pdf.fillColor('#0f1729').font('Helvetica-Bold').fontSize(17).text(brand, left, 34);
+  pdf.fillColor([ar, ag, ab] as unknown as string).font('Helvetica-Bold').fontSize(19)
+    .text('STATEMENT', left, 34, { width, align: 'right' });
+  pdf.font('Helvetica').fontSize(9).fillColor('#64748b');
+  const period = st.from || st.to
+    ? `${st.from ?? 'the beginning'} to ${st.to ?? 'today'}`
+    : 'All activity';
+  pdf.text(period, left, 60, { width, align: 'right' });
+
+  pdf.fillColor('#64748b').fontSize(8.5).text('STATEMENT FOR', left, 84);
+  pdf.fillColor('#0f1729').font('Helvetica-Bold').fontSize(11).text(st.client.name, left, 96);
+
+  // Table.
+  let y = 128;
+  const cols = { date: left, detail: left + 70, charge: left + width - 190, credit: left + width - 120, balance: left + width - 55 };
+  const header = () => {
+    pdf.font('Helvetica-Bold').fontSize(8).fillColor('#64748b');
+    pdf.text('DATE', cols.date, y);
+    pdf.text('DETAIL', cols.detail, y);
+    pdf.text('CHARGE', cols.charge, y, { width: 60, align: 'right' });
+    pdf.text('CREDIT', cols.credit, y, { width: 60, align: 'right' });
+    pdf.text('BALANCE', cols.balance, y, { width: 55, align: 'right' });
+    y += 14;
+    pdf.moveTo(left, y - 4).lineTo(left + width, y - 4).lineWidth(0.8).strokeColor('#cbd5e1').stroke();
+  };
+  header();
+
+  const KIND: Record<string, string> = {
+    opening: 'Balance brought forward', invoice: 'Invoice', credit_note: 'Credit note',
+    payment: 'Payment', refund: 'Refund',
+  };
+  for (const e of st.entries) {
+    if (y > 780) { pdf.addPage(); y = 46; header(); }
+    const isOpening = e.kind === 'opening';
+    pdf.font(isOpening ? 'Helvetica-Bold' : 'Helvetica').fontSize(9)
+      .fillColor(isOpening ? '#0f1729' : '#334155');
+    pdf.text(e.date, cols.date, y);
+    const label = isOpening ? 'Balance brought forward' : `${KIND[e.kind] ?? e.kind} ${e.ref}${e.detail ? ` (${e.detail})` : ''}`;
+    pdf.text(label, cols.detail, y, { width: cols.charge - cols.detail - 8, lineBreak: false });
+    if (!isOpening) {
+      if (e.charge) pdf.text(money2(e.charge), cols.charge, y, { width: 60, align: 'right' });
+      if (e.credit) pdf.text(money2(e.credit), cols.credit, y, { width: 60, align: 'right' });
+    }
+    pdf.font('Helvetica-Bold').fillColor('#0f1729')
+      .text(money2(e.balance), cols.balance, y, { width: 55, align: 'right' });
+    y += 15;
+    pdf.moveTo(left, y - 4).lineTo(left + width, y - 4).lineWidth(0.4).strokeColor('#e2e8f0').stroke();
+  }
+
+  if (st.entries.length === 0) {
+    pdf.font('Helvetica').fontSize(9.5).fillColor('#64748b')
+      .text('No activity in this period.', left, y + 6);
+    y += 24;
+  }
+
+  // Balance owing, loudest thing on the page, same rule as the invoice total.
+  y += 12;
+  if (y > 760) { pdf.addPage(); y = 60; }
+  pdf.roundedRect(left + width - 220, y, 220, 40, 6).fill([ar, ag, ab] as unknown as string);
+  pdf.fillColor('#ffffff').font('Helvetica').fontSize(8.5).text('BALANCE OWING', left + width - 208, y + 8);
+  pdf.font('Helvetica-Bold').fontSize(14).text(money2(st.summary.balance), left + width - 208, y + 19);
+
+  if (st.currencies.length > 1) {
+    pdf.font('Helvetica').fontSize(8).fillColor('#64748b')
+      .text(`In ${st.currency}. This client has also been billed in ${st.currencies.filter((c) => c !== st.currency).join(', ')}; those are separate statements.`,
+        left, y + 50, { width });
+  }
+
+  pdf.end();
+  const buffer = await done;
+  return { filename: `statement-${st.client.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.pdf`, buffer };
+}
+

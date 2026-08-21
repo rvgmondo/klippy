@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
-import { DEFAULT_CURRENCY } from '../lib/currency.js';
-import { mrrByCurrency } from '../lib/mrr.js';
+import { DEFAULT_CURRENCY, roundMoney } from '../lib/currency.js';
+import { mrrByCurrency, chargeFor } from '../lib/mrr.js';
+import { addMonths, anchorDayOf, addDays } from '../lib/billing.js';
+import { balancesFor } from '../lib/balances.js';
 import { db } from '../db/client.js';
 import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings, subscriptions, documents, payments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -411,5 +413,121 @@ export async function reportRoutes(app: FastifyInstance) {
       // currency (output there minus input VAT, which is in the workspace currency).
       netPayable: round(wsOutput - inputVat),
     };
+  });
+
+  /**
+   * The next eight weeks of money coming in, per currency.
+   *
+   * Two sources, both things the app already knows and previously kept apart:
+   * invoices that are out and unpaid, bucketed by DUE date, and active
+   * subscriptions projected forward at their real cadence (monthly, quarterly,
+   * annual) using the same anchored month arithmetic the billing cron uses, so the
+   * forecast and the invoices it turns into always agree. What is already overdue
+   * sits in its own bucket rather than pretending it will arrive this week.
+   *
+   * This is a forecast of what SHOULD arrive, not a promise. Klippy never converts
+   * currency, so a workspace billing in two currencies gets two forecasts.
+   */
+  app.get('/api/v1/reports/cashflow', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'Bad query.' });
+    const onlyBusiness = q.data.businessId;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const WEEKS = 8;
+    const horizon = addDays(today, WEEKS * 7 - 1);
+
+    const [acc] = await db.select({ currency: accounts.currency }).from(accounts)
+      .where(eq(accounts.id, accountId)).limit(1);
+    const workspace = acc?.currency || DEFAULT_CURRENCY;
+    const bizRows = await db.select({ id: businesses.id, currency: businesses.currency })
+      .from(businesses).where(tenantWhere(businesses, accountId));
+    const currencyOfBiz = new Map(bizRows.map((b) => [b.id, b.currency || workspace]));
+    const curOf = (bid: number | null) => (bid != null ? currencyOfBiz.get(bid) : null) || workspace;
+
+    const invRows = await db.select({
+      id: documents.id, total: documents.total, dueDate: documents.dueDate,
+      currency: documents.currency, businessId: documents.businessId,
+    }).from(documents)
+      .where(tenantWhere(documents, accountId,
+        eq(documents.type, 'invoice'), eq(documents.status, 'sent'),
+        isNotNull(documents.dueDate),
+        onlyBusiness !== undefined ? eq(documents.businessId, onlyBusiness) : undefined,
+        await businessScope(req, documents.businessId)));
+    const balances = await balancesFor(accountId, invRows);
+
+    type Bucket = { start: string; end: string; invoices: number; subscriptions: number };
+    type Lane = { overdue: number; overdueCount: number; later: number; buckets: Bucket[] };
+    const lanes = new Map<string, Lane>();
+    const laneOf = (cur: string): Lane => {
+      let l = lanes.get(cur);
+      if (!l) {
+        l = {
+          overdue: 0, overdueCount: 0, later: 0,
+          buckets: Array.from({ length: WEEKS }, (_, i) => ({
+            start: addDays(today, i * 7), end: addDays(today, i * 7 + 6), invoices: 0, subscriptions: 0,
+          })),
+        };
+        lanes.set(cur, l);
+      }
+      return l;
+    };
+    const weekIndex = (date: string) =>
+      Math.floor((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / (7 * 86_400_000));
+
+    for (const inv of invRows) {
+      const owed = balances.get(inv.id)?.outstanding ?? Number(inv.total);
+      if (owed <= 0.001) continue;
+      const lane = laneOf(inv.currency);
+      const due = inv.dueDate!;
+      if (due < today) { lane.overdue += owed; lane.overdueCount += 1; }
+      else if (due > horizon) lane.later += owed;
+      else lane.buckets[Math.min(WEEKS - 1, weekIndex(due))]!.invoices += owed;
+    }
+
+    const subRows = await db.select({
+      price: subscriptions.price, listPrice: offerings.price,
+      intervalMonths: subscriptions.intervalMonths, startedOn: subscriptions.startedOn,
+      nextBillDate: subscriptions.nextBillDate, businessId: subscriptions.businessId,
+    }).from(subscriptions)
+      .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'),
+        onlyBusiness !== undefined ? eq(subscriptions.businessId, onlyBusiness) : undefined,
+        await businessScope(req, subscriptions.businessId)));
+
+    for (const s of subRows) {
+      const amount = chargeFor(s, { price: s.listPrice });
+      if (!Number.isFinite(amount) || amount <= 0) continue;
+      const lane = laneOf(curOf(s.businessId));
+      const anchor = anchorDayOf(s.startedOn);
+      // A next-bill date the cron has not reached yet still bills, so count it now
+      // rather than dropping it into the past.
+      let d = s.nextBillDate < today ? today : s.nextBillDate;
+      for (let i = 0; i < 24 && d <= horizon; i++) {
+        lane.buckets[Math.min(WEEKS - 1, Math.max(0, weekIndex(d)))]!.subscriptions += amount;
+        d = addMonths(d, s.intervalMonths, anchor);
+      }
+    }
+
+    const currencies = [...lanes].map(([currency, l]) => {
+      const buckets = l.buckets.map((b) => ({
+        ...b,
+        invoices: roundMoney(b.invoices, currency),
+        subscriptions: roundMoney(b.subscriptions, currency),
+        total: roundMoney(b.invoices + b.subscriptions, currency),
+      }));
+      const expected = roundMoney(l.overdue + buckets.reduce((s2, b) => s2 + b.total, 0), currency);
+      return {
+        currency,
+        overdue: roundMoney(l.overdue, currency),
+        overdueCount: l.overdueCount,
+        later: roundMoney(l.later, currency),
+        buckets,
+        expected,
+      };
+    }).sort((a, b) => b.expected - a.expected);
+
+    return { start: today, weeks: WEEKS, currencies };
   });
 }

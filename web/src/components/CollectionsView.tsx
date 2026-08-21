@@ -6,6 +6,7 @@ import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { money } from '../lib/money';
+import { notify } from './ConfirmDialog';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
@@ -38,9 +39,32 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
     retry: false,
   });
 
-  const remind = useMutation({
-    mutationFn: (id: number) => apiPost(`/documents/${id}/email`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['collections'] }),
+  // Which rows are ticked. Chasing sends ONE email per client per currency listing
+  // everything they owe, with a pay link per invoice and their statement attached,
+  // then records the reminder so the automatic schedule does not chase again today.
+  const [sel, setSel] = useState<Set<number>>(new Set());
+  const toggle = (id: number) => setSel((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const chase = useMutation({
+    mutationFn: (ids?: number[]) => apiPost<{ sent: number; covered: number; skipped: number }>(
+      '/collections/chase',
+      { ...(ids?.length ? { ids } : {}), ...(businessId === 'all' ? {} : { businessId }) }),
+    onSuccess: (r) => {
+      setSel(new Set());
+      qc.invalidateQueries({ queryKey: ['collections'] });
+      if (r.sent === 0) {
+        notify('Nothing sent. No overdue invoice with an email address matched.', 'error');
+      } else {
+        const emails = r.sent === 1 ? '1 email' : `${r.sent} emails`;
+        const invoices = r.covered === 1 ? '1 invoice' : `${r.covered} invoices`;
+        notify(`Sent ${emails} covering ${invoices}${r.skipped ? `. ${r.skipped} skipped for having no email address` : ''}.`);
+      }
+    },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not send.', 'error'),
   });
 
   return (
@@ -75,10 +99,30 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                 Nothing overdue. Everyone has paid, or is not late yet.
               </div>
             ) : (
+              <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-slate-500">
+                  {sel.size > 0
+                    ? `${sel.size} selected`
+                    : 'Tick invoices to chase a few, or chase everything owed in one go.'}
+                </div>
+                <button onClick={() => chase.mutate(sel.size ? [...sel] : undefined)} disabled={chase.isPending}
+                  className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-50">
+                  <Mail size={14} /> {chase.isPending ? 'Sending' : sel.size ? `Chase selected (${sel.size})` : 'Chase all'}
+                </button>
+              </div>
               <div className="overflow-x-auto rounded-xl border border-slate-800">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                      <th className="w-8 px-3 py-2">
+                        <input type="checkbox" aria-label="Select every invoice with an email address"
+                          checked={sel.size > 0 && sel.size === data.items.filter((i) => i.clientEmail).length}
+                          onChange={(e) => setSel(e.target.checked
+                            ? new Set(data.items.filter((i) => i.clientEmail).map((i) => i.id))
+                            : new Set())}
+                          className="accent-violet-500" />
+                      </th>
                       <th className="px-3 py-2">Invoice</th>
                       <th className="px-3 py-2">Client</th>
                       <th className="px-3 py-2 text-right">Outstanding</th>
@@ -90,6 +134,13 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                   <tbody>
                     {data.items.map((i) => (
                       <tr key={i.id} className="border-b border-slate-800/60 last:border-0">
+                        <td className="px-3 py-2.5">
+                          <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)}
+                            disabled={!i.clientEmail}
+                            aria-label={`Select invoice ${i.number}`}
+                            title={i.clientEmail ? undefined : 'No email address on this invoice'}
+                            className="accent-violet-500 disabled:opacity-30" />
+                        </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2">
                             <span className="num text-slate-200">{i.number}</span>
@@ -124,10 +175,10 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                               </button>
                             )}
                             {i.clientEmail && (
-                              <button onClick={() => remind.mutate(i.id)} disabled={remind.isPending}
-                                title="Email this invoice again now"
+                              <button onClick={() => chase.mutate([i.id])} disabled={chase.isPending}
+                                title="Email an overdue notice for this invoice now, statement attached"
                                 className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
-                                <Mail size={12} /> Nudge
+                                <Mail size={12} /> Chase
                               </button>
                             )}
                           </div>
@@ -137,9 +188,12 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                   </tbody>
                 </table>
               </div>
+              </>
             )}
             <p className="text-[11px] text-slate-500">
-              Reminders send automatically on each business's schedule (set in Business settings). "Nudge" re-sends the invoice now.
+              Chasing sends one email per client per currency listing everything owed, with a pay link for each invoice
+              and their statement attached. It also counts as the reminder, so the automatic schedule will not chase the
+              same invoice again today. Reminders still send on each business's schedule, set in Business settings.
             </p>
           </>
         )}

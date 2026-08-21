@@ -1,28 +1,29 @@
 import { useState } from 'react';
 import { Modal } from './Modal';
-import { useQuery } from '@tanstack/react-query';
-import { Printer, X } from 'lucide-react';
-import { apiGet } from '../lib/api';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { Mail, Printer, X } from 'lucide-react';
+import { apiGet, apiPost } from '../lib/api';
 import { money } from '../lib/money';
+import { notify } from './ConfirmDialog';
 import { fieldCompactClass } from './ui';
 
 interface Entry {
-  date: string; kind: 'invoice' | 'credit_note' | 'payment' | 'refund';
+  date: string; kind: 'opening' | 'invoice' | 'credit_note' | 'payment' | 'refund';
   ref: string; detail: string | null; charge: number; credit: number; balance: number;
 }
 interface Statement {
-  client: { id: number; name: string; businessId: number | null };
+  client: { id: number; name: string; businessId: number | null; billingEmail: string | null };
   from: string | null; to: string | null;
   /** The currency THIS statement is drawn in. A balance only means something in one. */
   currency: string;
   /** Every currency this client has been billed in, when there is more than one. */
   currencies: string[];
   entries: Entry[];
-  summary: { invoiced: number; credited: number; received: number; balance: number };
+  summary: { opening: number; invoiced: number; credited: number; received: number; balance: number };
 }
 
 
-const KIND_LABEL: Record<Entry['kind'], string> = {
+const KIND_LABEL: Record<Exclude<Entry['kind'], 'opening'>, string> = {
   invoice: 'Invoice', credit_note: 'Credit note', payment: 'Payment', refund: 'Refund',
 };
 
@@ -48,6 +49,16 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
   const others = data?.currencies ?? [];
   const field = fieldCompactClass;
 
+  // The same statement, rendered server-side as a PDF and mailed to the client's
+  // billing email. The server refuses politely when no billing email is set.
+  const emailIt = useMutation({
+    mutationFn: () => apiPost<{ ok: true; to: string }>(`/statements/${folderId}/email`, {
+      ...(from ? { from } : {}), ...(to ? { to } : {}), ...(pick ? { currency: pick } : {}),
+    }),
+    onSuccess: (r) => notify(`Statement sent to ${r.to}.`),
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not send the statement.', 'error'),
+  });
+
   return (
     <Modal onClose={onClose} variant="page">
       <div className="mx-auto my-4 max-w-3xl">
@@ -60,6 +71,13 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
               {others.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           )}
+          <button onClick={() => emailIt.mutate()} disabled={emailIt.isPending}
+            title={data?.client.billingEmail
+              ? `Email this statement as a PDF to ${data.client.billingEmail}`
+              : 'Set a billing email on the client first'}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+            <Mail size={15} /> {emailIt.isPending ? 'Sending' : 'Email statement'}
+          </button>
           <button onClick={() => window.print()}
             className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90">
             <Printer size={15} /> Print / Save as PDF
@@ -102,7 +120,18 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
                   </tr>
                 </thead>
                 <tbody>
-                  {(data?.entries ?? []).map((e, i) => (
+                  {(data?.entries ?? []).map((e, i) => (e.kind === 'opening' ? (
+                    /* Activity from before the chosen range, netted into one row.
+                       Without it a ranged statement pretends the account started at
+                       zero and its closing balance misstates what is owed. */
+                    <tr key={i} className="border-b border-slate-200 bg-slate-50">
+                      <td className="py-2 num text-slate-600">{e.date}</td>
+                      <td className="py-2 font-medium text-slate-800">Balance brought forward</td>
+                      <td className="py-2" />
+                      <td className="py-2" />
+                      <td className="py-2 text-right num font-semibold text-slate-900">{money(e.balance, cur)}</td>
+                    </tr>
+                  ) : (
                     <tr key={i} className="border-b border-slate-200">
                       <td className="py-2 num text-slate-600">{e.date}</td>
                       <td className="py-2">
@@ -113,7 +142,7 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
                       <td className="py-2 text-right num text-slate-700">{e.credit ? money(e.credit, cur) : ''}</td>
                       <td className="py-2 text-right num font-medium text-slate-900">{money(e.balance, cur)}</td>
                     </tr>
-                  ))}
+                  )))}
                 </tbody>
               </table>
             </div>
@@ -122,6 +151,9 @@ export function StatementView({ folderId, onClose }: { folderId: number; onClose
           {data && (
             <div className="mt-6 flex justify-end">
               <div className="w-72 space-y-1.5 text-sm">
+                {data.summary.opening !== 0 && (
+                  <div className="flex justify-between"><span className="text-slate-500">Brought forward</span><span className="num">{money(data.summary.opening, cur)}</span></div>
+                )}
                 <div className="flex justify-between"><span className="text-slate-500">Invoiced</span><span className="num">{money(data.summary.invoiced, cur)}</span></div>
                 {data.summary.credited > 0 && (
                   <div className="flex justify-between"><span className="text-slate-500">Credited</span><span className="num">-{money(data.summary.credited, cur)}</span></div>
