@@ -93,6 +93,12 @@ export async function runDailyDigest(): Promise<string> {
   // deleted them, so the table only grew; hung off the digest because it already
   // runs once a day and this is not worth a schedule of its own.
   await pruneLoginTokens().catch(() => { /* never let housekeeping stop the digest */ });
+  // Empty the trash of anything past its 30 days. Folders cascade their whole
+  // subtree (boards, columns, cards, time) through the FKs, exactly like the old
+  // hard delete, just a month later and after every chance to change your mind.
+  const trashCutoff = new Date(Date.now() - 30 * 86_400_000);
+  await db.delete(boards).where(lt(boards.deletedAt, trashCutoff)).catch(() => {});
+  await db.delete(folders).where(lt(folders.deletedAt, trashCutoff)).catch(() => {});
   // One row per (person, workspace) so someone in two workspaces gets each.
   const recipients = await db.select({
     id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,
@@ -105,6 +111,7 @@ export async function runDailyDigest(): Promise<string> {
     const base = and(
       eq(tasks.accountId, u.accountId), eq(tasks.isArchived, false),
       eq(tasks.isCompleted, false), isNotNull(tasks.dueDate),
+      isNull(boards.deletedAt),
     );
     const select = () => db.select({
       id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, priority: tasks.priority,

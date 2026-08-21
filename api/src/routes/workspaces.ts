@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { accounts, memberships } from '../db/schema.js';
-import { authOf } from '../lib/context.js';
+import { authOf, sessionEpochOf } from '../lib/context.js';
 import { getMembership, workspacesFor } from '../lib/membership.js';
 import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, signToken, slugify } from '../lib/auth.js';
@@ -40,7 +40,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
     const [account] = await db.select().from(accounts).where(eq(accounts.id, parsed.data.accountId)).limit(1);
     if (!account || account.status !== 'active') return reply.code(403).send({ error: 'That workspace is not active.' });
 
-    reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: account.id, role: m.role }), cookieOptions());
+    reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: account.id, role: m.role, se: await sessionEpochOf(userId) }), cookieOptions());
     return { ok: true, accountId: account.id, role: m.role };
   });
 
@@ -60,7 +60,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
     });
 
     // Drop straight into the new workspace.
-    reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: accountId, role: 'owner' }), cookieOptions());
+    reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: accountId, role: 'owner', se: await sessionEpochOf(userId) }), cookieOptions());
     const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
     return reply.code(201).send({ workspace: account });
   });
@@ -116,7 +116,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
     if (activeAccountId === id) {
       const next = remaining.find((w) => w.accountId !== id);
       if (next) {
-        reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: next.accountId, role: next.role }), cookieOptions());
+        reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: next.accountId, role: next.role, se: await sessionEpochOf(userId) }), cookieOptions());
         switchedTo = next.accountId;
       }
     }

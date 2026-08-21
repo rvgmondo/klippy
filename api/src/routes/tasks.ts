@@ -88,6 +88,7 @@ export async function taskRoutes(app: FastifyInstance) {
       .leftJoin(folders, eq(folders.id, boards.folderId))
       .where(tenantWhere(tasks, accountId, and(
         eq(tasks.isArchived, false), isNotNull(tasks.dueDate),
+        isNull(boards.deletedAt),
         gte(tasks.dueDate, q.data.from), lte(tasks.dueDate, q.data.to),
         await businessScope(req, folders.businessId),
       ))).orderBy(asc(tasks.dueDate));
@@ -129,7 +130,7 @@ export async function taskRoutes(app: FastifyInstance) {
       .leftJoin(boards, eq(boards.id, tasks.boardId))
       .leftJoin(folders, eq(folders.id, boards.folderId));
 
-    const scopes = [eq(tasks.isArchived, false)];
+    const scopes = [eq(tasks.isArchived, false), isNull(boards.deletedAt)];
     if (businessId) scopes.push(eq(folders.businessId, businessId));
     if (mine) scopes.push(or(eq(tasks.assignedTo, userId), isNull(tasks.assignedTo))!);
     // Restrict to the member's accessible businesses (no-op for owners/admins).

@@ -2,10 +2,10 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
 
-type Mode = 'login' | 'signup' | 'forgot' | 'reset';
+type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'twofactor';
 
 export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode; onBack?: () => void }) {
-  const { login, signup } = useAuth();
+  const { login, verify2fa, signup } = useAuth();
   const [blueprintKey, setBlueprintKey] = useState('');
   const [currency, setCurrency] = useState('ZAR');
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -14,6 +14,9 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
+  // The short-lived ticket a 2FA-enabled login hands back in place of a session.
+  const [ticket, setTicket] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -33,8 +36,12 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
     e.preventDefault();
     setError(null); setNotice(null); setBusy(true);
     try {
-      if (mode === 'login') await login(email, password);
-      else if (mode === 'signup') await signup(accountName, name, email, password, { blueprint: blueprintKey || undefined, currency });
+      if (mode === 'login') {
+        const res = await login(email, password);
+        if (res?.twoFactorRequired) { setTicket(res.ticket); setCode(''); setMode('twofactor'); }
+      } else if (mode === 'twofactor') {
+        await verify2fa(ticket, code);
+      } else if (mode === 'signup') await signup(accountName, name, email, password, { blueprint: blueprintKey || undefined, currency });
       else if (mode === 'forgot') {
         const res = await apiPost<{ message: string }>('/auth/forgot', { email });
         setNotice(res.message ?? 'Check your email for a reset link.');
@@ -58,6 +65,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
     signup: 'Create your workspace',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
+    twofactor: 'Enter the code from your authenticator app',
   }[mode];
 
   return (
@@ -105,12 +113,18 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} required />
           )}
 
+          {mode === 'twofactor' && (
+            <input className={input} inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code"
+              value={code} onChange={(e) => setCode(e.target.value)} autoFocus required />
+          )}
+
           {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
           {notice && <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-sm text-green-300">{notice}</div>}
 
           <button type="submit" disabled={busy} className="w-full rounded-lg bg-violet-600 py-2.5 text-sm font-medium text-[var(--accent-ink)] transition hover:bg-violet-500 disabled:opacity-60">
             {busy ? 'Please wait...'
               : mode === 'login' ? 'Sign in'
+              : mode === 'twofactor' ? 'Verify'
               : mode === 'signup' ? 'Create workspace'
               : mode === 'forgot' ? 'Send reset link'
               : 'Update password'}
@@ -126,6 +140,9 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
           )}
           {mode === 'signup' && (
             <p>Already have one? <button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('login'); setError(null); setNotice(null); }}>Sign in</button></p>
+          )}
+          {mode === 'twofactor' && (
+            <p><button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('login'); setTicket(''); setCode(''); setError(null); }}>Back to sign in</button></p>
           )}
           {(mode === 'forgot' || mode === 'reset') && (
             <p><button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('login'); setError(null); setNotice(null); clearResetParam(); }}>Back to sign in</button></p>

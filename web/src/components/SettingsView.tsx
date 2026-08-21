@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User, Palette, Building2, Receipt, BellRing, Mail, Users, Building,
-  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, type LucideIcon,
+  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, Trash2,
+  type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -25,6 +26,7 @@ import { HostingPanel } from './HostingPanel';
 import { AccountPanel } from './AccountPanel';
 import { ModulesPanel } from './ModulesPanel';
 import { PdfDesignPanel } from './PdfDesignPanel';
+import { TrashPanel } from './TrashPanel';
 
 /**
  * Settings as a real page.
@@ -40,7 +42,7 @@ type SectionId =
   | 'profile' | 'appearance'
   | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting'
   | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'connections' | 'automation'
-  | 'labels' | 'tokens' | 'notes';
+  | 'labels' | 'tokens' | 'notes' | 'trash';
 
 interface Item { id: SectionId; label: string; icon: LucideIcon; hint?: string }
 
@@ -73,6 +75,7 @@ const ACCOUNT: Item[] = [
   { id: 'labels', label: 'Labels', icon: Tag, hint: 'Card labels shared across boards' },
   { id: 'tokens', label: 'API tokens', icon: KeyRound, hint: 'For scripts and integrations' },
   { id: 'notes', label: 'Notes', icon: StickyNote, hint: 'Your private scratch notes' },
+  { id: 'trash', label: 'Trash', icon: Trash2, hint: 'Deleted clients and boards, restorable for 30 days' },
 ];
 
 export function SettingsView({ businessId }: { businessId: BusinessSelection }) {
@@ -189,6 +192,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     case 'labels': return <LabelsPanel />;
     case 'tokens': return <TokensPanel />;
     case 'notes': return <NotesPanel />;
+    case 'trash': return <TrashPanel />;
     default: return null;
   }
 }

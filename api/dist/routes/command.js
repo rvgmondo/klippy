@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, gte, isNotNull, lt, lte, ne, sql, inArray } from 'drizzle-orm';
+import { eq, gte, isNotNull, isNull, lt, lte, ne, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { tasks, boards, folders, deals, documents, payments, subscriptions, calendarEvents, } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -53,7 +53,7 @@ export async function commandRoutes(app) {
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId))
-            .where(tenantWhere(tasks, accountId, eq(tasks.isArchived, false), eq(tasks.isCompleted, false), onlyBusiness ? eq(folders.businessId, onlyBusiness) : undefined, await businessScope(req, folders.businessId)));
+            .where(tenantWhere(tasks, accountId, eq(tasks.isArchived, false), eq(tasks.isCompleted, false), isNull(boards.deletedAt), onlyBusiness ? eq(folders.businessId, onlyBusiness) : undefined, await businessScope(req, folders.businessId)));
         const mine = openTasks.filter((t) => t.assignedTo === userId || t.assignedTo == null);
         const overdueTasks = mine.filter((t) => t.dueDate && t.dueDate < today);
         const dueToday = mine.filter((t) => t.dueDate === today);

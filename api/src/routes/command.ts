@@ -102,6 +102,7 @@ export async function commandRoutes(app: FastifyInstance) {
       .leftJoin(folders, eq(folders.id, boards.folderId))
       .where(tenantWhere(tasks, accountId,
         eq(tasks.isArchived, false), eq(tasks.isCompleted, false),
+        isNull(boards.deletedAt),
         onlyBusiness ? eq(folders.businessId, onlyBusiness) : undefined,
         await businessScope(req, folders.businessId),
       ));

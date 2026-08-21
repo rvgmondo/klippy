@@ -52,15 +52,25 @@ async function authFromBearer(header: string | undefined): Promise<AuthContext |
  * and null the instant the user or their membership is deactivated. One indexed
  * lookup per request, the same cost the Bearer path already pays.
  */
-async function liveMembership(userId: number, accountId: number): Promise<AuthContext | null> {
+async function liveMembership(userId: number, accountId: number, tokenEpoch: number): Promise<AuthContext | null> {
   const [row] = await db.select({
     role: memberships.role, memberActive: memberships.isActive, userActive: users.isActive,
+    sessionEpoch: users.sessionEpoch,
   }).from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.userId, userId), eq(memberships.accountId, accountId)))
     .limit(1);
   if (!row || !row.role || !row.memberActive || !row.userActive) return null;
+  // A token from before the last password change / "sign out everywhere" is dead,
+  // however long its JWT expiry has left.
+  if ((row.sessionEpoch ?? 0) !== tokenEpoch) return null;
   return { userId, accountId, role: row.role };
+}
+
+/** The user's current session epoch, for signing a fresh token. */
+export async function sessionEpochOf(userId: number): Promise<number> {
+  const [u] = await db.select({ se: users.sessionEpoch }).from(users).where(eq(users.id, userId)).limit(1);
+  return u?.se ?? 0;
 }
 
 /**
@@ -81,7 +91,7 @@ export const authPlugin = fp(async (app: FastifyInstance) => {
         // password-resetting a member does nothing until it expires, so a fired or
         // compromised employee keeps full access for up to a week. The current role
         // is taken from the DB, not the token, so a demotion also takes effect at once.
-        const live = await liveMembership(payload.uid, payload.aid);
+        const live = await liveMembership(payload.uid, payload.aid, payload.se ?? 0);
         if (live) { req.auth = live; return; }
         // The token verifies but the membership is gone or suspended: treat as logged
         // out and clear the cookie so the app stops presenting it.

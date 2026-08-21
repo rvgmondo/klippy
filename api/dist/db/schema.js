@@ -67,6 +67,14 @@ export const users = mysqlTable('users', {
     // Appearance is a personal preference, not a workspace one.
     theme: mysqlEnum('theme', ['system', 'dark', 'light']).default('dark').notNull(),
     accent: varchar('accent', { length: 20 }).default('lime').notNull(),
+    // Bumped on password change, reset, or "sign out everywhere". Every session
+    // token carries the epoch it was issued under; a stale epoch is a dead session.
+    sessionEpoch: int('session_epoch', { unsigned: true }).default(0).notNull(),
+    // TOTP two-factor. The secret is encrypted at rest (AES-256-GCM under
+    // PAYMENTS_SECRET, same box as the PayFast credentials); enabledAt doubles as
+    // the on/off switch so a half-finished setup never locks anyone out.
+    totpSecretEnc: varchar('totp_secret_enc', { length: 255 }),
+    totpEnabledAt: datetime('totp_enabled_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
 }, (t) => [
@@ -315,6 +323,9 @@ export const folders = mysqlTable('folders', {
     // Which business pillar this top-level folder belongs to.
     pillar: mysqlEnum('pillar', ['delivery', 'operations']).default('delivery').notNull(),
     isArchived: boolean('is_archived').default(false).notNull(),
+    // Set when moved to Trash. Trashed things vanish from every list and search
+    // but restore intact for 30 days; the nightly housekeeping purges the rest.
+    deletedAt: datetime('deleted_at'),
     position: int('position', { unsigned: true }).default(0).notNull(),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
@@ -332,6 +343,9 @@ export const boards = mysqlTable('boards', {
     name: varchar('name', { length: 150 }).notNull(),
     description: varchar('description', { length: 255 }),
     isArchived: boolean('is_archived').default(false).notNull(),
+    // Set when moved to Trash. Trashed things vanish from every list and search
+    // but restore intact for 30 days; the nightly housekeeping purges the rest.
+    deletedAt: datetime('deleted_at'),
     position: int('position', { unsigned: true }).default(0).notNull(),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),

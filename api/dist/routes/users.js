@@ -3,7 +3,7 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, memberships } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
-import { hashPassword, verifyPassword } from '../lib/auth.js';
+import { hashPassword, verifyPassword, COOKIE_NAME, signToken, cookieOptions } from '../lib/auth.js';
 import { intId } from '../lib/http.js';
 import { membersOf, getMembership, addMember } from '../lib/membership.js';
 /** Active owners/admins in a workspace, optionally ignoring one person. */
@@ -52,10 +52,17 @@ export async function userRoutes(app) {
             if (!ok)
                 return reply.code(403).send({ error: 'Your current password is not correct.' });
             patch.passwordHash = await hashPassword(parsed.data.newPassword);
+            // New password, new epoch: every OTHER session dies. The cookie below keeps
+            // this one alive under the new number.
+            patch.sessionEpoch = me.sessionEpoch + 1;
         }
         if (Object.keys(patch).length === 0)
             return reply.code(400).send({ error: 'Nothing to update.' });
         await db.update(users).set(patch).where(eq(users.id, userId));
+        if (parsed.data.newPassword) {
+            const { accountId, role } = authOf(req);
+            reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: accountId, role, se: me.sessionEpoch + 1 }), cookieOptions());
+        }
         const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
         return { user: u ? { id: u.id, name: u.name, email: u.email, dailyDigest: u.dailyDigest, theme: u.theme, accent: u.accent } : null };
     });

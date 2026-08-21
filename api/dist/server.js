@@ -27,6 +27,7 @@ import { brandingRoutes, publicBrandingRoutes } from './routes/branding.js';
 import { storageRoutes } from './routes/storage.js';
 import { noteRoutes } from './routes/notes.js';
 import { reportRoutes } from './routes/reports.js';
+import { trashRoutes } from './routes/trash.js';
 import { pushRoutes } from './routes/push.js';
 import { documentRoutes } from './routes/documents.js';
 import { dealRoutes } from './routes/deals.js';
@@ -151,6 +152,7 @@ export function buildServer() {
     app.register(storageRoutes);
     app.register(noteRoutes);
     app.register(reportRoutes);
+    app.register(trashRoutes);
     app.register(pushRoutes);
     app.register(documentRoutes);
     app.register(dealRoutes);

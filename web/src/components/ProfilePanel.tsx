@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
-import { apiPatch } from '../lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { pushSupported, enablePush, disablePush, currentSubscription, sendTestPush } from '../lib/push';
 import { useEffect } from 'react';
 import { useAuth } from '../lib/auth';
+import { notify } from './ConfirmDialog';
 import { fieldClass } from './ui';
 
 export function ProfilePanel() {
@@ -97,7 +99,137 @@ export function ProfilePanel() {
           className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
           Change password
         </button>
+        <p className="text-[11px] text-slate-500">Changing your password signs you out everywhere else.</p>
       </form>
+
+      <TwoFactorSection />
+      <SessionsSection />
+    </div>
+  );
+}
+
+/**
+ * TOTP two-factor. Setup stores the secret server-side but nothing turns on
+ * until a real code from the app checks out, so a half-finished setup can never
+ * lock anyone out. Any authenticator app works: Google Authenticator, Authy,
+ * 1Password, Aegis.
+ */
+function TwoFactorSection() {
+  const qc = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ['2fa'],
+    queryFn: () => apiGet<{ enabled: boolean; pending: boolean }>('/auth/2fa'),
+  });
+  const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null);
+  const [codeIn, setCodeIn] = useState('');
+  const [disabling, setDisabling] = useState(false);
+
+  const start = useMutation({
+    mutationFn: () => apiPost<{ secret: string; otpauth: string }>('/auth/2fa/setup', {}),
+    onSuccess: (r) => { setSetup(r); setCodeIn(''); },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not start setup.', 'error'),
+  });
+  const enable = useMutation({
+    mutationFn: () => apiPost('/auth/2fa/enable', { code: codeIn }),
+    onSuccess: () => {
+      setSetup(null); setCodeIn('');
+      qc.invalidateQueries({ queryKey: ['2fa'] });
+      notify('Two-factor is on. You will be asked for a code at every sign-in.');
+    },
+    onError: (e) => notify(e instanceof Error ? e.message : 'That code did not work.', 'error'),
+  });
+  const disable = useMutation({
+    mutationFn: () => apiPost('/auth/2fa/disable', { code: codeIn }),
+    onSuccess: () => {
+      setDisabling(false); setCodeIn('');
+      qc.invalidateQueries({ queryKey: ['2fa'] });
+      notify('Two-factor is off.');
+    },
+    onError: (e) => notify(e instanceof Error ? e.message : 'That code did not work.', 'error'),
+  });
+
+  const field = fieldClass;
+
+  return (
+    <div className="border-t border-slate-800 pt-5">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-sm text-slate-200">Two-factor authentication</span>
+        {data?.enabled && (
+          <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-300">On</span>
+        )}
+      </div>
+      <p className="mb-3 text-[11px] text-slate-500">
+        A 6-digit code from your phone at every sign-in, so a stolen password alone is not enough.
+      </p>
+
+      {!data?.enabled && !setup && (
+        <button onClick={() => start.mutate()} disabled={start.isPending}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+          Turn on two-factor
+        </button>
+      )}
+
+      {setup && (
+        <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+          <p className="text-xs text-slate-400">
+            1. In your authenticator app, add an account and enter this key (or open the link on your phone):
+          </p>
+          <code className="block break-all rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-xs tracking-wider text-slate-200">{setup.secret}</code>
+          <a href={setup.otpauth} className="inline-block text-xs text-violet-400 hover:text-violet-300">Open in authenticator app</a>
+          <p className="text-xs text-slate-400">2. Then enter the code it shows, to prove the app is set up:</p>
+          <div className="flex gap-2">
+            <input className={field} inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit code"
+              value={codeIn} onChange={(e) => setCodeIn(e.target.value)} />
+            <button onClick={() => enable.mutate()} disabled={enable.isPending || codeIn.trim().length < 6}
+              className="shrink-0 rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
+              Confirm
+            </button>
+          </div>
+          <button onClick={() => { setSetup(null); setCodeIn(''); }} className="text-xs text-slate-500 hover:text-slate-300">Cancel</button>
+        </div>
+      )}
+
+      {data?.enabled && !disabling && (
+        <button onClick={() => { setDisabling(true); setCodeIn(''); }}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+          Turn off
+        </button>
+      )}
+      {data?.enabled && disabling && (
+        <div className="flex gap-2">
+          <input className={field} inputMode="numeric" autoComplete="one-time-code" placeholder="Current 6-digit code"
+            value={codeIn} onChange={(e) => setCodeIn(e.target.value)} />
+          <button onClick={() => disable.mutate()} disabled={disable.isPending || codeIn.trim().length < 6}
+            className="shrink-0 rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50">
+            Turn off
+          </button>
+          <button onClick={() => { setDisabling(false); setCodeIn(''); }}
+            className="shrink-0 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:bg-slate-800">
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One button that kills every other session: other browsers, other machines. */
+function SessionsSection() {
+  const out = useMutation({
+    mutationFn: () => apiPost('/auth/logout-all', {}),
+    onSuccess: () => notify('Done. Every other device is signed out; this one stays in.'),
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not do that.', 'error'),
+  });
+  return (
+    <div className="border-t border-slate-800 pt-5">
+      <div className="mb-1 text-sm text-slate-200">Sessions</div>
+      <p className="mb-3 text-[11px] text-slate-500">
+        Left yourself signed in on a shared machine, or lost a laptop? This signs out every session except this one.
+      </p>
+      <button onClick={() => out.mutate()} disabled={out.isPending}
+        className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+        Sign out everywhere else
+      </button>
     </div>
   );
 }

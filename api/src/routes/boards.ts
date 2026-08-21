@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { boards, boardColumns, tasks, folders, taskLabels, labels } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -40,7 +40,7 @@ export async function boardRoutes(app: FastifyInstance) {
       .where(tenantWhere(folders, accountId, eq(folders.id, q.data.folderId))).limit(1);
     if (fld && !(await assertMaybeBusiness(req, reply, fld.businessId, 'viewer'))) return;
     const rows = await db.select().from(boards)
-      .where(tenantWhere(boards, accountId, and(eq(boards.folderId, q.data.folderId), eq(boards.isArchived, false))))
+      .where(tenantWhere(boards, accountId, and(eq(boards.folderId, q.data.folderId), eq(boards.isArchived, false), isNull(boards.deletedAt))))
       .orderBy(asc(boards.position));
     return { boards: rows };
   });
@@ -118,14 +118,16 @@ export async function boardRoutes(app: FastifyInstance) {
     return { board: updated };
   });
 
+  // Delete = move to Trash: restorable for 30 days from Settings, purged after.
   app.delete('/api/v1/boards/:id', async (req, reply) => {
     const { accountId } = authOf(req);
     const id = intId(req);
     if (!id) return reply.code(400).send({ error: 'Bad id.' });
     if (!(await assertBoardAccess(req, reply, id, 'member'))) return;
-    const res = await db.delete(boards).where(tenantWhere(boards, accountId, eq(boards.id, id)));
+    const res = await db.update(boards).set({ deletedAt: new Date() })
+      .where(tenantWhere(boards, accountId, eq(boards.id, id), isNull(boards.deletedAt)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Board not found.' });
-    return { ok: true };
+    return { ok: true, trashed: true };
   });
 
   /**

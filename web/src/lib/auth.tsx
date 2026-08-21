@@ -3,11 +3,14 @@ import { apiGet, apiPost, apiPatch, ApiError } from './api';
 import type { Account, User } from './types';
 
 interface Session { user: User; account: Account; }
+/** Login either signs you in, or hands back a short-lived ticket and asks for a code. */
+export type LoginResult = { twoFactorRequired: true; ticket: string } | undefined;
 interface AuthState {
   user: User | null;
   account: Account | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verify2fa: (ticket: string, code: string) => Promise<void>;
   signup: (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -36,8 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refresh(); }, []);
 
-  const login = async (email: string, password: string) => {
-    apply(await apiPost<Session>('/auth/login', { email, password }));
+  const login = async (email: string, password: string): Promise<LoginResult> => {
+    const res = await apiPost<Session | { twoFactorRequired: true; ticket: string }>('/auth/login', { email, password });
+    if ('twoFactorRequired' in res) return res;
+    apply(res);
+    return undefined;
+  };
+  const verify2fa = async (ticket: string, code: string) => {
+    apply(await apiPost<Session>('/auth/2fa/verify', { ticket, code }));
   };
   const signup = async (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => {
     apply(await apiPost<Session>('/auth/signup', { accountName, name, email, password, ...extras }));
@@ -60,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <Ctx.Provider value={{ user, account, loading, login, signup, logout, refresh, updateAccount }}>
+    <Ctx.Provider value={{ user, account, loading, login, verify2fa, signup, logout, refresh, updateAccount }}>
       {children}
     </Ctx.Provider>
   );

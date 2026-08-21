@@ -32,7 +32,7 @@ export async function searchRoutes(app) {
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId))
-            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), or(like(tasks.title, term), like(tasks.description, term)))))
+            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), or(like(tasks.title, term), like(tasks.description, term)))))
             .orderBy(desc(tasks.updatedAt))
             .limit(12);
         // Clients: top-level folders. Their first board rides along so a hit can land
@@ -40,12 +40,12 @@ export async function searchRoutes(app) {
         const clientRows = await db.select({
             id: folders.id, name: folders.name, businessId: folders.businessId, pillar: folders.pillar,
         }).from(folders)
-            .where(tenantWhere(folders, accountId, isNull(folders.parentId), like(folders.name, term), await businessScope(req, folders.businessId)))
+            .where(tenantWhere(folders, accountId, isNull(folders.parentId), isNull(folders.deletedAt), like(folders.name, term), await businessScope(req, folders.businessId)))
             .limit(8);
         const clientIds = clientRows.map((c) => c.id);
         const clientBoards = clientIds.length
             ? await db.select({ id: boards.id, folderId: boards.folderId }).from(boards)
-                .where(tenantWhere(boards, accountId, inArray(boards.folderId, clientIds)))
+                .where(tenantWhere(boards, accountId, inArray(boards.folderId, clientIds), isNull(boards.deletedAt)))
             : [];
         const firstBoard = new Map();
         for (const b of clientBoards)

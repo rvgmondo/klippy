@@ -5,7 +5,10 @@ import { db } from '../db/client.js';
 import { accounts, users, memberships } from '../db/schema.js';
 import { getMembership, workspacesFor } from '../lib/membership.js';
 import { seedNewAccount } from '../lib/seed.js';
-import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
+import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, signTwoFactorTicket, verifyTwoFactorTicket, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
+import { authOf } from '../lib/context.js';
+import { generateTotpSecret, otpauthUrl, verifyTotp } from '../lib/totp.js';
+import { encryptSecret, decryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { sendMail, appUrl } from '../lib/mailer.js';
 import { publicAccount } from '../lib/publicAccount.js';
 import { blueprint, provisionFrom } from '../lib/blueprints.js';
@@ -73,7 +76,7 @@ export async function authRoutes(app) {
         const [user] = await db.select().from(users).where(eq(users.id, result.userId)).limit(1);
         if (!account || !user)
             return reply.code(500).send({ error: 'Signup failed.' });
-        const token = signToken({ uid: user.id, aid: account.id, role: 'owner' });
+        const token = signToken({ uid: user.id, aid: account.id, role: 'owner', se: 0 });
         reply.setCookie(COOKIE_NAME, token, cookieOptions());
         return reply.code(201).send({ user: publicUser(user, 'owner', account.id), account: publicAccount(account) });
     });
@@ -115,12 +118,47 @@ export async function authRoutes(app) {
         if (!account || account.status !== 'active') {
             return reply.code(403).send({ error: 'This workspace is not active.' });
         }
+        // Password proven: with 2FA on, stop here and hand back a short-lived ticket
+        // instead of a session. The cookie is only set once the code checks out.
+        if (user.totpEnabledAt && user.totpSecretEnc) {
+            await db.update(users).set({ failedAttempts: 0, lockedUntil: null }).where(eq(users.id, user.id));
+            return reply.send({
+                twoFactorRequired: true,
+                ticket: signTwoFactorTicket({ uid: user.id, aid: account.id, role: first.role, se: user.sessionEpoch }),
+            });
+        }
         await db.update(users)
             .set({ failedAttempts: 0, lockedUntil: null, lastLogin: new Date() })
             .where(eq(users.id, user.id));
-        const token = signToken({ uid: user.id, aid: account.id, role: first.role });
+        const token = signToken({ uid: user.id, aid: account.id, role: first.role, se: user.sessionEpoch });
         reply.setCookie(COOKIE_NAME, token, cookieOptions());
         return reply.send({ user: publicUser(user, first.role, account.id), account: publicAccount(account) });
+    });
+    // ---- Second factor: turn a ticket plus a code into a session -------------
+    app.post('/api/v1/auth/2fa/verify', { preHandler: authLimiter('auth-2fa') }, async (req, reply) => {
+        const parsed = z.object({ ticket: z.string().min(10), code: z.string().trim().min(6).max(8) }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Enter the 6-digit code from your authenticator app.' });
+        const t = verifyTwoFactorTicket(parsed.data.ticket);
+        if (!t)
+            return reply.code(401).send({ error: 'This sign-in attempt has expired. Start again.' });
+        const [user] = await db.select().from(users).where(eq(users.id, t.uid)).limit(1);
+        if (!user || !user.isActive || !user.totpSecretEnc || !user.totpEnabledAt) {
+            return reply.code(401).send({ error: 'This sign-in attempt has expired. Start again.' });
+        }
+        // A password change between ticket and code kills the ticket too.
+        if (user.sessionEpoch !== (t.se ?? 0)) {
+            return reply.code(401).send({ error: 'This sign-in attempt has expired. Start again.' });
+        }
+        if (!verifyTotp(decryptSecret(user.totpSecretEnc), parsed.data.code)) {
+            return reply.code(401).send({ error: 'That code is not right. Codes change every 30 seconds; try the current one.' });
+        }
+        const [account] = await db.select().from(accounts).where(eq(accounts.id, t.aid)).limit(1);
+        if (!account || account.status !== 'active')
+            return reply.code(403).send({ error: 'This workspace is not active.' });
+        await db.update(users).set({ lastLogin: new Date() }).where(eq(users.id, user.id));
+        reply.setCookie(COOKIE_NAME, signToken({ uid: user.id, aid: t.aid, role: t.role, se: user.sessionEpoch }), cookieOptions());
+        return reply.send({ user: publicUser(user, t.role, t.aid), account: publicAccount(account) });
     });
     // ---- Forgot password: email a reset link ---------------------------------
     app.post('/api/v1/auth/forgot', { preHandler: authLimiter('auth-forgot') }, async (req, reply) => {
@@ -158,8 +196,11 @@ export async function authRoutes(app) {
             return reply.code(400).send({ error: 'Invalid or expired reset link. Request a new one.' });
         }
         const passwordHash = await hashPassword(parsed.data.password);
+        // The epoch bump signs out every existing session. A reset usually means the
+        // password may be in someone else's hands; their sessions die with it.
         await db.update(users).set({
             passwordHash, resetTokenHash: null, resetExpires: null, failedAttempts: 0, lockedUntil: null,
+            sessionEpoch: user.sessionEpoch + 1,
         }).where(eq(users.id, user.id));
         return reply.send({ ok: true });
     });
@@ -167,6 +208,77 @@ export async function authRoutes(app) {
     app.post('/api/v1/auth/logout', async (_req, reply) => {
         reply.clearCookie(COOKIE_NAME, { path: '/' });
         return reply.send({ ok: true });
+    });
+    /**
+     * Sign out everywhere else. Bumps the session epoch, which kills every token
+     * issued before this moment (other browsers, other machines, a laptop left on a
+     * train), then re-issues THIS session under the new epoch so the person asking
+     * stays signed in.
+     */
+    app.post('/api/v1/auth/logout-all', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { userId, accountId, role } = authOf(req);
+        const [me] = await db.select({ se: users.sessionEpoch }).from(users).where(eq(users.id, userId)).limit(1);
+        const next = (me?.se ?? 0) + 1;
+        await db.update(users).set({ sessionEpoch: next }).where(eq(users.id, userId));
+        reply.setCookie(COOKIE_NAME, signToken({ uid: userId, aid: accountId, role, se: next }), cookieOptions());
+        return { ok: true };
+    });
+    // ---- Two-factor management ----------------------------------------------
+    app.get('/api/v1/auth/2fa', { preHandler: app.requireAuth }, async (req) => {
+        const { userId } = authOf(req);
+        const [u] = await db.select({ enc: users.totpSecretEnc, on: users.totpEnabledAt })
+            .from(users).where(eq(users.id, userId)).limit(1);
+        return { enabled: !!u?.on, pending: !!u?.enc && !u?.on };
+    });
+    /**
+     * Start 2FA setup: generate a secret, store it encrypted but NOT yet enabled.
+     * Enabling requires proving a code first, so a half-scanned QR can never lock
+     * anyone out of their own account.
+     */
+    app.post('/api/v1/auth/2fa/setup', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { userId } = authOf(req);
+        if (!secretsAvailable()) {
+            return reply.code(400).send({ error: 'The server has no PAYMENTS_SECRET configured, so encrypted secrets are off.' });
+        }
+        const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        if (!u)
+            return reply.code(404).send({ error: 'Account not found.' });
+        if (u.totpEnabledAt)
+            return reply.code(400).send({ error: 'Two-factor is already on. Turn it off first to re-set it up.' });
+        const secret = generateTotpSecret();
+        await db.update(users).set({ totpSecretEnc: encryptSecret(secret), totpEnabledAt: null }).where(eq(users.id, userId));
+        return { secret, otpauth: otpauthUrl(secret, u.email) };
+    });
+    app.post('/api/v1/auth/2fa/enable', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { userId } = authOf(req);
+        const parsed = z.object({ code: z.string().trim().min(6).max(8) }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Enter the 6-digit code from your authenticator app.' });
+        const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        if (!u?.totpSecretEnc)
+            return reply.code(400).send({ error: 'Start setup first.' });
+        if (u.totpEnabledAt)
+            return reply.code(400).send({ error: 'Two-factor is already on.' });
+        if (!verifyTotp(decryptSecret(u.totpSecretEnc), parsed.data.code)) {
+            return reply.code(400).send({ error: 'That code is not right. Codes change every 30 seconds; try the current one.' });
+        }
+        await db.update(users).set({ totpEnabledAt: new Date() }).where(eq(users.id, userId));
+        return { ok: true };
+    });
+    /** Turning 2FA off requires a current code: possession, not just a session. */
+    app.post('/api/v1/auth/2fa/disable', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { userId } = authOf(req);
+        const parsed = z.object({ code: z.string().trim().min(6).max(8) }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Enter the 6-digit code from your authenticator app.' });
+        const [u] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        if (!u?.totpSecretEnc || !u.totpEnabledAt)
+            return reply.code(400).send({ error: 'Two-factor is not on.' });
+        if (!verifyTotp(decryptSecret(u.totpSecretEnc), parsed.data.code)) {
+            return reply.code(400).send({ error: 'That code is not right. Codes change every 30 seconds; try the current one.' });
+        }
+        await db.update(users).set({ totpSecretEnc: null, totpEnabledAt: null }).where(eq(users.id, userId));
+        return { ok: true };
     });
     // ---- Current user --------------------------------------------------------
     app.get('/api/v1/auth/me', { preHandler: app.requireAuth }, async (req, reply) => {

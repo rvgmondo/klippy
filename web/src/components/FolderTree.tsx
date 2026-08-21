@@ -180,7 +180,7 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
             // Only top-level folders are clients, and only a client has a portal.
             ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
-            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Delete "${folder.name}"${hasKids ? ' and everything inside it' : ''}? This cannot be undone.`, { danger: true })) deleteFolder.mutate(); } },
+            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Move "${folder.name}"${hasKids ? ' and everything inside it' : ''} to the Trash? It can be restored from Settings for 30 days.`, { danger: true })) deleteFolder.mutate(); } },
           ]}
         />
       </div>
@@ -267,7 +267,7 @@ export function BoardRow({ board, folderId, depth, selected, onSelect }: {
         trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={13} /></span>}
         items={[
           { label: 'Rename', onClick: async () => { const n = await ask('Rename board', board.name); if (n) rename.mutate(n); } },
-          { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Delete board "${board.name}" and its cards? This cannot be undone.`, { danger: true })) del.mutate(); } },
+          { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Move board "${board.name}" and its cards to the Trash? It can be restored from Settings for 30 days.`, { danger: true })) del.mutate(); } },
         ]}
       />
     </div>

@@ -37,6 +37,7 @@ export async function searchRoutes(app: FastifyInstance) {
       .leftJoin(folders, eq(folders.id, boards.folderId))
       .where(tenantWhere(tasks, accountId, and(
         eq(tasks.isArchived, false),
+        isNull(boards.deletedAt), isNull(folders.deletedAt),
         or(like(tasks.title, term), like(tasks.description, term)),
       )))
       .orderBy(desc(tasks.updatedAt))
@@ -49,6 +50,7 @@ export async function searchRoutes(app: FastifyInstance) {
     }).from(folders)
       .where(tenantWhere(folders, accountId,
         isNull(folders.parentId),
+        isNull(folders.deletedAt),
         like(folders.name, term),
         await businessScope(req, folders.businessId),
       ))
@@ -56,7 +58,7 @@ export async function searchRoutes(app: FastifyInstance) {
     const clientIds = clientRows.map((c) => c.id);
     const clientBoards = clientIds.length
       ? await db.select({ id: boards.id, folderId: boards.folderId }).from(boards)
-        .where(tenantWhere(boards, accountId, inArray(boards.folderId, clientIds)))
+        .where(tenantWhere(boards, accountId, inArray(boards.folderId, clientIds), isNull(boards.deletedAt)))
       : [];
     const firstBoard = new Map<number, number>();
     for (const b of clientBoards) if (b.folderId != null && !firstBoard.has(b.folderId)) firstBoard.set(b.folderId, b.id);

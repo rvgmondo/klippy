@@ -11,6 +11,13 @@ export interface TokenPayload {
   uid: number; // user id
   aid: number; // account id
   role: 'owner' | 'admin' | 'member';
+  /**
+   * The user's session epoch when this token was issued. A password change,
+   * reset, or "sign out everywhere" bumps the stored epoch, and every token
+   * carrying the old number dies on its next request. Optional because tokens
+   * issued before this existed carry none; those read as epoch 0.
+   */
+  se?: number;
 }
 
 export async function hashPassword(plain: string): Promise<string> {
@@ -32,6 +39,25 @@ export const APP_AUDIENCE = 'klippy-app';
 export function signToken(payload: TokenPayload): string {
   return jwt.sign(payload, SECRET as string, { expiresIn: TOKEN_TTL, audience: APP_AUDIENCE });
 }
+/**
+ * A short-lived ticket for the gap between a correct password and a correct
+ * 2FA code. Its own audience, so it can never be presented as a session cookie,
+ * and five minutes, so an abandoned login screen is not a standing invitation.
+ */
+export const TWOFA_AUDIENCE = 'klippy-2fa';
+export function signTwoFactorTicket(payload: TokenPayload): string {
+  return jwt.sign(payload, SECRET as string, { expiresIn: '5m', audience: TWOFA_AUDIENCE });
+}
+export function verifyTwoFactorTicket(ticket: string): TokenPayload | null {
+  try {
+    const p = jwt.verify(ticket, SECRET as string, { audience: TWOFA_AUDIENCE }) as TokenPayload;
+    if (typeof p?.uid !== 'number' || typeof p?.aid !== 'number') return null;
+    return p;
+  } catch {
+    return null;
+  }
+}
+
 export function verifyToken(token: string): TokenPayload | null {
   try {
     const p = jwt.verify(token, SECRET as string, { audience: APP_AUDIENCE }) as TokenPayload;

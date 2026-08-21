@@ -82,7 +82,7 @@ export async function taskRoutes(app) {
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId))
-            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNotNull(tasks.dueDate), gte(tasks.dueDate, q.data.from), lte(tasks.dueDate, q.data.to), await businessScope(req, folders.businessId)))).orderBy(asc(tasks.dueDate));
+            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNotNull(tasks.dueDate), isNull(boards.deletedAt), gte(tasks.dueDate, q.data.from), lte(tasks.dueDate, q.data.to), await businessScope(req, folders.businessId)))).orderBy(asc(tasks.dueDate));
         return { tasks: rows };
     });
     /**
@@ -118,7 +118,7 @@ export async function taskRoutes(app) {
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId));
-        const scopes = [eq(tasks.isArchived, false)];
+        const scopes = [eq(tasks.isArchived, false), isNull(boards.deletedAt)];
         if (businessId)
             scopes.push(eq(folders.businessId, businessId));
         if (mine)

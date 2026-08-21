@@ -22,6 +22,26 @@ export const APP_AUDIENCE = 'klippy-app';
 export function signToken(payload) {
     return jwt.sign(payload, SECRET, { expiresIn: TOKEN_TTL, audience: APP_AUDIENCE });
 }
+/**
+ * A short-lived ticket for the gap between a correct password and a correct
+ * 2FA code. Its own audience, so it can never be presented as a session cookie,
+ * and five minutes, so an abandoned login screen is not a standing invitation.
+ */
+export const TWOFA_AUDIENCE = 'klippy-2fa';
+export function signTwoFactorTicket(payload) {
+    return jwt.sign(payload, SECRET, { expiresIn: '5m', audience: TWOFA_AUDIENCE });
+}
+export function verifyTwoFactorTicket(ticket) {
+    try {
+        const p = jwt.verify(ticket, SECRET, { audience: TWOFA_AUDIENCE });
+        if (typeof p?.uid !== 'number' || typeof p?.aid !== 'number')
+            return null;
+        return p;
+    }
+    catch {
+        return null;
+    }
+}
 export function verifyToken(token) {
     try {
         const p = jwt.verify(token, SECRET, { audience: APP_AUDIENCE });

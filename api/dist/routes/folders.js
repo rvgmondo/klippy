@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { boards } from '../db/schema.js';
 import { db } from '../db/client.js';
 import { folders, businesses, documents, deals, dealActivities } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -51,7 +52,7 @@ export async function folderRoutes(app) {
     app.get('/api/v1/folders', async (req) => {
         const { accountId } = authOf(req);
         const rows = await db.select().from(folders)
-            .where(tenantWhere(folders, accountId))
+            .where(tenantWhere(folders, accountId, isNull(folders.deletedAt)))
             .orderBy(asc(folders.parentId), asc(folders.position));
         const allowed = await accessibleBusinessIds(req);
         return { folders: allowed ? rows.filter((f) => f.businessId == null || allowed.has(f.businessId)) : rows };
@@ -135,22 +136,47 @@ export async function folderRoutes(app) {
             .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
         return { folder: updated };
     });
-    // Hard delete (cascades to subfolders, boards, columns, tasks via FKs).
+    /**
+     * Delete = move to Trash. The whole subtree (subfolders and their boards) gets
+     * one shared deletedAt stamp, which is what lets a restore bring back exactly
+     * this delete and nothing that was already in the trash. The Trash keeps it 30
+     * days; the nightly housekeeping does the hard delete nobody should do by hand.
+     */
     app.delete('/api/v1/folders/:id', async (req, reply) => {
         const { accountId } = authOf(req);
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        const [own] = await db.select({ businessId: folders.businessId }).from(folders)
+        const [own] = await db.select({ businessId: folders.businessId, deletedAt: folders.deletedAt }).from(folders)
             .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
-        if (!own)
+        if (!own || own.deletedAt)
             return reply.code(404).send({ error: 'Folder not found.' });
         if (!(await assertMaybeBusiness(req, reply, own.businessId)))
             return;
-        const res = await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, id)));
-        if (!res[0].affectedRows)
-            return reply.code(404).send({ error: 'Folder not found.' });
-        return { ok: true };
+        const all = await db.select({ id: folders.id, parentId: folders.parentId })
+            .from(folders).where(tenantWhere(folders, accountId));
+        const children = new Map();
+        for (const f of all) {
+            if (f.parentId == null)
+                continue;
+            const list = children.get(f.parentId) ?? [];
+            list.push(f.id);
+            children.set(f.parentId, list);
+        }
+        const ids = [];
+        const queue = [id];
+        while (queue.length) {
+            const cur = queue.pop();
+            ids.push(cur);
+            for (const c of children.get(cur) ?? [])
+                queue.push(c);
+        }
+        const stamp = new Date();
+        await db.update(folders).set({ deletedAt: stamp })
+            .where(tenantWhere(folders, accountId, inArray(folders.id, ids), isNull(folders.deletedAt)));
+        await db.update(boards).set({ deletedAt: stamp })
+            .where(tenantWhere(boards, accountId, inArray(boards.folderId, ids), isNull(boards.deletedAt)));
+        return { ok: true, trashed: true };
     });
     // Persist sibling order after drag/drop.
     app.post('/api/v1/folders/reorder', async (req, reply) => {

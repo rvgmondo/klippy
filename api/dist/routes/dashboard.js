@@ -1,4 +1,4 @@
-import { and, eq, gte, isNotNull } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '../db/client.js';
 import { tasks, timeEntries, boards, folders, businesses } from '../db/schema.js';
@@ -33,7 +33,7 @@ export async function dashboardRoutes(app) {
         };
         // board -> { pillar, businessId }
         const boardRows = await db.select({ id: boards.id, folderId: boards.folderId }).from(boards)
-            .where(tenantWhere(boards, accountId));
+            .where(tenantWhere(boards, accountId, isNull(boards.deletedAt)));
         const boardMeta = new Map(boardRows.map((b) => [b.id, {
                 pillar: rootPillar(b.folderId),
                 businessId: fById.get(b.folderId)?.businessId ?? null,
@@ -59,6 +59,9 @@ export async function dashboardRoutes(app) {
         }).from(tasks).where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), eq(tasks.isCompleted, false))));
         for (const t of openTasks) {
             const meta = boardMeta.get(t.boardId);
+            // No meta means the board is in the Trash; its cards do not count anywhere.
+            if (!meta)
+                continue;
             bump(meta?.businessId ?? null, 1, 0);
             if (!inScope(meta?.businessId ?? null))
                 continue;
