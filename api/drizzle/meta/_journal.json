@@ -414,6 +414,13 @@
       "when": 1787500000000,
       "tag": "0058_trash_and_2fa",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "5",
+      "when": 1787560000000,
+      "tag": "0059_notifications_quote_links",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,7 @@ import { formatMoney } from '../lib/currency.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
 import { credsFor, settingsFor } from '../lib/paymentSettings.js';
 import { onInvoicePaid } from '../lib/hosting.js';
+import { notifyAdmins } from '../lib/notify.js';
 import { assertBusinessAccess } from '../lib/access.js';
 import { isDuplicateKey } from '../lib/tenant.js';
 import {
@@ -435,6 +436,13 @@ export async function paymentRoutes(app: FastifyInstance) {
         if (isDuplicateKey(e)) { await record('Duplicate ITN ignored; this payment was already recorded.', true); return ok(); }
         throw e;
       }
+
+      await notifyAdmins(doc.accountId, {
+        kind: 'payment',
+        title: `Payment received: ${formatMoney(Number(body.amount_gross), doc.currency)}`,
+        body: `${doc.clientName} paid invoice ${doc.number} via PayFast.`,
+        url: '/?v=billing',
+      });
 
       // Mark paid once covered.
       const paidRows = await db.select({ amount: payments.amount }).from(payments)

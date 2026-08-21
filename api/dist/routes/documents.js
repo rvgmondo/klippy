@@ -20,6 +20,7 @@ import { nextNumberFor } from '../lib/numbering.js';
 import { addDays } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
+import { quoteLinkFor } from './quotes.js';
 import { renderStatementPdf } from '../lib/pdf.js';
 const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
@@ -863,6 +864,9 @@ export async function documentRoutes(app) {
         // A one-click way to pay, when PayFast is on. Invoices only, never quotes.
         const payLink = doc.type === 'invoice' && doc.status !== 'paid'
             ? await payLinkFor(accountId, doc.id) : null;
+        // A quote instead carries its accept link: the client can say yes from the
+        // email itself, name recorded, no account needed.
+        const acceptLink = doc.type === 'quote' && !doc.decision ? quoteLinkFor(doc.id) : null;
         // One branded layout for every send, with its plain-text twin alongside.
         const emailBrand = await emailBrandFor(accountId, doc.businessId);
         const content = {
@@ -881,6 +885,7 @@ export async function documentRoutes(app) {
                 ['Total', fmt(doc.total)],
             ],
             ...(payLink ? { button: { label: 'Pay online', url: payLink } } : {}),
+            ...(acceptLink ? { button: { label: 'View and accept this quote', url: acceptLink } } : {}),
             ...(doc.notes?.trim() ? { note: doc.notes.trim() } : {}),
         };
         const html = renderEmail(emailBrand, content);

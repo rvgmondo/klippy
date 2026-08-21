@@ -10,6 +10,7 @@ import { assertBusinessAccess } from '../lib/access.js';
 import { signLeadToken, verifyLeadToken } from '../lib/secretbox.js';
 import { appUrl } from '../lib/mailer.js';
 import { rateLimit } from '../lib/rateLimit.js';
+import { notifyAdmins } from '../lib/notify.js';
 
 /**
  * Inbound lead capture: the pipeline stops needing the founder as its typist.
@@ -152,6 +153,15 @@ export async function leadRoutes(app: FastifyInstance) {
       position: Number(pos),
       createdBy: null,
     }));
+
+    // The whole point of capturing a lead is that someone hears about it NOW,
+    // not when they next happen to open the pipeline.
+    await notifyAdmins(biz.accountId, {
+      kind: 'lead',
+      title: `New lead: ${d.company?.trim() || d.name}`,
+      body: [d.name, d.email?.trim(), d.message?.trim()].filter(Boolean).join(' | ').slice(0, 400),
+      url: '/?v=pipeline',
+    });
     return done();
   });
 }

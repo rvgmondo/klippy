@@ -641,6 +641,12 @@ export const documents = mysqlTable('documents', {
     decision: mysqlEnum('decision', ['accepted', 'declined']),
     decisionAt: datetime('decision_at'),
     decisionBy: varchar('decision_by', { length: 150 }),
+    // Where the decision came from, when it was made over the PUBLIC accept link
+    // rather than the signed-in portal. This is the e-sign evidence: name typed,
+    // address and browser recorded, date stamped. Thin, but it is what you have
+    // when a client disputes the scope six months later.
+    decisionIp: varchar('decision_ip', { length: 64 }),
+    decisionUa: varchar('decision_ua', { length: 255 }),
     // For a credit note: the invoice it credits. Null for invoices/quotes.
     sourceDocumentId: int('source_document_id', { unsigned: true }),
     folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
@@ -1271,5 +1277,27 @@ export const jobRuns = mysqlTable('job_runs', {
     updatedAt: updatedAt(),
 }, (t) => [
     uniqueIndex('uniq_job_runs_name').on(t.name),
+]);
+// ---- Notifications ---------------------------------------------------------
+// The in-app inbox. Web push is fire-and-forget and easily missed; a row here is
+// what makes "a lead came in while you slept" reliably discoverable the next
+// morning. One row per recipient, so read-state is personal.
+export const notifications = mysqlTable('notifications', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    // What produced it: 'lead' | 'payment' | 'quote' so far. A plain varchar on
+    // purpose; every new event kind should not need a migration.
+    kind: varchar('kind', { length: 40 }).notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    body: varchar('body', { length: 500 }),
+    // A same-app link ("/?v=pipeline"), so clicking one lands on the thing itself.
+    url: varchar('url', { length: 300 }),
+    readAt: datetime('read_at'),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_notifications_user').on(t.accountId, t.userId, t.readAt, t.id),
 ]);
 //# sourceMappingURL=schema.js.map

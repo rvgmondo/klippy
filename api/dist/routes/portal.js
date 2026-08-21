@@ -17,6 +17,7 @@ import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
 import { assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
 import { authLimiter } from '../lib/rateLimit.js';
+import { notifyAdmins } from '../lib/notify.js';
 /** The scope filter. Every read of a client-owned table goes through this. */
 const mine = (c) => and(eq(documents.accountId, c.user.accountId), eq(documents.folderId, c.user.folderId));
 /** What a client is allowed to see at all: issued documents, never drafts. */
@@ -357,6 +358,11 @@ export async function portalRoutes(app) {
         if (quote.decision) {
             return reply.code(409).send({ error: `You already ${quote.decision} this quote. Get in touch if you need to change that.` });
         }
+        // An expired quote is not silently acceptable at a stale price.
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (quote.dueDate && quote.dueDate < todayStr) {
+            return reply.code(409).send({ error: `This quote expired on ${quote.dueDate}. Please ask for a fresh one.` });
+        }
         const who = c.user.name || c.user.email;
         const res = await db.update(documents)
             .set({ decision: parsed.data.decision, decisionAt: new Date(), decisionBy: who })
@@ -366,6 +372,12 @@ export async function portalRoutes(app) {
             return reply.code(409).send({ error: 'That quote was just updated. Reload and try again.' });
         // Tell the business. A quote accepted at 11pm that nobody hears about until
         // someone happens to look is a quote that loses its own momentum.
+        await notifyAdmins(c.user.accountId, {
+            kind: 'quote',
+            title: `Quote ${quote.number} ${parsed.data.decision}`,
+            body: `${who} ${parsed.data.decision} the quote for ${c.client.name} in the portal.`,
+            url: '/?v=billing',
+        });
         const brand = await emailBrandFor(c.user.accountId, quote.businessId);
         const content = {
             heading: `Quote ${quote.number} ${parsed.data.decision}`,

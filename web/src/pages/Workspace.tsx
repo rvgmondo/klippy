@@ -19,6 +19,7 @@ import { ContactsView } from '../components/ContactsView';
 import { DashboardView } from '../components/DashboardView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
+import { NotificationsBell } from '../components/NotificationsBell';
 import { SettingsView } from '../components/SettingsView';
 import { MobileTabBar } from '../components/MobileTabBar';
 import { CommandPalette } from '../components/CommandPalette';
@@ -186,6 +187,7 @@ export function Workspace() {
               <kbd className="ml-auto shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px]">Ctrl K</kbd>
             </button>
             <TimerChip />
+            <NotificationsBell />
             <button onClick={() => setShowTimer(true)} title="Focus timer"
               className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
               <Timer size={14} /> <span className="hidden sm:inline">Focus</span>

@@ -67,6 +67,18 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     }
   }
 
+  const todayStr = new Date().toISOString().slice(0, 10);
+  // The signed public link a client can accept the quote on, no account needed.
+  const copyQuoteLink = async (id: number) => {
+    try {
+      const r = await apiGet<{ url: string }>(`/documents/${id}/quote-link`);
+      await navigator.clipboard.writeText(r.url);
+      notify('Accept link copied. Anyone with it can view and accept this quote.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not build the link.', 'error');
+    }
+  };
+
   const setStatus = useMutation({
     mutationFn: (v: { id: number; status: Status }) => apiPatch(`/documents/${v.id}/status`, { status: v.status }),
     onSuccess: invalidate,
@@ -126,7 +138,14 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
               )}
               {docs.map((d) => (
                 <tr key={d.id} className="group border-t border-slate-800">
-                  <td className="px-3 py-2 font-medium text-slate-200">{d.number}</td>
+                  <td className="px-3 py-2 font-medium text-slate-200">
+                    {d.number}
+                    {/* A quote past its valid-until that nobody decided on. The public
+                        accept page refuses it too; this is the staff-side echo. */}
+                    {d.type === 'quote' && d.status === 'sent' && d.dueDate && d.dueDate < todayStr && (
+                      <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">Expired</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-slate-300">{d.clientName}</td>
                   <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{d.issueDate}</td>
                   <td className="px-3 py-2">
@@ -163,6 +182,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                             ? [{ label: 'Open PayFast checkout', onClick: () => payOnline(d.id) }] : []),
                           ...(d.type === 'quote'
                             ? [{ label: 'Convert to invoice', onClick: () => convert.mutate(d.id) }] : []),
+                          ...(d.type === 'quote' && d.status === 'sent'
+                            ? [{ label: 'Copy accept link', onClick: () => copyQuoteLink(d.id) }] : []),
                           { label: d.status === 'draft' ? 'Delete' : 'Void', danger: true, onClick: async () => { if (await confirmDialog(d.status === 'draft' ? `Delete ${d.number}?` : `Void ${d.number}? The number is kept, the amount drops out of balances.`, { danger: true })) del.mutate(d.id); } },
                         ]}
                       />

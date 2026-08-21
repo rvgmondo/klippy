@@ -90,6 +90,21 @@ export function verifyLeadToken(businessId: number, token: string): boolean {
  * No expiry on purpose: emails outlive tokens, and a two-year-old invoice should
  * still render its letterhead.
  */
+/**
+ * Signed public quote link, same recipe as the pay link: HMAC over the document
+ * id, so the URL cannot be guessed or enumerated, and carrying no session at all.
+ */
+export function signQuoteToken(docId: number): string | null {
+  const key = process.env.PAYMENTS_SECRET;
+  if (!key) return null;
+  return createHmac('sha256', key).update(`quote:${docId}`).digest('hex').slice(0, 32);
+}
+export function verifyQuoteToken(docId: number, token: string): boolean {
+  const expect = signQuoteToken(docId);
+  if (!expect || !token || token.length !== expect.length) return false;
+  return timingSafeEqual(Buffer.from(expect), Buffer.from(token));
+}
+
 export function signLogoToken(kind: 'business' | 'account', id: number): string | null {
   const raw = process.env.PAYMENTS_SECRET;
   if (!raw || raw.length < 16) return null;
