@@ -23,7 +23,9 @@ const startOfWeek = (d: Date) => { const x = new Date(d); const day = (x.getDay(
 const sameDay = (a: Date, b: Date) => iso(a) === iso(b);
 
 export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSelection }) {
-  const [view, setView] = useState<View>('month');
+  // A month grid at 375px is thirty tap targets the size of rice grains. Phones
+  // start on the day view; the switcher is right there for anyone who disagrees.
+  const [view, setView] = useState<View>(() => (window.innerWidth < 640 ? 'day' : 'month'));
   const [cursor, setCursor] = useState(new Date());
   const [openTask, setOpenTask] = useState<{ id: number; boardId: number } | null>(null);
   const [addDate, setAddDate] = useState<string | null>(null);
@@ -78,17 +80,17 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-y-2 border-b border-slate-800 px-3 py-3 sm:px-4">
         <div className="flex items-center gap-2">
-          <button onClick={() => shift(-1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronLeft size={16} /></button>
-          <button onClick={() => shift(1)} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><ChevronRight size={16} /></button>
-          <button onClick={() => setCursor(new Date())} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">Today</button>
+          <button onClick={() => shift(-1)} title="Previous" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronLeft size={16} /></button>
+          <button onClick={() => shift(1)} title="Next" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronRight size={16} /></button>
+          <button onClick={() => setCursor(new Date())} className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">Today</button>
           <button onClick={() => setMeetingDate(iso(new Date()))}
-            className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90">
+            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90 sm:min-h-9">
             <CalendarPlus size={14} /> <span className="hidden sm:inline">Meeting</span>
           </button>
           <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
-            className="grid h-8 w-8 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800">
+            className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9">
             <Rss size={13} />
           </button>
           <h2 className="ml-2 font-display text-lg font-semibold text-slate-100">{titleFor(view, cursor)}</h2>
@@ -96,7 +98,7 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
         <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
           {(['day', 'week', 'month', 'year'] as View[]).map((v) => (
             <button key={v} onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${view === v ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>{v}</button>
+              className={`min-h-9 rounded-md px-3 text-xs font-medium capitalize ${view === v ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>{v}</button>
           ))}
         </div>
       </div>

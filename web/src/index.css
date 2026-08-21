@@ -148,6 +148,44 @@ body {
 /* Thin, unobtrusive scrollbars for the board columns. */
 * { scrollbar-width: thin; scrollbar-color: var(--color-slate-700) transparent; }
 
+/* ---- Mobile ergonomics ------------------------------------------------------
+ * The app is run daily from phones as an installed PWA; these rules are the
+ * floor under every screen rather than per-component fixes. */
+
+/* iOS Safari zooms the whole page when a focused control's font is under 16px.
+ * Every field in the app uses text-sm (14px), so on small screens the act of
+ * tapping any input reflowed the entire layout. Bumping the CONTROL font on
+ * phones fixes it globally; desktop keeps its density. */
+@media (max-width: 1023px) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* No double-tap-to-zoom hesitation on things meant to be pressed. */
+button, a, [role='button'], label { touch-action: manipulation; }
+
+/* A visually small control with a finger-sized hit area. Applied to the icon
+ * buttons that live inside table rows and card corners: the icon stays 14px,
+ * the target does not. */
+.tap {
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border-radius: 0.5rem;
+}
+@media (pointer: coarse) {
+  .tap { min-width: 2.75rem; min-height: 2.75rem; }
+  /* Touch scrollers glide and keep their scrollbars to themselves. */
+  .overflow-x-auto { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .overflow-x-auto::-webkit-scrollbar { display: none; }
+  /* Checkboxes are made for mice; give them finger dimensions on touch. */
+  input[type='checkbox'] { width: 1.25rem; height: 1.25rem; }
+}
+
 /* Date inputs render a dark-on-dark icon in dark mode; nudge it back. */
 [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.6); }
 

@@ -59,7 +59,7 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, company, email..."
             className="w-56 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500" />
           <button onClick={() => setEditing('new')}
-            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New contact
           </button>
         </div>
@@ -99,9 +99,9 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
                     </td>
                     <td className="px-3 py-2">
                       <div className="flex justify-end gap-2">
-                        <button onClick={() => setEditing(c)} className="text-slate-500 hover:text-slate-200" title="Edit"><Pencil size={14} /></button>
+                        <button onClick={() => setEditing(c)} className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200" title="Edit"><Pencil size={14} /></button>
                         <button onClick={async () => { if (await confirmDialog(`Delete ${c.name}? Deals linked to them keep their typed details.`, { danger: true })) del.mutate(c.id); }}
-                          className="text-slate-500 hover:text-red-400" title="Delete"><Trash2 size={14} /></button>
+                          className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400" title="Delete"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>

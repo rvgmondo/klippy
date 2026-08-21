@@ -141,7 +141,7 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
 
   return (
     <div ref={setNodeRef} style={style} className={isDragging ? 'opacity-40' : ''}>
-      <div className="group flex items-center gap-1 rounded-md px-1.5 py-1.5 hover:bg-slate-800/60"
+      <div className="group flex items-center gap-1 rounded-md px-1.5 py-2.5 hover:bg-slate-800/60 lg:py-1.5"
         style={{ paddingLeft: depth * 12 + 6 }}>
         <Grip setRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
         <button onClick={() => setOpen(!open)} className="text-slate-500 hover:text-slate-300">
@@ -271,7 +271,7 @@ export function BoardRow({ board, folderId, depth, selected, onSelect }: {
       className={`group flex items-center gap-1 rounded-md pr-1 ${isDragging ? 'opacity-40' : ''} ${selected ? 'bg-violet-600/20' : 'hover:bg-slate-800/60'}`}>
       <Grip setRef={setActivatorNodeRef} attributes={attributes} listeners={listeners} />
       <button onClick={onSelect}
-        className={`flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left text-sm ${selected ? 'text-violet-200' : 'text-slate-400'}`}>
+        className={`flex min-w-0 flex-1 items-center gap-2 py-2.5 text-left text-sm lg:py-1.5 ${selected ? 'text-violet-200' : 'text-slate-400'}`}>
         <SquareKanban size={13} className="shrink-0" />
         <span className="truncate">{board.name}</span>
       </button>

@@ -34,14 +34,16 @@ export function Menu({ trigger, items, align = 'right', fullWidth }: { trigger: 
             <div key={i} className="group flex items-center">
               <button
                 onClick={(e) => { e.stopPropagation(); setOpen(false); it.onClick(); }}
-                className={`block flex-1 truncate px-3 py-1.5 text-left text-xs ${it.danger ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-200 hover:bg-slate-800'}`}>
+                className={`block flex-1 truncate px-3 py-2.5 text-left text-xs lg:py-1.5 ${it.danger ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-200 hover:bg-slate-800'}`}>
                 {it.label}
               </button>
               {it.onDelete && (
                 <button
                   onClick={(e) => { e.stopPropagation(); it.onDelete!(); }}
                   title="Delete"
-                  className="mr-1.5 shrink-0 rounded p-1 text-slate-500 opacity-0 hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100">
+                  /* Hover-revealed on desktop; a touch screen has no hover, so there it is
+                     simply visible. */
+                  className="mr-1.5 shrink-0 rounded p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-400 lg:p-1 lg:opacity-0 lg:group-hover:opacity-100">
                   <Trash2 size={12} />
                 </button>
               )}

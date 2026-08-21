@@ -189,7 +189,7 @@ export function Workspace() {
             <TimerChip />
             <NotificationsBell />
             <button onClick={() => setShowTimer(true)} title="Focus timer"
-              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800 sm:px-2.5">
+              className="flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800">
               <Timer size={14} /> <span className="hidden sm:inline">Focus</span>
             </button>
             <div className="hidden items-center gap-2 lg:flex">
@@ -200,14 +200,17 @@ export function Workspace() {
                   in two workspaces had no way to move between them. */}
               <WorkspaceSwitcher />
             </div>
+            {/* On phones the Admin tab reaches Settings and the drawer carries Sign
+                out; keeping both here as 32px icons only crowded the one row that
+                has to hold the timer and the bell. */}
             <button onClick={() => setView('settings')} title="Settings"
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg hover:bg-slate-800 hover:text-slate-200 ${
+              className={`hidden h-9 w-9 shrink-0 place-items-center rounded-lg hover:bg-slate-800 hover:text-slate-200 lg:grid ${
                 view === 'settings' ? 'text-[var(--accent)]' : 'text-slate-400'
               }`}>
               <Settings size={15} />
             </button>
             <button onClick={logout} title="Sign out"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200">
+              className="hidden h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200 lg:grid">
               <LogOut size={15} />
             </button>
           </div>

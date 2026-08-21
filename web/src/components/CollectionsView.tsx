@@ -111,7 +111,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                   <Mail size={14} /> {chase.isPending ? 'Sending' : sel.size ? `Chase selected (${sel.size})` : 'Chase all'}
                 </button>
               </div>
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
@@ -187,6 +187,57 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Cards for phones: chasing debtors is exactly the job done from a
+                  phone in a spare minute, and the seven-column table made it a
+                  zoom-and-squint exercise. */}
+              <div className="overflow-hidden rounded-xl border border-slate-800 sm:hidden">
+                {data.items.map((i) => (
+                  <div key={i.id} className="border-t border-slate-800 px-3 py-3 first:border-t-0">
+                    <div className="flex items-start gap-3">
+                      <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)}
+                        disabled={!i.clientEmail}
+                        aria-label={`Select invoice ${i.number}`}
+                        className="mt-1 accent-violet-500 disabled:opacity-30" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="num font-medium text-slate-200">{i.number}</span>
+                          {i.suspended && (
+                            <span className="flex items-center gap-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-300">
+                              <AlertTriangle size={10} /> At risk
+                            </span>
+                          )}
+                        </div>
+                        <div className="truncate text-sm text-slate-400">{i.clientName}</div>
+                        <div className="num mt-0.5 text-[11px] text-slate-500">
+                          <span className={i.daysOverdue >= 14 ? 'text-red-300' : 'text-amber-300'}>{i.daysOverdue}d overdue</span>
+                          {', last reminder '}{i.lastReminderOn ?? 'never'}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className="num font-semibold text-slate-100">{money(i.outstanding, i.currency)}</div>
+                        {Math.abs(i.outstanding - i.total) > 0.005 && (
+                          <div className="num text-[10px] text-slate-500">of {money(i.total, i.currency)}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="mt-2 flex justify-end gap-2">
+                      {i.folderId && (
+                        <button onClick={() => setStatementFor(i.folderId)}
+                          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800">
+                          <FileText size={13} /> Statement
+                        </button>
+                      )}
+                      {i.clientEmail && (
+                        <button onClick={() => chase.mutate([i.id])} disabled={chase.isPending}
+                          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                          <Mail size={13} /> Chase
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
               </>
             )}

@@ -267,7 +267,7 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
     <div className={showHeader ? 'mb-1 border-t border-slate-800/70 pt-1 first:border-t-0' : ''}>
       {showHeader && (
         <button onClick={toggle}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-slate-800/40">
+          className="flex w-full items-center gap-2 rounded-md px-2 py-2.5 text-left hover:bg-slate-800/40 lg:py-1.5">
           {open ? <ChevronDown size={12} className="shrink-0 text-slate-500" /> : <ChevronRight size={12} className="shrink-0 text-slate-500" />}
           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: business.color }} />
           <span className="truncate text-xs font-semibold text-slate-200">{business.name}</span>

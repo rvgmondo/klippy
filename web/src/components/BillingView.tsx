@@ -101,18 +101,18 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
             {(['invoice', 'quote'] as DocType[]).map((t) => (
               <button key={t} onClick={() => setTab(t)}
-                className={`rounded-md px-3 py-1.5 text-xs font-medium capitalize ${tab === t ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                className={`min-h-10 rounded-md px-3 text-xs font-medium capitalize sm:min-h-9 ${tab === t ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
                 {t}s
               </button>
             ))}
           </div>
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New {tab}
           </button>
         </div>
 
-        <div className="overflow-x-auto rounded-xl border border-slate-800">
+        <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
               <tr>
@@ -193,6 +193,64 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* The same list as cards for phones. Six columns of 14px table with 32px
+            icon strips was the single worst screen to run a business from; a card
+            per document gives the number, the money and finger-sized actions. */}
+        <div className="overflow-hidden rounded-xl border border-slate-800 sm:hidden">
+          {docs.length === 0 && (
+            <div className="px-3 py-6">
+              <EmptyState
+                title={tab === 'invoice' ? 'No invoices yet' : 'No quotes yet'}
+                body={tab === 'invoice'
+                  ? 'Raise your first invoice, or pull one straight from tracked time.'
+                  : 'A quote a client accepts becomes an invoice in one click.'}
+                actionLabel={tab === 'invoice' ? 'New invoice' : 'New quote'}
+                onAction={() => setEditing('new')}
+              />
+            </div>
+          )}
+          {docs.map((d) => (
+            <div key={d.id} className="border-t border-slate-800 px-3 py-3 first:border-t-0">
+              <button onClick={() => setEditing(d.id)} className="flex w-full items-start justify-between gap-3 text-left">
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2">
+                    <span className="num font-medium text-slate-200">{d.number}</span>
+                    {d.type === 'quote' && d.status === 'sent' && d.dueDate && d.dueDate < todayStr && (
+                      <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">Expired</span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block truncate text-sm text-slate-400">{d.clientName}</span>
+                  <span className="num mt-0.5 block text-[11px] text-slate-500">{d.issueDate}</span>
+                </span>
+                <span className="shrink-0 text-right">
+                  <span className="num block text-base font-semibold text-slate-100">{money(d.total, d.currency)}</span>
+                  <span className={`mt-1 inline-block rounded-md px-2 py-0.5 text-[11px] ${STATUS_COLOR[d.status]}`}>{d.status}</span>
+                </span>
+              </button>
+              <div className="mt-2 flex items-center justify-end gap-1">
+                <button onClick={() => setEditing(d.id)} title="Edit" className="tap text-slate-400 hover:bg-slate-800 hover:text-slate-200"><Pencil size={16} /></button>
+                {d.type === 'invoice' && (
+                  <button onClick={() => setPaying(d)} title="Payments" className="tap text-slate-400 hover:bg-slate-800 hover:text-green-300"><DollarSign size={16} /></button>
+                )}
+                <Menu align="right"
+                  trigger={<span className="tap text-slate-400 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={17} /></span>}
+                  items={[
+                    { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
+                    { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
+                    ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
+                      ? [{ label: 'Open PayFast checkout', onClick: () => payOnline(d.id) }] : []),
+                    ...(d.type === 'quote'
+                      ? [{ label: 'Convert to invoice', onClick: () => convert.mutate(d.id) }] : []),
+                    ...(d.type === 'quote' && d.status === 'sent'
+                      ? [{ label: 'Copy accept link', onClick: () => copyQuoteLink(d.id) }] : []),
+                    { label: d.status === 'draft' ? 'Delete' : 'Void', danger: true, onClick: async () => { if (await confirmDialog(d.status === 'draft' ? `Delete ${d.number}?` : `Void ${d.number}? The number is kept, the amount drops out of balances.`, { danger: true })) del.mutate(d.id); } },
+                  ]}
+                />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

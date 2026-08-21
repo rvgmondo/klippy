@@ -259,7 +259,7 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
       <DndContext sensors={sensors} collisionDetection={closestCorners}
         onDragStart={(e: DragStartEvent) => setActiveId(String(e.active.id))}
         onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
+        <div className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4">
           <SortableContext items={data.columns.map((c) => colKey(c.id))} strategy={horizontalListSortingStrategy}>
             {data.columns.map((col) => (
               <ColumnLane key={col.id} column={col} boardId={boardId}
@@ -319,7 +319,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
 
   return (
     <div ref={setNodeRef} style={style}
-      className={`group/col flex max-h-full w-72 shrink-0 flex-col rounded-xl border bg-slate-900/40 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
+      className={`group/col flex max-h-full w-72 shrink-0 snap-start scroll-ml-4 flex-col rounded-xl border bg-slate-900/40 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-violet-500/60 bg-violet-500/5' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <span ref={setActivatorNodeRef} {...attributes} {...listeners}
           className="-ml-1 cursor-grab text-slate-500 hover:text-slate-300 active:cursor-grabbing" title="Drag to reorder">

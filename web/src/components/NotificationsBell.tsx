@@ -68,7 +68,7 @@ export function NotificationsBell() {
   return (
     <div ref={ref} className="relative shrink-0">
       <button onClick={toggle} title="Notifications" aria-label={`Notifications${data?.unread ? `, ${data.unread} unread` : ''}`}
-        className="relative grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200">
+        className="relative grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200">
         <Bell size={15} />
         {(data?.unread ?? 0) > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-violet-500 px-1 text-[9px] font-bold leading-4 text-white">
@@ -78,7 +78,10 @@ export function NotificationsBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 w-80 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+        /* Anchored to the bell on desktop; on a phone that anchor would hang the
+           320px panel off the left edge, so it becomes a full-width sheet under
+           the header instead. */
+        <div className="fixed inset-x-2 top-[calc(3.5rem+env(safe-area-inset-top)+0.25rem)] z-50 overflow-hidden rounded-xl border border-slate-700 bg-slate-900 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-10 sm:w-80">
           <div className="border-b border-slate-800 px-3 py-2 text-xs font-semibold text-slate-300">
             Notifications
           </div>

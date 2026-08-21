@@ -206,16 +206,16 @@ export function TodayView({ businessId, onNavigate }: {
           </div>
           <div className="flex items-center gap-1">
             <button onClick={() => setDate(shiftDate(date, -1))} title="Previous day"
-              className="grid h-8 w-8 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200">
-              <ChevronLeft size={15} />
+              className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 sm:h-9 sm:w-9">
+              <ChevronLeft size={16} />
             </button>
             <button onClick={() => setDate(todayStr())}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+              className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">
               Today
             </button>
             <button onClick={() => setDate(shiftDate(date, 1))} title="Next day"
-              className="grid h-8 w-8 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200">
-              <ChevronRight size={15} />
+              className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 sm:h-9 sm:w-9">
+              <ChevronRight size={16} />
             </button>
           </div>
 
@@ -390,16 +390,16 @@ function Block({ task, running, onToggleTimer, onOpen, onUnschedule, onEstimate 
             being worked on and one click stops it. */}
         <div className={`flex shrink-0 items-center gap-0.5 group-hover:opacity-100 max-lg:opacity-100 ${running ? '' : 'opacity-0'}`}>
           <button onClick={onToggleTimer} title={running ? 'Stop timer' : 'Start timer'}
-            className={`rounded p-1 ${running
+            className={`tap ${running
               ? 'text-[var(--accent)] hover:bg-slate-800'
               : 'text-slate-500 hover:bg-slate-700 hover:text-slate-200'}`}>
-            {running ? <Square size={12} /> : <Play size={12} />}
+            {running ? <Square size={13} /> : <Play size={13} />}
           </button>
           <EstimateMenu value={task.estimateMinutes} onPick={onEstimate} />
           <button onClick={onOpen} title="Open card"
-            className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200"><Clock size={12} /></button>
+            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200"><Clock size={13} /></button>
           <button onClick={onUnschedule} title="Unschedule"
-            className="rounded p-1 text-slate-500 hover:bg-red-500/10 hover:text-red-400"><X size={12} /></button>
+            className="tap text-slate-500 hover:bg-red-500/10 hover:text-red-400"><X size={13} /></button>
         </div>
       </div>
 
@@ -420,7 +420,7 @@ function EstimateMenu({ value, onPick }: { value: number | null; onPick: (m: num
     <div className="relative">
       <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         title="Estimate"
-        className={`num rounded px-1.5 py-1 text-[11px] ${value == null ? 'text-amber-400/90 hover:bg-amber-500/10' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
+        className={`num tap px-1.5 text-[11px] ${value == null ? 'text-amber-400/90 hover:bg-amber-500/10' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}>
         {value == null ? 'est?' : fmtDuration(value)}
       </button>
       {open && (
@@ -450,8 +450,8 @@ function ScheduleMenu({ onPick }: { onPick: (hour: number) => void }) {
   return (
     <div className="relative">
       <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} title="Schedule"
-        className="rounded p-1 text-slate-500 hover:bg-slate-700 hover:text-slate-200">
-        <CalendarPlus size={12} />
+        className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200">
+        <CalendarPlus size={13} />
       </button>
       {open && (
         <>
@@ -611,8 +611,8 @@ function BacklogCard({ task, onOpen, onEstimate, onSchedule }: { task: DayTask; 
           <EstimateMenu value={task.estimateMinutes} onPick={onEstimate} />
           <ScheduleMenu onPick={onSchedule} />
           <button onClick={onOpen} title="Open card"
-            className="rounded p-1 text-slate-500 opacity-0 hover:bg-slate-700 hover:text-slate-200 group-hover:opacity-100 max-lg:opacity-100">
-            <Clock size={12} />
+            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200 lg:opacity-0 lg:group-hover:opacity-100">
+            <Clock size={13} />
           </button>
         </div>
       </div>

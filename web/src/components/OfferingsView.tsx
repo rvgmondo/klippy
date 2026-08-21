@@ -105,7 +105,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
         <div className="mb-1 flex items-center gap-3">
           <h1 className="text-lg font-semibold text-slate-100">Offerings</h1>
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New offering
           </button>
         </div>
@@ -183,9 +183,9 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                     <div className="flex justify-end gap-1">
                       <button onClick={() => toggleActive.mutate({ id: o.id, active: !o.active })}
                         title={o.active ? 'Archive' : 'Reactivate'}
-                        className="text-[11px] text-slate-500 hover:text-slate-200">{o.active ? 'Archive' : 'Reactivate'}</button>
-                      <button onClick={() => setEditing(o)} title="Edit" className="text-slate-500 hover:text-slate-200"><Pencil size={14} /></button>
-                      <button onClick={async () => { if (await confirmDialog(`Delete "${o.name}"?`, { danger: true })) del.mutate(o.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                        className="tap px-2 text-[11px] text-slate-500 hover:bg-slate-800 hover:text-slate-200">{o.active ? 'Archive' : 'Reactivate'}</button>
+                      <button onClick={() => setEditing(o)} title="Edit" className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Pencil size={14} /></button>
+                      <button onClick={async () => { if (await confirmDialog(`Delete "${o.name}"?`, { danger: true })) del.mutate(o.id); }} title="Delete" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -199,8 +199,8 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
             <div className="mb-1 mt-8 flex items-center gap-3">
               <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200"><Repeat size={14} /> Subscriptions</h2>
               <button onClick={() => setStartingSub(true)}
-                className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800">
-                <Plus size={13} /> Start subscription
+                className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-200 hover:bg-slate-800 min-h-10 sm:min-h-9">
+                <Plus size={14} /> Start subscription
               </button>
             </div>
             <p className="mb-4 text-xs text-slate-500">Bills a client automatically every month for a recurring offering. Invoices land as drafts for you to review before sending.</p>
@@ -240,9 +240,9 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                         )}
                         <button
                           onClick={() => setPricing(s)}
-                          className="ml-1.5 text-slate-600 hover:text-slate-300"
+                          className="tap ml-1 text-slate-600 hover:bg-slate-800 hover:text-slate-300"
                           title="Change what this client pays">
-                          <Pencil size={11} />
+                          <Pencil size={12} />
                         </button>
                       </td>
                       <td className="px-3 py-2">
@@ -274,15 +274,15 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           {s.status === 'active' && (
-                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'paused' })} title="Pause" className="text-slate-500 hover:text-amber-300"><Pause size={14} /></button>
+                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'paused' })} title="Pause" className="tap text-slate-500 hover:bg-slate-800 hover:text-amber-300"><Pause size={14} /></button>
                           )}
                           {s.status === 'paused' && (
-                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'active' })} title="Resume" className="text-slate-500 hover:text-green-300"><Play size={14} /></button>
+                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'active' })} title="Resume" className="tap text-slate-500 hover:bg-slate-800 hover:text-green-300"><Play size={14} /></button>
                           )}
                           {s.status !== 'canceled' && (
-                            <button onClick={async () => { if (await confirmDialog('Cancel this subscription? It will stop billing.', { danger: true })) setSubStatus.mutate({ id: s.id, status: 'canceled' }); }} title="Cancel" className="text-slate-500 hover:text-red-400"><XCircle size={14} /></button>
+                            <button onClick={async () => { if (await confirmDialog('Cancel this subscription? It will stop billing.', { danger: true })) setSubStatus.mutate({ id: s.id, status: 'canceled' }); }} title="Cancel" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><XCircle size={14} /></button>
                           )}
-                          <button onClick={async () => { if (await confirmDialog('Delete this subscription record entirely?', { danger: true })) delSub.mutate(s.id); }} title="Delete" className="text-slate-500 hover:text-red-400"><Trash2 size={14} /></button>
+                          <button onClick={async () => { if (await confirmDialog('Delete this subscription record entirely?', { danger: true })) delSub.mutate(s.id); }} title="Delete" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><Trash2 size={14} /></button>
                         </div>
                       </td>
                     </tr>

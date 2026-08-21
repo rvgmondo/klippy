@@ -111,17 +111,17 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
           {typeof businessId === 'number' && (
             <button onClick={() => setShowLeadForm(true)}
               title="A public form whose submissions land here as leads"
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+              className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
               Lead form
             </button>
           )}
           {s && (s.wonCount + s.lostCount) > 0 && (
             <button onClick={() => setShowInsights((v) => !v)}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+              className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
               {showInsights ? 'Hide insights' : 'Insights'}
             </button>
           )}
-          <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+          <button onClick={() => setAdding(true)} className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New deal
           </button>
         </div>
@@ -183,7 +183,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
         }} />
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
+        <div className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4">
           {STAGES.map((st) => (
             <StageLane key={st.key} stage={st} deals={deals.filter((d) => d.stage === st.key)}
               money={money} onOpen={setEditing}
@@ -270,7 +270,7 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onOpenCli
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.key}` });
   const total = deals.reduce((s, d) => s + Number(d.value), 0);
   return (
-    <div ref={setNodeRef} className={`flex max-h-full w-72 shrink-0 flex-col rounded-2xl border bg-slate-900 ${isOver ? 'border-[var(--accent)]/60 bg-[var(--accent-quiet)]' : 'border-slate-800'}`}>
+    <div ref={setNodeRef} className={`flex max-h-full w-72 shrink-0 snap-start scroll-ml-4 flex-col rounded-2xl border bg-slate-900 ${isOver ? 'border-[var(--accent)]/60 bg-[var(--accent-quiet)]' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 px-3 py-2.5">
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: stage.color }} />
         <span className="font-display text-sm font-semibold text-slate-200">{stage.label}</span>
@@ -312,7 +312,7 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onOpenClient }: {
           {deal.company && <p className="truncate text-xs text-slate-400">{deal.company}</p>}
         </div>
         <Menu align="right"
-          trigger={<span className="text-slate-500 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
+          trigger={<span className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
           items={[
             ...(deal.clientFolderId
               ? [{ label: 'Open client (Delivery)', onClick: () => onOpenClient?.(deal.clientFolderId!) }]

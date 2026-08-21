@@ -84,7 +84,10 @@ function CurrencyLane({ lane, many }: { lane: Lane; many: boolean }) {
       {/* One column per week, invoices and subscriptions stacked. Bars, because the
           question is "which weeks are thin", and a table hides that shape. */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        <div className="grid grid-cols-9 gap-2">
+        {/* Nine columns cannot shrink to a phone; the chart keeps its readable
+            width and scrolls sideways instead, overdue column first in view. */}
+        <div className="overflow-x-auto">
+        <div className="grid min-w-[560px] grid-cols-9 gap-2 sm:min-w-0">
           <BarColumn label="Overdue" value={lane.overdue} peak={peak} currency={lane.currency}
             segments={[{ amount: lane.overdue, className: 'bg-red-500/70' }]} />
           {lane.buckets.map((b) => (
@@ -94,6 +97,7 @@ function CurrencyLane({ lane, many }: { lane: Lane; many: boolean }) {
                 { amount: b.subscriptions, className: 'bg-sky-500/70' },
               ]} />
           ))}
+        </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-4 text-[11px] text-slate-500">
           <span className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-sm bg-violet-500/80" /> Invoices due</span>

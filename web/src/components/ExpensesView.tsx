@@ -43,7 +43,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
         <div className="mb-1 flex items-center gap-3">
           <h1 className="text-lg font-semibold text-slate-100">Expenses</h1>
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New expense
           </button>
         </div>
