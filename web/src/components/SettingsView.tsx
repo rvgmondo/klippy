@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User, Palette, Building2, Receipt, BellRing, Mail, Users, Building,
-  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, Trash2,
+  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, Trash2, MessageSquare,
   type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -27,6 +27,7 @@ import { AccountPanel } from './AccountPanel';
 import { ModulesPanel } from './ModulesPanel';
 import { PdfDesignPanel } from './PdfDesignPanel';
 import { TrashPanel } from './TrashPanel';
+import { MessagingPanel } from './MessagingPanel';
 
 /**
  * Settings as a real page.
@@ -40,9 +41,9 @@ import { TrashPanel } from './TrashPanel';
 
 type SectionId =
   | 'profile' | 'appearance'
-  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting'
+  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting' | 'biz:messaging'
   | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'connections' | 'automation'
-  | 'labels' | 'tokens' | 'notes' | 'trash';
+  | 'labels' | 'tokens' | 'notes' | 'trash' | 'messaging';
 
 interface Item { id: SectionId; label: string; icon: LucideIcon; hint?: string }
 
@@ -59,6 +60,7 @@ const BUSINESS: Item[] = [
   { id: 'biz:payments', label: 'Payments', icon: CreditCard, hint: 'The merchant account this business is paid into' },
   { id: 'biz:hosting', label: 'Hosting', icon: Server, hint: 'The WHM server new hosting accounts are created on' },
   { id: 'biz:reminders', label: 'Payment reminders', icon: BellRing, hint: 'When unpaid invoices get chased' },
+  { id: 'biz:messaging', label: 'SMS and WhatsApp', icon: MessageSquare, hint: 'Reminders by text, with this business\'s own sender' },
   { id: 'biz:email', label: 'Email', icon: Mail, hint: 'What this business sends from' },
   { id: 'biz:access', label: 'Access', icon: Shield, hint: 'Who can work in this business' },
 ];
@@ -69,6 +71,7 @@ const ACCOUNT: Item[] = [
   { id: 'people', label: 'People', icon: Users, hint: 'Who can sign in' },
   { id: 'teams', label: 'Teams', icon: Users, hint: 'Group people for assignment' },
   { id: 'payments', label: 'Payments', icon: CreditCard, hint: 'PayFast and online payment links' },
+  { id: 'messaging', label: 'SMS and WhatsApp', icon: MessageSquare, hint: 'Reminders by text message' },
   { id: 'hosting', label: 'Hosting', icon: Server, hint: 'Create cPanel accounts when hosting invoices are paid' },
   { id: 'connections', label: 'Connections', icon: Server, hint: 'Where each business banks, hosts and sends from' },
   { id: 'automation', label: 'Automation', icon: Zap, hint: 'Scheduled jobs and when they last ran' },
@@ -176,6 +179,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     if (id === 'biz:pdf') return <PdfDesignPanel business={business} />;
     if (id === 'biz:payments') return <PaymentsPanel businessId={business.id} />;
     if (id === 'biz:hosting') return <HostingPanel businessId={business.id} />;
+    if (id === 'biz:messaging') return <MessagingPanel businessId={business.id} />;
     return <BusinessSettingsPanel business={business} only={id.slice(4) as BusinessSection} />;
   }
   switch (id) {
@@ -193,6 +197,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     case 'tokens': return <TokensPanel />;
     case 'notes': return <NotesPanel />;
     case 'trash': return <TrashPanel />;
+    case 'messaging': return <MessagingPanel />;
     default: return null;
   }
 }

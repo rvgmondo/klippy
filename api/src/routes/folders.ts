@@ -29,6 +29,7 @@ const updateSchema = z.object({
   hourlyRate: z.number().nonnegative().max(100000).nullable().optional(),
   monthlyHoursBudget: z.number().nonnegative().max(10000).nullable().optional(),
   billingEmail: z.string().trim().email().max(150).nullable().optional().or(z.literal('')),
+  billingPhone: z.string().trim().max(40).nullable().optional(),
   // The client's own billing details. Editable here as well as by the client in
   // their portal, since whoever knows the right answer should be able to fix it.
   billingVatNumber: z.string().trim().max(60).nullable().optional(),
@@ -118,6 +119,9 @@ export async function folderRoutes(app: FastifyInstance) {
 
     // MySQL DECIMAL columns are string-typed in Drizzle.
     const patch: Record<string, unknown> = { ...parsed.data };
+    if (parsed.data.billingPhone !== undefined) {
+      patch.billingPhone = parsed.data.billingPhone?.trim() || null;
+    }
     if (parsed.data.monthlyHoursBudget !== undefined) {
       patch.monthlyHoursBudget = parsed.data.monthlyHoursBudget === null ? null : String(parsed.data.monthlyHoursBudget);
     }

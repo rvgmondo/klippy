@@ -4,7 +4,7 @@ import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { balanceOf, balancesFor } from '../lib/balances.js';
@@ -21,6 +21,7 @@ import { addDays } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
 import { quoteLinkFor } from './quotes.js';
+import { phoneForClient, sendReminderMessage, normalizePhone } from '../lib/messaging.js';
 import { renderStatementPdf } from '../lib/pdf.js';
 const lineSchema = z.object({
     description: z.string().trim().min(1).max(500),
@@ -165,9 +166,27 @@ export async function documentRoutes(app) {
         }
         const days = (d) => Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${d}T00:00:00Z`)) / 86400000);
         const round = (n) => Math.round(n * 100) / 100;
+        // Which clients can be reached by phone, for the WhatsApp button: the number on
+        // the client record, else any contact of theirs with a phone. One query each,
+        // not one per row.
+        const folderIds = [...new Set(rows.map((r) => r.folderId).filter((x) => x != null))];
+        const phoned = new Set();
+        if (folderIds.length) {
+            const fRows = await db.select({ id: folders.id, phone: folders.billingPhone }).from(folders)
+                .where(tenantWhere(folders, accountId, inArray(folders.id, folderIds)));
+            for (const f of fRows)
+                if (normalizePhone(f.phone))
+                    phoned.add(f.id);
+            const cRows = await db.select({ folderId: contacts.folderId, phone: contacts.phone }).from(contacts)
+                .where(tenantWhere(contacts, accountId, inArray(contacts.folderId, folderIds), isNotNull(contacts.phone)));
+            for (const c of cRows)
+                if (c.folderId != null && normalizePhone(c.phone))
+                    phoned.add(c.folderId);
+        }
         const items = rows
             .map((r) => ({
             id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
+            hasPhone: r.folderId != null && phoned.has(r.folderId),
             businessId: r.businessId, folderId: r.folderId, currency: r.currency, total: Number(r.total),
             // What is actually still owed, which is what you chase for.
             outstanding: round(Number(r.total) - (paidBy.get(r.id) ?? 0) - (creditedBy.get(r.id) ?? 0)),
@@ -298,6 +317,21 @@ export async function documentRoutes(app) {
                     .where(tenantWhere(documents, accountId, inArray(documents.id, group.map((r) => r.id))));
                 sent++;
                 covered += group.length;
+                // And the same chase by SMS/WhatsApp when those channels are on. One
+                // message per client, like the email: the oldest invoice named, the
+                // total owed, one pay link.
+                const phone = await phoneForClient(accountId, first.folderId);
+                if (phone) {
+                    const oldest = [...group].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))[0];
+                    const firstLink = links[0]?.replace(/^Pay [^:]+: /, '') ?? null;
+                    await sendReminderMessage(accountId, first.businessId, phone, {
+                        clientName: first.clientName,
+                        number: group.length === 1 ? first.number : `${oldest.number} and ${group.length - 1} more`,
+                        amount: formatMoney(owedTotal, first.currency),
+                        whenPhrase: group.length === 1 ? `was due on ${first.dueDate}` : 'are overdue',
+                        link: firstLink, brand: emailBrand.name,
+                    }, { kind: 'chase', docId: first.id });
+                }
             }
             catch { /* one bad address must not stop the rest */ }
         }

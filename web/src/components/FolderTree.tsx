@@ -105,6 +105,10 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
     mutationFn: (email: string) => apiPatch(`/folders/${folder.id}`, { billingEmail: email }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
+  const setBillingPhone = useMutation({
+    mutationFn: (phone: string) => apiPatch(`/folders/${folder.id}`, { billingPhone: phone || null }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
+  });
   const setRate = useMutation({
     mutationFn: (rate: number | null) => apiPatch(`/folders/${folder.id}`, { hourlyRate: rate }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
@@ -188,6 +192,12 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
               const v = await promptDialog('Where should invoices and payment reminders go? (blank to clear)', folder.billingEmail ?? '');
               if (v === null) return;
               setBillingEmail.mutate(v.trim());
+            } }] : []),
+            // The number WhatsApp reminders go to, and SMS when that is switched on.
+            ...(depth === 0 ? [{ label: folder.billingPhone ? `Phone: ${folder.billingPhone}` : 'Set phone number', onClick: async () => {
+              const v = await promptDialog('Mobile number for WhatsApp and SMS reminders (blank to clear)', folder.billingPhone ?? '');
+              if (v === null) return;
+              setBillingPhone.mutate(v.trim());
             } }] : []),
             // Only top-level folders are clients, and only a client has a portal.
             ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),

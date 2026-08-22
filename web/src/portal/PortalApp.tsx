@@ -505,6 +505,7 @@ function Details({ me, accent }: { me: PortalMe; accent: React.CSSProperties }) 
   const qc = useQueryClient();
   const [name, setName] = useState(me.user.name ?? '');
   const [billingEmail, setBillingEmail] = useState(me.client.billingEmail ?? '');
+  const [phone, setPhone] = useState(me.client.phone ?? '');
   const [vat, setVat] = useState(me.client.vatNumber ?? '');
   const [address, setAddress] = useState(me.client.address ?? '');
   const [password, setPassword] = useState('');
@@ -512,7 +513,7 @@ function Details({ me, accent }: { me: PortalMe; accent: React.CSSProperties }) 
 
   const save = useMutation({
     mutationFn: () => apiPatch('/portal/profile', {
-      name, billingEmail: billingEmail || null, vatNumber: vat || null, address: address || null,
+      name, billingEmail: billingEmail || null, phone: phone || null, vatNumber: vat || null, address: address || null,
     }),
     onSuccess: () => {
       setSaved('Saved.');
@@ -543,6 +544,8 @@ function Details({ me, accent }: { me: PortalMe; accent: React.CSSProperties }) 
       <div>
         <label className={label}>Where invoices should be sent</label>
         <input type="email" className={field} value={billingEmail} onChange={(e) => setBillingEmail(e.target.value)} />
+        <label className="mt-3 block text-xs font-medium text-slate-600">Mobile number (for WhatsApp or SMS reminders)
+          <input type="tel" inputMode="tel" className={field} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="082 123 4567" /></label>
       </div>
       <div>
         <label className={label}>VAT number</label>

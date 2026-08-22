@@ -67,6 +67,16 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     }
   }
 
+  // Click-to-chat: WhatsApp opens with the invoice (pay link) or quote (accept
+  // link) message written, sent from the founder's own phone.
+  const whatsapp = async (id: number) => {
+    try {
+      const r = await apiGet<{ url: string }>(`/documents/${id}/whatsapp-link`);
+      window.open(r.url, '_blank', 'noopener');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not build the WhatsApp link.', 'error');
+    }
+  };
   const todayStr = new Date().toISOString().slice(0, 10);
   // The signed public link a client can accept the quote on, no account needed.
   const copyQuoteLink = async (id: number) => {
@@ -178,6 +188,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                         items={[
                           { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
                           { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
+                          ...(d.status !== 'draft' && d.status !== 'void' ? [{ label: 'Send via WhatsApp', onClick: () => whatsapp(d.id) }] : []),
                           ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
                             ? [{ label: 'Open PayFast checkout', onClick: () => payOnline(d.id) }] : []),
                           ...(d.type === 'quote'
@@ -239,6 +250,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                   items={[
                     { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
                     { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
+                    ...(d.status !== 'draft' && d.status !== 'void' ? [{ label: 'Send via WhatsApp', onClick: () => whatsapp(d.id) }] : []),
                     ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
                       ? [{ label: 'Open PayFast checkout', onClick: () => payOnline(d.id) }] : []),
                     ...(d.type === 'quote'

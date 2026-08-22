@@ -11,6 +11,7 @@ import { mrrByCurrency } from './mrr.js';
 import { runHostingSuspensions } from './hosting.js';
 import { pruneLoginTokens } from './portalAuth.js';
 import { buildAccountExport } from './export.js';
+import { phoneForClient, sendReminderMessage } from './messaging.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -387,7 +388,6 @@ export async function runInvoiceReminders(): Promise<string> {
     eq(documents.type, 'invoice'),
     eq(documents.status, 'sent'),            // draft = not sent yet, paid/void = done
     isNotNull(documents.dueDate),
-    isNotNull(documents.clientEmail),
   ));
 
   // Each invoice is chased on its own business's schedule, so cache the schedule
@@ -447,11 +447,23 @@ export async function runInvoiceReminders(): Promise<string> {
         note: 'If you have already paid, please let us know so we can update our records.',
       };
       try {
-        await sendBusinessMail({
-          accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-          to: doc.clientEmail!, subject: `Action needed: invoice ${doc.number} overdue`,
-          text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
-        });
+        const phone = await phoneForClient(doc.accountId, doc.folderId);
+        if (!doc.clientEmail && !phone) continue;
+        if (doc.clientEmail) {
+          await sendBusinessMail({
+            accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
+            to: doc.clientEmail, subject: `Action needed: invoice ${doc.number} overdue`,
+            text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
+          });
+        }
+        // The same notice by SMS/WhatsApp when those channels are on: the email
+        // that gets ignored is exactly the one this exists to back up.
+        await sendReminderMessage(doc.accountId, doc.businessId, phone, {
+          clientName: doc.clientName, number: doc.number,
+          amount: formatMoney(doc.total, doc.currency),
+          whenPhrase: `was due on ${doc.dueDate} (${overdueBy} days ago)`,
+          link: payLink, brand: cfg.brand,
+        }, { kind: 'suspension', docId: doc.id });
         await db.update(documents).set({ lastReminderOn: today, suspendedAt: new Date() })
           .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
         suspended++;
@@ -489,11 +501,23 @@ export async function runInvoiceReminders(): Promise<string> {
     };
 
     try {
-      await sendBusinessMail({
-        accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-        to: doc.clientEmail!, subject,
-        text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
-      });
+      const phone = await phoneForClient(doc.accountId, doc.folderId);
+      if (!doc.clientEmail && !phone) continue;
+      if (doc.clientEmail) {
+        await sendBusinessMail({
+          accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
+          to: doc.clientEmail, subject,
+          text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
+        });
+      }
+      await sendReminderMessage(doc.accountId, doc.businessId, phone, {
+        clientName: doc.clientName, number: doc.number,
+        amount: formatMoney(doc.total, doc.currency),
+        whenPhrase: overdueBy > 0
+          ? `was due on ${doc.dueDate} (${overdueBy} day${overdueBy === 1 ? '' : 's'} ago)`
+          : overdueBy === 0 ? 'is due today' : `is due on ${doc.dueDate}`,
+        link: payLink, brand: cfg.brand,
+      }, { kind: 'reminder', docId: doc.id });
       await db.update(documents).set({ lastReminderOn: today })
         .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
       sent++;

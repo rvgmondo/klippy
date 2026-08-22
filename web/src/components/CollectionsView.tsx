@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, AlertTriangle, FileText } from 'lucide-react';
+import { Mail, AlertTriangle, FileText, MessageCircle } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
@@ -10,6 +10,8 @@ import { notify } from './ConfirmDialog';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
+  /** A phone is on the client or one of its contacts: WhatsApp works. */
+  hasPhone: boolean;
   businessId: number | null; folderId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
 }
@@ -48,6 +50,17 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+
+  // Click-to-chat: opens WhatsApp with the reminder already typed, pay link and
+  // all. The founder's own phone does the sending; nothing to configure.
+  const whatsapp = async (id: number) => {
+    try {
+      const r = await apiGet<{ url: string }>(`/documents/${id}/whatsapp-link`);
+      window.open(r.url, '_blank', 'noopener');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Could not build the WhatsApp link.', 'error');
+    }
+  };
 
   const chase = useMutation({
     mutationFn: (ids?: number[]) => apiPost<{ sent: number; covered: number; skipped: number }>(
@@ -174,6 +187,13 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                                 <FileText size={12} /> Statement
                               </button>
                             )}
+                            {i.hasPhone && (
+                              <button onClick={() => whatsapp(i.id)}
+                                title="Open WhatsApp with the reminder written, ready to send from your phone"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">
+                                <MessageCircle size={12} /> WhatsApp
+                              </button>
+                            )}
                             {i.clientEmail && (
                               <button onClick={() => chase.mutate([i.id])} disabled={chase.isPending}
                                 title="Email an overdue notice for this invoice now, statement attached"
@@ -229,6 +249,12 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                           <FileText size={13} /> Statement
                         </button>
                       )}
+                      {i.hasPhone && (
+                        <button onClick={() => whatsapp(i.id)}
+                          className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800">
+                          <MessageCircle size={13} /> WhatsApp
+                        </button>
+                      )}
                       {i.clientEmail && (
                         <button onClick={() => chase.mutate([i.id])} disabled={chase.isPending}
                           className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
@@ -242,8 +268,9 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
               </>
             )}
             <p className="text-[11px] text-slate-500">
+              WhatsApp opens a message on your own phone with the reminder and pay link written; you tap send.
               Chasing sends one email per client per currency listing everything owed, with a pay link for each invoice
-              and their statement attached. It also counts as the reminder, so the automatic schedule will not chase the
+              and their statement attached (and the same by SMS or WhatsApp when those are on under Settings). It also counts as the reminder, so the automatic schedule will not chase the
               same invoice again today. Reminders still send on each business's schedule, set in Business settings.
             </p>
           </>

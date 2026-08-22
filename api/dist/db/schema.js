@@ -320,6 +320,10 @@ export const folders = mysqlTable('folders', {
     // print, so letting them fix it is worth more than guarding it.
     billingVatNumber: varchar('billing_vat_number', { length: 60 }),
     billingAddress: text('billing_address'),
+    // Where reminders go when email is not enough. A South African client reads a
+    // WhatsApp in minutes and an email never; this is the number both the
+    // click-to-chat buttons and the automated SMS/WhatsApp reminders use.
+    billingPhone: varchar('billing_phone', { length: 40 }),
     // A retainer's monthly allowance in hours. Purely informational arithmetic:
     // the reports compare tracked hours against it so "we are over on this client"
     // is a fact on a screen instead of a month-end surprise.
@@ -1308,5 +1312,36 @@ export const notifications = mysqlTable('notifications', {
     createdAt: createdAt(),
 }, (t) => [
     index('idx_notifications_user').on(t.accountId, t.userId, t.readAt, t.id),
+]);
+// ---- Messaging (SMS / WhatsApp) settings -------------------------------------
+// Per account, optionally per business (0 = the workspace default), same scoping
+// as payment_settings: businesses are usually separate entities with their own
+// sender identities. Tokens are SECRETS, encrypted like the PayFast passphrase.
+// Nothing sends until a channel is switched on, and a channel can only be
+// switched on with credentials present.
+export const messagingSettings = mysqlTable('messaging_settings', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }).default(0).notNull(),
+    /** 'none' | 'bulksms'. A varchar so a second provider is a code change, not a migration. */
+    smsProvider: varchar('sms_provider', { length: 20 }).default('none').notNull(),
+    smsTokenId: varchar('sms_token_id', { length: 120 }),
+    smsTokenSecretEnc: text('sms_token_secret_enc'),
+    /** Registered sender id, when the provider supports one. Optional. */
+    smsSender: varchar('sms_sender', { length: 20 }),
+    // WhatsApp Cloud API (Meta): the business phone number id and a permanent token.
+    // Business-initiated messages must use an approved template; we send the
+    // named template with five ordered variables (see lib/messaging.ts).
+    waPhoneNumberId: varchar('wa_phone_number_id', { length: 40 }),
+    waAccessTokenEnc: text('wa_access_token_enc'),
+    waTemplateName: varchar('wa_template_name', { length: 100 }),
+    waTemplateLang: varchar('wa_template_lang', { length: 10 }).default('en').notNull(),
+    remindBySms: boolean('remind_by_sms').default(false).notNull(),
+    remindByWhatsapp: boolean('remind_by_whatsapp').default(false).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_messaging_settings_scope').on(t.accountId, t.businessId),
 ]);
 //# sourceMappingURL=schema.js.map

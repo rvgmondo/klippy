@@ -171,6 +171,7 @@ export async function portalRoutes(app: FastifyInstance) {
       client: {
         name: c.client.name,
         billingEmail: c.client.billingEmail,
+        phone: c.client.billingPhone,
         vatNumber: c.client.billingVatNumber,
         address: c.client.billingAddress,
       },
@@ -674,6 +675,7 @@ export async function portalRoutes(app: FastifyInstance) {
       billingEmail: z.string().email().max(150).nullable().optional(),
       vatNumber: z.string().trim().max(60).nullable().optional(),
       address: z.string().trim().max(500).nullable().optional(),
+      phone: z.string().trim().max(40).nullable().optional(),
     }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
@@ -685,6 +687,7 @@ export async function portalRoutes(app: FastifyInstance) {
     if (d.billingEmail !== undefined) clientPatch.billingEmail = d.billingEmail;
     if (d.vatNumber !== undefined) clientPatch.billingVatNumber = d.vatNumber;
     if (d.address !== undefined) clientPatch.billingAddress = d.address;
+    if (d.phone !== undefined) clientPatch.billingPhone = d.phone?.trim() || null;
     if (Object.keys(clientPatch).length) {
       await db.update(folders).set(clientPatch)
         .where(and(eq(folders.id, c.user.folderId), eq(folders.accountId, c.user.accountId)));
