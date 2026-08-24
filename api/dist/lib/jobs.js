@@ -122,7 +122,22 @@ export async function runDailyDigest() {
         const subject = overdue.length
             ? `Klippy: ${dueToday.length} due today, ${overdue.length} overdue`
             : `Klippy: ${dueToday.length} due today`;
-        await sendMail(u.email, subject, renderDigest(u.name, dueToday, overdue));
+        const digestBrand = await emailBrandFor(u.accountId, null);
+        const line = (t) => {
+            const where = [t.folderName, t.boardName].filter(Boolean).join(' / ');
+            return `${t.title}${t.priority !== 'none' ? ` [${t.priority}]` : ''}${where ? ` (${where})` : ''}`;
+        };
+        const digestHtml = renderEmail(digestBrand, {
+            heading: overdue.length ? `${dueToday.length} due today, ${overdue.length} overdue` : `${dueToday.length} due today`,
+            body: [
+                `Morning ${u.name},`,
+                ...(overdue.length ? [`Overdue (${overdue.length}):`, ...overdue.map((t) => `${line(t)}, was due ${t.dueDate}`)] : []),
+                ...(dueToday.length ? [`Due today (${dueToday.length}):`, ...dueToday.map(line)] : []),
+            ],
+            button: { label: 'Open Klippy', url: appUrl() },
+            note: 'To stop these, turn off the daily digest in Settings > Profile.',
+        });
+        await sendMail(u.email, subject, renderDigest(u.name, dueToday, overdue), digestHtml);
         sent++;
     }
     return `${sent} sent of ${recipients.length} considered`;
@@ -207,7 +222,7 @@ export async function runFinanceDigest() {
         };
         const brand = await emailBrandFor(accountId, null);
         for (const u of people) {
-            await sendMail(u.email, 'Klippy: your weekly money digest', renderEmail(brand, content))
+            await sendMail(u.email, 'Klippy: your weekly money digest', renderEmailText(brand, content), renderEmail(brand, content))
                 .then(() => { sent++; })
                 .catch(() => { });
         }
@@ -344,7 +359,21 @@ export async function runDealFollowUps() {
             '',
             'To stop these, clear the follow-up date on a deal.',
         ].join('\n');
-        await sendMail(u.email, `Klippy: ${list.length} to follow up${overdue ? `, ${overdue} overdue` : ''}`, body);
+        const fuBrand = await emailBrandFor(list[0].accountId, null);
+        const fuHtml = renderEmail(fuBrand, {
+            heading: overdue ? `${list.length} to follow up, ${overdue} overdue` : `${list.length} to follow up`,
+            body: [
+                `Morning ${u.name},`,
+                ...list.map((d) => {
+                    const late = daysBetween(today, d.nextFollowUpAt);
+                    const when = late === 0 ? 'today' : `${late} day${late === 1 ? '' : 's'} ago`;
+                    return `${d.title}${d.company ? ` (${d.company})` : ''}, due ${when}${d.followUpNote ? `: ${d.followUpNote}` : ''}`;
+                }),
+            ],
+            button: { label: 'Open the pipeline', url: `${appUrl()}?v=pipeline` },
+            note: 'To stop these, clear the follow-up date on a deal.',
+        });
+        await sendMail(u.email, `Klippy: ${list.length} to follow up${overdue ? `, ${overdue} overdue` : ''}`, body, fuHtml);
         sent++;
     }
     return `${sent} sent for ${due.length} deals due`;
@@ -524,8 +553,17 @@ export async function runBackupEmail() {
             const data = await buildAccountExport(accountId);
             const json = JSON.stringify(data);
             const attachment = { filename: `klippy-backup-${today}.json`, content: Buffer.from(json, 'utf-8') };
+            const bkBrand = await emailBrandFor(accountId, null);
+            const bkContent = {
+                heading: 'Your weekly backup',
+                body: [
+                    `Hi there,`,
+                    `Attached is this week's full export of ${list[0].accountName}: clients, boards, cards, time, contacts, deals, documents, payments, offerings, subscriptions and expenses.`,
+                    'Keep a copy somewhere that is not this server. That is the whole point of it.',
+                ],
+            };
             for (const o of list) {
-                await sendMail(o.email, `Your weekly Klippy backup (${o.accountName})`, `Hi ${o.name},\n\nAttached is this week's full export of ${o.accountName}: clients, boards, cards, time, contacts, deals, documents, payments, offerings, subscriptions and expenses.\n\nKeep a copy somewhere that is not this server. That is the whole point of it.`, undefined, [attachment]);
+                await sendMail(o.email, `Your weekly Klippy backup (${o.accountName})`, renderEmailText(bkBrand, bkContent), renderEmail(bkBrand, bkContent), [attachment]);
                 sent++;
             }
         }

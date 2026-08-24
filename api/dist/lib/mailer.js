@@ -23,12 +23,47 @@ function getTransport() {
     });
     return transport;
 }
-export async function sendMail(to, subject, text, html, attachments) {
+/**
+ * The seatbelt against the raw-HTML email.
+ *
+ * The weekly money digest once passed its rendered HTML as the TEXT argument,
+ * and every recipient got a screen of markup: nodemailer sends `text` as
+ * text/plain, verbatim. Rather than trusting every future call site to keep the
+ * two arguments straight, the senders below normalise: a body that is clearly an
+ * HTML document is moved to the html part and a readable text/plain fallback is
+ * derived from it. A mistake now degrades to a slightly plain email instead of
+ * a client-facing wall of code.
+ */
+export function looksLikeHtml(s) {
+    const head = s.trimStart().slice(0, 200).toLowerCase();
+    return head.startsWith('<!doctype') || head.startsWith('<html') || /^<(table|div|body|head|meta)\b/.test(head);
+}
+/** Crude but readable text out of an HTML body, for the text/plain part. */
+export function htmlToText(html) {
+    return html
+        .replace(/<style[\s\S]*?<\/style>/gi, '')
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|tr|table|h[1-6]|li)>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+/** Whatever a caller passed, come out with sane text and optional html. */
+export function normalizeBody(text, html) {
+    if (!html && looksLikeHtml(text))
+        return { text: htmlToText(text), html: text };
+    return { text, html };
+}
+export async function sendMail(to, subject, rawText, rawHtml, attachments) {
+    const { text, html } = normalizeBody(rawText, rawHtml);
     const t = getTransport();
     const from = process.env.SMTP_FROM ?? 'Klippy <no-reply@localhost>';
     if (!t) {
         // eslint-disable-next-line no-console
         console.log(`[mailer:not-configured] would send to ${to}: ${subject}`
+            + `${html ? ' (+html)' : ''}`
             + `${attachments?.length ? ` (attachments: ${attachments.map((a) => a.filename).join(', ')})` : ''}\n${text}`);
         return;
     }
@@ -90,6 +125,10 @@ function safeDecrypt(enc) {
     }
 }
 export async function sendBusinessMail(opts) {
+    // The same seatbelt as sendMail: HTML handed over as text becomes a proper
+    // html part with a derived text fallback, never a wall of markup.
+    const normalized = normalizeBody(opts.text, opts.html);
+    opts = { ...opts, text: normalized.text, html: normalized.html };
     // No business (legacy doc) -> the plain account sender.
     if (!opts.businessId) {
         const t = getTransport();
