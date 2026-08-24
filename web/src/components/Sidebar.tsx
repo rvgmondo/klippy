@@ -10,6 +10,7 @@ import {
 import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
 import { NewClientModal } from './NewClientModal';
+import { useUrlAction } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import { BusinessSwitcher, type BusinessSelection } from './BusinessSwitcher';
 import type { Business, Folder as TFolder } from '../lib/types';
@@ -97,6 +98,10 @@ function NavButton({ nav, view, onNavigate, compact }: {
 
 export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusinessChange, onSelectBoard }: Props) {
   const { account } = useAuth();
+  // The onboarding checklist (and anything else) can open the New Client modal
+  // by URL intent, without knowing where in the tree the button lives.
+  const [quickNewClient, setQuickNewClient] = useState(false);
+  useUrlAction('new-client', () => setQuickNewClient(true));
   const { data } = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
   const folders = data?.folders ?? [];
   const bizData = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
@@ -145,6 +150,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   }
 
   return (
+    <>
     <aside className="flex h-full w-full shrink-0 border-r border-slate-800 bg-slate-950/40">
       {/* The area rail: five words, always visible. An app switcher done right,
           five areas rather than forty apps. */}
@@ -217,6 +223,17 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         )}
       </div>
     </aside>
+      {quickNewClient && businesses[0] && (
+        <NewClientModal
+          businessId={(businessId !== 'all' && businesses.find((b) => b.id === businessId)) ? (businessId as number) : businesses[0].id}
+          businessName={(businessId !== 'all' && businesses.find((b) => b.id === businessId)?.name) || businesses[0].name}
+          pillar="delivery"
+          label={account?.folderLabelSingular ?? 'Client'}
+          onClose={() => setQuickNewClient(false)}
+          onCreated={() => setQuickNewClient(false)}
+        />
+      )}
+    </>
   );
 }
 

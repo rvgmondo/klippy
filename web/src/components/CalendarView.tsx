@@ -106,6 +106,12 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
 
       <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
         {isLoading && <Skeleton className="h-full min-h-64" />}
+        {!isLoading && (data?.tasks?.length ?? 0) === 0 && (eventsQ.data?.events?.length ?? 0) === 0 && (
+          <div className="mx-auto mb-3 max-w-md rounded-xl border border-dashed border-slate-700 p-4 text-center text-xs text-slate-500">
+            Nothing scheduled yet. Cards with due dates appear here on their own;
+            the Meeting button adds calls and appointments alongside them.
+          </div>
+        )}
         {!isLoading && (<>
         {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}

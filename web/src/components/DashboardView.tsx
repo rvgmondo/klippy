@@ -7,6 +7,7 @@ import { SkeletonTile } from './ui';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { setUrlParams } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
+import { OnboardingChecklist } from './OnboardingChecklist';
 import type { Priority, Folder, Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
@@ -91,6 +92,7 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
   return (
     <div className="h-full overflow-y-auto p-4 sm:p-6">
       <div className="mx-auto max-w-6xl space-y-5">
+        <OnboardingChecklist onNavigate={onNavigate} />
         {/* Hero */}
         <div className="flex items-end justify-between gap-4">
           <div>

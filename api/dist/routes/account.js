@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, isNotNull, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
+import { tenantWhere } from '../lib/tenant.js';
 import { buildAccountExport } from '../lib/export.js';
 import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
 import { publicAccount } from '../lib/publicAccount.js';
-import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings } from '../db/schema.js';
+import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings, documents } from '../db/schema.js';
 import { TEMPLATES } from '../lib/templates.js';
 import { inArray, isNull } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
@@ -226,6 +227,39 @@ export async function accountRoutes(app) {
      * (credentials, tokens, password hashes) stay out by construction because each
      * table lists its columns explicitly.
      */
+    /**
+     * The first-run checklist, computed rather than stored: each step is "does the
+     * thing exist yet", so it ticks itself the moment the work is done and can
+     * never drift out of step with reality.
+     */
+    app.get('/api/v1/onboarding', async (req) => {
+        const { accountId } = authOf(req);
+        const exists = async (q) => (await q).length > 0;
+        const [client, brand, offering, deal, invoice, pay] = await Promise.all([
+            exists(db.select({ id: folders.id }).from(folders)
+                .where(tenantWhere(folders, accountId, isNull(folders.parentId), eq(folders.pillar, 'delivery'), isNull(folders.deletedAt))).limit(1)),
+            exists(db.select({ id: businesses.id }).from(businesses)
+                .where(tenantWhere(businesses, accountId, isNotNull(businesses.brandName))).limit(1)),
+            exists(db.select({ id: offerings.id }).from(offerings)
+                .where(tenantWhere(offerings, accountId)).limit(1)),
+            exists(db.select({ id: deals.id }).from(deals)
+                .where(tenantWhere(deals, accountId)).limit(1)),
+            exists(db.select({ id: documents.id }).from(documents)
+                .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), ne(documents.status, 'draft'))).limit(1)),
+            exists(db.select({ id: paymentSettings.id }).from(paymentSettings)
+                .where(and(eq(paymentSettings.accountId, accountId), eq(paymentSettings.enabled, true))).limit(1)),
+        ]);
+        return {
+            steps: [
+                { key: 'client', done: client },
+                { key: 'brand', done: brand },
+                { key: 'offering', done: offering },
+                { key: 'deal', done: deal },
+                { key: 'invoice', done: invoice },
+                { key: 'payments', done: pay },
+            ],
+        };
+    });
     app.get('/api/v1/account/export', async (req, reply) => {
         const { accountId, role } = authOf(req);
         if (role === 'member')

@@ -188,6 +188,27 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-72 shrink-0" />)}
         </div>
       )}
+      {!isLoading && data && deals.length === 0 && (
+        <div className="mx-4 mt-4 rounded-xl border border-dashed border-slate-700 p-5 text-center">
+          <p className="text-sm font-medium text-slate-200">No deals yet</p>
+          <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
+            Add one by hand, or put your lead form on your website and in your email signature;
+            everyone who fills it in lands here on their own, marked with where they came from.
+          </p>
+          <div className="mt-3 flex justify-center gap-2">
+            <button onClick={() => setAdding(true)}
+              className="rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
+              New deal
+            </button>
+            {typeof businessId === 'number' && (
+              <button onClick={() => setShowLeadForm(true)}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
+                Get your lead form
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       {!isLoading && (
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <div className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4">
