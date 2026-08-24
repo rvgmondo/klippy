@@ -245,6 +245,25 @@ a:focus-visible,
 }
 
 /*
+ * Tailwind v4's preflight gives buttons the browser-default ARROW cursor, and no
+ * override existed, so every clickable thing in the app read as inert. The
+ * pointer is the oldest affordance on the web; restore it, and give disabled
+ * buttons the honest cursor instead.
+ */
+button:not(:disabled), [role='button'], summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/*
+ * Interactive state changes ease instead of snapping. 150ms: fast enough to feel
+ * immediate, slow enough to read as a response rather than a glitch. Colours and
+ * opacity only, so nothing ever animates layout.
+ */
+button, a, select {
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease,
+    opacity .15s ease, box-shadow .15s ease;
+}
+
+/*
  * Respect a reduced-motion preference (WCAG 2.3.3). Near-instant rather than fully
  * zero so state still changes visibly, just without the movement that can trigger
  * vestibular discomfort.

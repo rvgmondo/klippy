@@ -6,7 +6,7 @@ import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
-import { EmptyState } from './ui';
+import { EmptyState, Skeleton } from './ui';
 import { Modal } from './Modal';
 import { Menu } from './Menu';
 import { PrintView } from './InvoicePrintView';
@@ -40,7 +40,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const bizParam = businessId === 'all' ? '' : `&businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['documents', tab, businessId],
     queryFn: () => apiGet<{ documents: DocSummary[] }>(`/documents?type=${tab}${bizParam}`),
   });
@@ -122,6 +122,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           </button>
         </div>
 
+        {isLoading && <Skeleton className="h-56" />}
+        {!isLoading && (<>
         <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
@@ -264,6 +266,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
             </div>
           ))}
         </div>
+        </>)}
       </div>
 
       {editing && <Editor id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} />}

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss } from 'lucide-react';
 import { apiGet } from '../lib/api';
+import { Skeleton } from './ui';
 import { notify } from './ConfirmDialog';
 import type { CalendarTask, Priority } from '../lib/types';
 import { CardDetail } from './CardDetail';
@@ -45,7 +46,7 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
   };
 
   const range = useMemo(() => computeRange(view, cursor), [view, cursor]);
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['calendar', range.from, range.to],
     queryFn: () => apiGet<{ tasks: CalendarTask[] }>(`/tasks/calendar?from=${range.from}&to=${range.to}`),
   });
@@ -104,10 +105,13 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
+        {isLoading && <Skeleton className="h-full min-h-64" />}
+        {!isLoading && (<>
         {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'year' && <YearGrid cursor={cursor} byDay={byDay} onPick={(d) => { setCursor(d); setView('month'); }} />}
+        </>)}
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}

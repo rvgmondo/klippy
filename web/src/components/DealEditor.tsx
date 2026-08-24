@@ -85,16 +85,36 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New deal' : 'Edit deal'}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
-        <div className="space-y-2">
-          <input className={field} placeholder="Deal title (e.g. Website redesign)" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <input className={field} placeholder="Company" value={company} onChange={(e) => setCompany(e.target.value)} />
+        {/* Labels, not placeholder-only fields: a placeholder vanishes the moment
+            you type, and a half-filled form becomes a guessing game (WCAG 3.3.2). */}
+        <div className="space-y-2.5">
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-slate-400">Deal title</span>
+            <input className={field} placeholder="Website redesign" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-slate-400">Company</span>
+            <input className={field} value={company} onChange={(e) => setCompany(e.target.value)} />
+          </label>
           <div className="grid grid-cols-2 gap-2">
-            <input className={field} placeholder="Contact name" value={contactName} onChange={(e) => setContactName(e.target.value)} />
-            <input className={field} type="number" placeholder="Value" value={value} onChange={(e) => setValue(e.target.value)} />
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Contact name</span>
+              <input className={field} value={contactName} onChange={(e) => setContactName(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Deal value</span>
+              <input className={field} type="number" placeholder="0" value={value} onChange={(e) => setValue(e.target.value)} />
+            </label>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input className={field} placeholder="Email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
-            <input className={field} placeholder="Phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Email</span>
+              <input className={field} type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Phone</span>
+              <input className={field} type="tel" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+            </label>
           </div>
           <select className={field} value={contactId ?? ''}
             onChange={(e) => {
@@ -112,8 +132,10 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
             ))}
             <option value="__new">+ Save this person as a contact</option>
           </select>
-          <input className={field} placeholder="Where did this lead come from? (referral, Google, ...)"
-            value={source} onChange={(e) => setSource(e.target.value)} />
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-slate-400">Source</span>
+            <input className={field} placeholder="Referral, Google, walk-in" value={source} onChange={(e) => setSource(e.target.value)} />
+          </label>
 
           {/* The field that actually saves deals. A date turns "I must chase them"
               from something you remember at 2am into something on a list. */}
@@ -121,7 +143,7 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
             <div className="mb-1.5 text-[11px] font-medium text-slate-400">Follow up</div>
             <div className="grid grid-cols-2 gap-2">
               <input className={field} type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
-              <input className={field} placeholder="About what?" value={followUpNote}
+              <input className={field} placeholder="About what?" aria-label="What the follow-up is about" value={followUpNote}
                 onChange={(e) => setFollowUpNote(e.target.value)} />
             </div>
             <p className="mt-1 text-[11px] text-slate-500">
@@ -129,7 +151,10 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
             </p>
           </div>
 
-          <textarea className={field + ' min-h-16 resize-y'} placeholder="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-slate-400">Notes</span>
+            <textarea className={field + ' min-h-16 resize-y'} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
           {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</div>}
           <button onClick={() => title.trim() ? save.mutate() : setError('Give the deal a title.')} disabled={save.isPending}
             className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">

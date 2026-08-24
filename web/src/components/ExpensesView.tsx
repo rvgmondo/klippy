@@ -3,6 +3,7 @@ import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Receipt } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { Skeleton } from './ui';
 import type { Expense, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
@@ -23,7 +24,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['expenses', businessId],
     queryFn: () => apiGet<{ expenses: Expense[]; total: number }>(`/expenses${bizParam}`),
   });
@@ -49,6 +50,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
         </div>
         <p className="mb-5 text-xs text-slate-500">What this business actually spends. Tag one to a client to see per-client profit in Reports.</p>
 
+        {isLoading && <Skeleton className="h-48" />}
         {data && (
           <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2.5 text-sm text-slate-300">
             Total logged: <span className="font-semibold text-slate-100">{money(data.total)}</span>

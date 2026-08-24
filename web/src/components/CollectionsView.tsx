@@ -6,6 +6,7 @@ import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { money } from '../lib/money';
+import { Skeleton, SkeletonTile } from './ui';
 import { notify } from './ConfirmDialog';
 
 interface Item {
@@ -35,7 +36,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   const qc = useQueryClient();
   const [statementFor, setStatementFor] = useState<number | null>(null);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
-  const { data, error, refetch } = useQuery({
+  const { data, error, isLoading, refetch } = useQuery({
     queryKey: ['collections', businessId],
     queryFn: () => apiGet<Collections>(`/collections${bizQ}`),
     retry: false,
@@ -89,6 +90,13 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
         </div>
 
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
+
+        {isLoading && (
+          <>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3"><SkeletonTile /><SkeletonTile /><SkeletonTile /></div>
+            <Skeleton className="h-40" />
+          </>
+        )}
 
         {data && (
           <>

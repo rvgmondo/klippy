@@ -3,6 +3,7 @@ import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Pause, Play, XCircle } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
+import { Skeleton } from './ui';
 import type { Business, BusinessType, Offering, Subscription, Folder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
@@ -57,7 +58,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     setTypes.mutate(next);
   };
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['offerings', businessId],
     queryFn: () => apiGet<{
       offerings: Offering[];
@@ -145,6 +146,8 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           </div>
         )}
 
+        {isLoading && <Skeleton className="h-48" />}
+        {!isLoading && (
         <div className="overflow-x-auto rounded-xl border border-slate-800">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
@@ -193,6 +196,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
             </tbody>
           </table>
         </div>
+        )}
 
         {recurringOfferings.length > 0 && (
           <>

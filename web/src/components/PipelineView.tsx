@@ -6,6 +6,7 @@ import {
 } from '@dnd-kit/core';
 import { Plus, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
+import { Skeleton } from './ui';
 import { Menu } from './Menu';
 import type { Stage, Deal, Summary } from './pipelineShared';
 import { DealEditor } from './DealEditor';
@@ -38,7 +39,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   );
 
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
-  const { data } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });
+  const { data, isLoading } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });
   const deals = data?.deals ?? [];
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['deals'] });
@@ -182,6 +183,12 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
           if (d) setEditing(d);
         }} />
 
+      {isLoading && (
+        <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-4">
+          {[0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-72 shrink-0" />)}
+        </div>
+      )}
+      {!isLoading && (
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         <div className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4">
           {STAGES.map((st) => (
@@ -191,6 +198,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
           ))}
         </div>
       </DndContext>
+      )}
 
       {adding && <DealEditor businessId={newBusinessId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
       {showLeadForm && typeof businessId === 'number' && (

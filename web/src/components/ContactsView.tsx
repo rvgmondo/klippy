@@ -5,7 +5,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { confirmDialog, notify } from './ConfirmDialog';
-import { fieldClass } from './ui';
+import { fieldClass, Skeleton } from './ui';
 
 /**
  * The people you deal with, as a place of their own.
@@ -35,7 +35,7 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['contacts', businessId],
     queryFn: () => apiGet<{ contacts: Contact[] }>(`/contacts${bizParam}`),
   });
@@ -64,7 +64,9 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
           </button>
         </div>
 
-        {rows.length === 0 ? (
+        {isLoading ? (
+          <Skeleton className="h-48" />
+        ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-400">
             {all.length ? 'No contacts match that search.' : 'No contacts yet. Add the people you deal with, or save one from a deal.'}
           </div>
