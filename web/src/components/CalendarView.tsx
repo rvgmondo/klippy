@@ -9,6 +9,7 @@ import { CardDetail } from './CardDetail';
 import { QuickAddTask } from './QuickAddTask';
 import { MeetingModal, type CalendarEvent } from './MeetingModal';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { CanvasPage, PageHeader } from './PageHeader';
 
 type View = 'day' | 'week' | 'month' | 'year';
 
@@ -80,29 +81,30 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-y-2 border-b border-slate-800 px-3 py-3 sm:px-4">
-        <div className="flex items-center gap-2">
-          <button onClick={() => shift(-1)} title="Previous" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronLeft size={16} /></button>
-          <button onClick={() => shift(1)} title="Next" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronRight size={16} /></button>
-          <button onClick={() => setCursor(new Date())} className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">Today</button>
-          <button onClick={() => setMeetingDate(iso(new Date()))}
-            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90 sm:min-h-9">
-            <CalendarPlus size={14} /> <span className="hidden sm:inline">Meeting</span>
-          </button>
-          <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
-            className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9">
-            <Rss size={13} />
-          </button>
-          <h2 className="ml-2 font-display text-lg font-semibold text-slate-100">{titleFor(view, cursor)}</h2>
-        </div>
-        <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
+    <CanvasPage>
+      <PageHeader view="calendar" title={titleFor(view, cursor)}
+        actions={(
+          <>
+            <button onClick={() => shift(-1)} title="Previous" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronLeft size={16} /></button>
+            <button onClick={() => shift(1)} title="Next" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronRight size={16} /></button>
+            <button onClick={() => setCursor(new Date())} className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">Today</button>
+            <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
+              className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9">
+              <Rss size={13} />
+            </button>
+            <button onClick={() => setMeetingDate(iso(new Date()))}
+              className="flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-2.5 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90 sm:min-h-9">
+              <CalendarPlus size={14} /> Meeting
+            </button>
+          </>
+        )}>
+        <div className="flex w-fit gap-1 rounded-lg bg-slate-900 p-1">
           {(['day', 'week', 'month', 'year'] as View[]).map((v) => (
             <button key={v} onClick={() => setView(v)}
               className={`min-h-9 rounded-md px-3 text-xs font-medium capitalize ${view === v ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>{v}</button>
           ))}
         </div>
-      </div>
+      </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
         {isLoading && <Skeleton className="h-full min-h-64" />}
@@ -124,7 +126,7 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
       {addDate && <QuickAddTask dueDate={addDate} onClose={() => setAddDate(null)} />}
       {meetingDate && <MeetingModal defaultDate={meetingDate} businessId={businessId} onClose={() => setMeetingDate(null)} />}
       {openEvent && <MeetingModal existing={openEvent} businessId={businessId} onClose={() => setOpenEvent(null)} />}
-    </div>
+    </CanvasPage>
   );
 }
 

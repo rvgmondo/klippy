@@ -11,6 +11,7 @@ import { Modal } from './Modal';
 import { Menu } from './Menu';
 import { PrintView } from './InvoicePrintView';
 import { PaymentsModal } from './PaymentsModal';
+import { Page, PageHeader, PageBody } from './PageHeader';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { fieldClass } from './ui';
 import {
@@ -105,22 +106,25 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   });
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-5 flex items-center gap-3">
-          <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
-            {(['invoice', 'quote'] as DocType[]).map((t) => (
-              <button key={t} onClick={() => setTab(t)}
-                className={`min-h-10 rounded-md px-3 text-xs font-medium capitalize sm:min-h-9 ${tab === t ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-                {t}s
-              </button>
-            ))}
-          </div>
+    <Page>
+      <PageHeader view="billing" title="Billing"
+        subtitle="Quotes, invoices and what has been paid."
+        actions={(
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
+            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New {tab}
           </button>
+        )}>
+        <div className="flex w-fit gap-1 rounded-lg bg-slate-900 p-1">
+          {(['invoice', 'quote'] as DocType[]).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`min-h-9 rounded-md px-3 text-xs font-medium capitalize ${tab === t ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+              {t}s
+            </button>
+          ))}
         </div>
+      </PageHeader>
+      <PageBody>
 
         {isLoading && <Skeleton className="h-56" />}
         {!isLoading && (<>
@@ -267,12 +271,12 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           ))}
         </div>
         </>)}
-      </div>
+      </PageBody>
 
       {editing && <Editor id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
-    </div>
+    </Page>
   );
 }
 

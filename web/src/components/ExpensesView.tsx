@@ -10,6 +10,7 @@ import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
 import { useUrlAction } from '../lib/urlAction';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -39,16 +40,16 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
   const clientName = (id: number | null) => id == null ? null : clientFolders.find((f) => f.id === id)?.name ?? null;
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-1 flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-slate-100">Expenses</h1>
+    <Page>
+      <PageHeader view="expenses" title="Expenses"
+        subtitle="What this business actually spends. Tag one to a client to see per-client profit in Reports."
+        actions={(
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
+            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New expense
           </button>
-        </div>
-        <p className="mb-5 text-xs text-slate-500">What this business actually spends. Tag one to a client to see per-client profit in Reports.</p>
+        )} />
+      <PageBody>
 
         {isLoading && <Skeleton className="h-48" />}
         {data && (
@@ -94,7 +95,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
             </tbody>
           </table>
         </div>
-      </div>
+      </PageBody>
 
       {editing && (
         <ExpenseEditor
@@ -105,7 +106,7 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
           onSaved={() => { setEditing(null); invalidate(); }}
         />
       )}
-    </div>
+    </Page>
   );
 }
 

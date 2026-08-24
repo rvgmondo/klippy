@@ -11,6 +11,7 @@ import type { Priority, Folder as TFolder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
+import { CanvasPage, PageHeader } from './PageHeader';
 
 interface DayTask {
   id: number; title: string; priority: Priority; dueDate: string | null;
@@ -192,18 +193,11 @@ export function TodayView({ businessId, onNavigate }: {
   const hours = Array.from({ length: DAY_END_HOUR - DAY_START_HOUR }, (_, i) => DAY_START_HOUR + i);
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header: date nav + capacity */}
-      <div className="shrink-0 border-b border-slate-800 px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <h2 className="font-display text-lg font-semibold text-slate-100">
-              {isToday ? 'Today' : new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}
-            </h2>
-            <p className="num text-xs text-slate-500">
-              {new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}
-            </p>
-          </div>
+    <CanvasPage>
+      <PageHeader view="today"
+        title={isToday ? 'Today' : new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long' })}
+        subtitle={new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}
+        actions={(
           <div className="flex items-center gap-1">
             <button onClick={() => setDate(shiftDate(date, -1))} title="Previous day"
               className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 sm:h-9 sm:w-9">
@@ -218,9 +212,10 @@ export function TodayView({ businessId, onNavigate }: {
               <ChevronRight size={16} />
             </button>
           </div>
+        )}>
 
-          {/* Capacity: the point of the whole screen. */}
-          <div className="ml-auto w-full sm:w-72">
+        {/* Capacity: the point of the whole screen. */}
+        <div className="w-full sm:w-72">
             <div className="mb-1 flex items-baseline justify-between text-xs">
               <span className="text-slate-500">Planned</span>
               <span className={`num font-semibold ${cap?.overcommitted ? 'text-red-400' : 'text-violet-300'}`}>
@@ -251,9 +246,8 @@ export function TodayView({ businessId, onNavigate }: {
                 <span className="text-amber-400/90">{cap.unestimated} without an estimate</span>
               )}
             </div>
-          </div>
         </div>
-      </div>
+      </PageHeader>
 
       {error && (
         <div className="px-4 pt-4 sm:px-6">
@@ -303,7 +297,7 @@ export function TodayView({ businessId, onNavigate }: {
       </DndContext>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
-    </div>
+    </CanvasPage>
   );
 }
 

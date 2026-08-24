@@ -154,7 +154,9 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
     <aside className="flex h-full w-full shrink-0 border-r border-slate-800 bg-slate-950/40">
       {/* The area rail: five words, always visible. An app switcher done right,
           five areas rather than forty apps. */}
-      <div className="flex w-16 shrink-0 flex-col gap-1 border-r border-slate-800 bg-slate-950/70 px-1.5 pb-3 pt-2">
+      {/* Hidden on phones: the bottom tab bar already shows these five, 8px
+          below where this would draw them again. */}
+      <div className="hidden w-16 shrink-0 flex-col gap-1 border-r border-slate-800 bg-slate-950/70 px-1.5 pb-3 pt-2 lg:flex">
         <div className="mb-1 grid place-items-center py-1">
           {account?.hasLogo ? (
             <img src="/api/v1/account/logo" alt="" className="h-8 w-8 rounded-lg object-contain" />
@@ -180,20 +182,32 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
         })}
       </div>
 
-      {/* The active area's own column. */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-800 px-3">
+      {/*
+        The active area's own column.
+
+        It used to be here on every screen, 239px of it, and on Home and Admin it
+        held one sentence of filler. The area's sibling screens are now tabs at
+        the top of the content (see PageHeader), where they sit directly above
+        the thing they switch. What is genuinely a column of its own is the
+        clients-and-boards tree, so the column survives for Work and steps aside
+        everywhere else. On a phone the drawer IS the navigation, so it keeps the
+        full list there whatever the area.
+      */}
+      <div className={`flex w-[15rem] min-w-0 flex-1 flex-col ${
+        view === 'board' || view === 'today' ? '' : 'lg:hidden'}`}>
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-slate-800 px-3 lg:hidden">
           <span className="truncate font-semibold text-slate-100">{account?.brandName || 'Klippy'}</span>
         </div>
 
-        {/* The business you are in: a persistent context that follows you between
-            areas, so Work to Money is a glance, not a re-orientation. */}
-        <div className="border-b border-slate-800 px-2 py-2">
+        {/* The business you are in. On a desktop this lives in the app header
+            now; the drawer keeps its own copy because the header is out of
+            reach behind it. */}
+        <div className="border-b border-slate-800 px-2 py-2 lg:hidden">
           <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
         </div>
 
         {items.length > 0 && (
-          <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2">
+          <div className="shrink-0 space-y-0.5 border-b border-slate-800 px-2 py-2 lg:hidden">
             {items.map((n) => <NavButton key={n.key} nav={n} view={view} onNavigate={onNavigate} />)}
           </div>
         )}

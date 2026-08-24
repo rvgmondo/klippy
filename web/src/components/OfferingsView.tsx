@@ -10,6 +10,7 @@ import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
 import { useUrlAction } from '../lib/urlAction';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'services', label: 'Services' }, { value: 'products', label: 'Products' },
@@ -100,16 +101,16 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
   const recurringOfferings = rows.filter((o) => o.recurring && o.active);
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-1 flex items-center gap-3">
-          <h1 className="text-lg font-semibold text-slate-100">Offerings</h1>
+    <Page>
+      <PageHeader view="offerings" title="Offerings"
+        subtitle="What this business actually sells. Rename, price and stock these however fits."
+        actions={(
           <button onClick={() => setEditing('new')}
-            className="ml-auto flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
+            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
             <Plus size={15} /> New offering
           </button>
-        </div>
-        <p className="mb-3 text-xs text-slate-500">What this business actually sells. Rename, price and stock these however fits.</p>
+        )} />
+      <PageBody>
 
         {business && (
           <div className="mb-5 flex flex-wrap items-center gap-1.5">
@@ -295,7 +296,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
             </div>
           </>
         )}
-      </div>
+      </PageBody>
 
       {editing && (
         <OfferingEditor
@@ -323,7 +324,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           onStarted={() => { setStartingSub(false); setSubFolder(null); invalidateSubs(); }}
         />
       )}
-    </div>
+    </Page>
   );
 }
 

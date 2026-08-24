@@ -8,6 +8,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { money } from '../lib/money';
 import { Skeleton, SkeletonTile } from './ui';
 import { notify } from './ConfirmDialog';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 interface Item {
   id: number; number: string; clientName: string; clientEmail: string | null;
@@ -82,13 +83,10 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   });
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-slate-100">Collections</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Overdue invoices, and who has been flagged for non-payment.</p>
-        </div>
-
+    <Page>
+      <PageHeader view="collections" title="Collections"
+        subtitle="Overdue invoices, and who has been flagged for non-payment." />
+      <PageBody className="space-y-5">
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
 
         {isLoading && (
@@ -283,9 +281,9 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
             </p>
           </>
         )}
-      </div>
+      </PageBody>
       {statementFor && <StatementView folderId={statementFor} onClose={() => setStatementFor(null)} />}
-    </div>
+    </Page>
   );
 }
 

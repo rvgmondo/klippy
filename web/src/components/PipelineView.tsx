@@ -14,6 +14,7 @@ import {} from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { moneyRound } from '../lib/money';
 import { useUrlAction } from '../lib/urlAction';
+import { CanvasPage, PageHeader } from './PageHeader';
 import { LeadFormModal } from './LeadFormModal';
 import { useCurrency } from '../lib/useCurrency';
 
@@ -94,39 +95,37 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   const s = data?.summary;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 px-4 py-3 sm:px-6">
-        <div>
-          <h2 className="font-display text-lg font-semibold text-slate-100">Pipeline</h2>
-          <p className="text-xs text-slate-500">Acquisition. Turn leads into clients.</p>
-        </div>
+    <CanvasPage>
+      <PageHeader view="pipeline" title="Pipeline" subtitle="Turn leads into clients."
+        actions={(
+          <>
+            {typeof businessId === 'number' && (
+              <button onClick={() => setShowLeadForm(true)}
+                title="A public form whose submissions land here as leads"
+                className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
+                Lead form
+              </button>
+            )}
+            {s && (s.wonCount + s.lostCount) > 0 && (
+              <button onClick={() => setShowInsights((v) => !v)}
+                className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
+                {showInsights ? 'Hide insights' : 'Insights'}
+              </button>
+            )}
+            <button onClick={() => setAdding(true)} className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
+              <Plus size={15} /> New deal
+            </button>
+          </>
+        )}>
         {s && (
-          <div className="flex gap-4 text-xs">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs">
             <Stat label="Open deals" value={String(s.openCount)} />
             <Stat label="Pipeline value" value={money(s.pipelineValue)} accent />
             <Stat label="Won this month" value={`${s.wonThisMonth}, ${money(s.wonValueThisMonth)}`} />
             {s.winRate != null && <Stat label="Win rate" value={`${s.winRate}%`} accent />}
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
-          {typeof businessId === 'number' && (
-            <button onClick={() => setShowLeadForm(true)}
-              title="A public form whose submissions land here as leads"
-              className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
-              Lead form
-            </button>
-          )}
-          {s && (s.wonCount + s.lostCount) > 0 && (
-            <button onClick={() => setShowInsights((v) => !v)}
-              className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
-              {showInsights ? 'Hide insights' : 'Insights'}
-            </button>
-          )}
-          <button onClick={() => setAdding(true)} className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
-            <Plus size={15} /> New deal
-          </button>
-        </div>
-      </div>
+      </PageHeader>
 
       {/* What is actually working. The source field was dutifully filled in and,
           until now, read by zero screens; the same for why deals are lost. */}
@@ -226,7 +225,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
         <LeadFormModal businessId={businessId} onClose={() => setShowLeadForm(false)} />
       )}
       {editing && <DealEditor deal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
-    </div>
+    </CanvasPage>
   );
 }
 

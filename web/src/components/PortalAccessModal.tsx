@@ -62,6 +62,25 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
     onError: (e) => setErr(e instanceof Error ? e.message : 'Could not send that.'),
   });
 
+  /**
+   * Portal passwords are hashed, so no screen can show an existing one and
+   * Klippy never stores a readable copy. What an admin needs when a client says
+   * "I cannot get in" is a working credential to hand over: this generates a
+   * strong one, shows it back ONCE, and sends a sign-in link alongside it.
+   */
+  const [issued, setIssued] = useState<{ email: string; password: string; linkSent: boolean } | null>(null);
+  const setPassword = useMutation({
+    mutationFn: (id: number) => apiPost<{ password: string; email: string; linkSent: boolean }>(
+      `/portal-users/${id}/password`, { sendLink: true }),
+    onSuccess: (r) => { setErr(''); setIssued(r); refresh(); },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not set a password.'),
+  });
+  const clearPassword = useMutation({
+    mutationFn: (id: number) => apiPost(`/portal-users/${id}/password`, { password: null }),
+    onSuccess: () => { setErr(''); setNote('Password cleared. They sign in with a link now.'); setTimeout(() => setNote(''), 4000); refresh(); },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not clear that.'),
+  });
+
   // Read-only, short-lived, and recorded. Opens in a new tab so the app stays put.
   const preview = useMutation({
     mutationFn: () => apiPost<{ url: string }>(`/folders/${folderId}/portal-preview`),
@@ -89,6 +108,23 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
         {err && <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{err}</p>}
         {note && <p className="mb-3 rounded-lg border border-green-500/30 bg-green-500/10 p-2 text-xs text-green-300">{note}</p>}
 
+        {issued && (
+          <div className="mb-3 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-200">
+            <div className="mb-1.5 font-semibold">New portal password for {issued.email}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="num rounded bg-slate-950/60 px-2 py-1 text-sm tracking-wide">{issued.password}</code>
+              <button onClick={async () => { await navigator.clipboard.writeText(issued.password).catch(() => {}); setNote('Password copied.'); setTimeout(() => setNote(''), 3000); }}
+                className="rounded-lg border border-green-500/40 px-2.5 py-1 text-[11px] hover:bg-green-500/10">Copy</button>
+              <button onClick={() => setIssued(null)}
+                className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800">Done</button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-green-300/80">
+              Shown once and never stored in a readable form, so read it to them now.
+              {issued.linkSent ? ' A sign-in link is on its way to them as well.' : ''}
+            </p>
+          </div>
+        )}
+
         <div className="mb-4 space-y-2">
           {rows.length === 0 && (
             <p className="rounded-lg border border-dashed border-slate-700 p-4 text-center text-xs text-slate-500">
@@ -110,6 +146,17 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
                 className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40">
                 Send link
               </button>
+              <button onClick={() => setPassword.mutate(u.id)} disabled={setPassword.isPending}
+                title="Generate a password you can read out to them. Klippy cannot show an existing one: they are hashed."
+                className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-40">
+                {u.hasPassword ? 'New password' : 'Set password'}
+              </button>
+              {u.hasPassword && (
+                <button onClick={async () => { if (await confirmDialog(`Clear ${u.email}'s password? They will sign in with a one-click link instead.`)) clearPassword.mutate(u.id); }}
+                  className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:bg-slate-800">
+                  Clear password
+                </button>
+              )}
               <button onClick={() => toggle.mutate({ id: u.id, isActive: !u.isActive })}
                 className="rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">
                 {u.isActive ? 'Switch off' : 'Switch on'}
@@ -125,9 +172,13 @@ export function PortalAccessModal({ folderId, folderName, onClose }: {
         <button type="button"
           onClick={() => preview.mutate()}
           disabled={preview.isPending}
-          className="mb-4 w-full rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+          className="mb-2 w-full rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
           {preview.isPending ? 'Opening...' : 'See what this client sees'}
         </button>
+        <p className="mb-4 text-[11px] text-slate-500">
+          Passwords are stored hashed, so nothing here (and nobody, including you) can read an
+          existing one. When someone is locked out, send them a link or set a new password above.
+        </p>
 
         <form className="space-y-2 border-t border-slate-800 pt-4"
           onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>

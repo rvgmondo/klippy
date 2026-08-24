@@ -25,16 +25,10 @@ import { MobileTabBar } from '../components/MobileTabBar';
 import { CommandPalette } from '../components/CommandPalette';
 import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
-import type { BusinessSelection } from '../components/BusinessSwitcher';
+import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
 type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
 
-const VIEW_LABELS: Record<View, string> = {
-  home: 'Home', pipeline: 'Pipeline', contacts: 'Contacts', board: 'Board', calendar: 'Calendar',
-  today: 'Today', files: 'Files', offerings: 'Offerings', expenses: 'Expenses', reports: 'Reports', billing: 'Billing',
-  collections: 'Collections', cashflow: 'Cash flow', settings: 'Settings',
-};
-const viewLabel = (v: View) => VIEW_LABELS[v] ?? '';
 
 function loadBusiness(): BusinessSelection {
   const s = localStorage.getItem('klippy.business');
@@ -86,6 +80,19 @@ export function Workspace() {
   const [showTimer, setShowTimer] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Anything in the tree can change the view by writing it to the URL
+  // (page-header tabs, the onboarding checklist, an empty state). The workspace
+  // owns the state; the URL is how everything else asks it to move.
+  useEffect(() => {
+    const sync = () => {
+      const next = readUrlState();
+      setView(next.view);
+      if (next.boardId != null) setBoardId(next.boardId);
+    };
+    window.addEventListener('klippy:params', sync);
+    return () => window.removeEventListener('klippy:params', sync);
+  }, []);
 
   // Cmd/Ctrl-K opens the palette from anywhere. The one shortcut worth learning.
   useEffect(() => {
@@ -151,7 +158,10 @@ export function Workspace() {
 
       {/* Sidebar: fixed drawer under lg, static column at lg+ */}
       <div
-        className={`fixed inset-y-0 left-0 z-40 w-[19rem] transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 ${
+        /* A 19rem drawer on phones, where it is the whole navigation. On a
+           desktop it shrinks to whatever the rail needs: the second column only
+           appears for Work, which is the one area with a tree in it. */
+        className={`fixed inset-y-0 left-0 z-40 w-[19rem] transform bg-slate-950 pt-safe pl-safe transition-transform duration-200 lg:static lg:z-auto lg:w-auto lg:translate-x-0 ${
           navOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -176,15 +186,22 @@ export function Workspace() {
             {navOpen ? <X size={18} /> : <MenuIcon size={18} />}
           </button>
 
-          {/* Current section name, shown where the sidebar is hidden */}
-          <span className="truncate text-sm font-semibold text-slate-100 lg:hidden">{viewLabel(view)}</span>
+          {/* Which business you are working in: the one piece of context that
+              follows you between every area, so it belongs in the global bar
+              rather than in a column that no longer exists on most screens. */}
+          <div className="min-w-0 max-w-[13rem] flex-1 sm:max-w-xs">
+            <BusinessSwitcher value={businessId} onChange={selectBusiness} full />
+          </div>
 
           <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-3">
-            <button onClick={() => setPaletteOpen(true)}
-              className="hidden min-w-0 flex-1 items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-500 hover:border-slate-600 hover:text-slate-400 sm:flex sm:max-w-xs">
+            {/* A full search field where there is room, a 36px icon where there
+                is not. It used to disappear below sm and reappear as its own
+                52px bar under the header, which is the same control twice. */}
+            <button onClick={() => setPaletteOpen(true)} aria-label="Search everything"
+              className="flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900 text-slate-500 hover:border-slate-600 hover:text-slate-400 sm:h-auto sm:w-auto sm:min-w-0 sm:flex-1 sm:justify-start sm:px-3 sm:py-2 sm:text-sm md:max-w-xs">
               <Search size={14} className="shrink-0" />
-              <span className="truncate">Search everything...</span>
-              <kbd className="ml-auto shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px]">Ctrl K</kbd>
+              <span className="hidden truncate sm:inline">Search everything...</span>
+              <kbd className="ml-auto hidden shrink-0 rounded border border-slate-700 px-1.5 py-0.5 text-[10px] md:inline">Ctrl K</kbd>
             </button>
             <TimerChip />
             <NotificationsBell />
@@ -215,14 +232,6 @@ export function Workspace() {
             </button>
           </div>
         </header>
-
-        {/* Search on the smallest screens sits under the bar so it stays usable */}
-        <div className="border-b border-slate-800 px-2 py-2 sm:hidden">
-          <button onClick={() => setPaletteOpen(true)}
-            className="flex w-full items-center gap-2 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-500">
-            <Search size={14} className="shrink-0" /> Search everything...
-          </button>
-        </div>
 
         <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[calc(52px+env(safe-area-inset-bottom))] lg:pb-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}

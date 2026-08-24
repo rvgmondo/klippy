@@ -6,6 +6,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { fieldClass, Skeleton } from './ui';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 /**
  * The people you deal with, as a place of their own.
@@ -49,20 +50,21 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
     : all;
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-4xl">
-        <div className="mb-5 flex flex-wrap items-center gap-3">
-          <div className="mr-auto">
-            <h2 className="font-display text-lg font-semibold text-slate-100">Contacts</h2>
-            <p className="text-xs text-slate-500">The people behind your deals and clients, kept once.</p>
-          </div>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, company, email..."
-            className="w-56 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500" />
-          <button onClick={() => setEditing('new')}
-            className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
-            <Plus size={15} /> New contact
-          </button>
-        </div>
+    <Page>
+      <PageHeader view="contacts" title="Contacts"
+        subtitle="The people behind your deals and clients, kept once."
+        actions={(
+          <>
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, company, email..."
+              aria-label="Search contacts"
+              className="w-44 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 sm:w-56" />
+            <button onClick={() => setEditing('new')}
+              className="flex min-h-10 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 sm:min-h-9">
+              <Plus size={15} /> New contact
+            </button>
+          </>
+        )} />
+      <PageBody>
 
         {isLoading ? (
           <Skeleton className="h-48" />
@@ -112,7 +114,7 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
             </table>
           </div>
         )}
-      </div>
+      </PageBody>
 
       {editing && (
         <ContactEditor
@@ -122,7 +124,7 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
           onSaved={() => { setEditing(null); invalidate(); }}
         />
       )}
-    </div>
+    </Page>
   );
 }
 

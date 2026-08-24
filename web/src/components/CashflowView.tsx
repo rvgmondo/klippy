@@ -4,6 +4,7 @@ import { ErrorNote } from './ErrorNote';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { money } from '../lib/money';
 import { SkeletonTile } from './ui';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 interface Bucket { start: string; end: string; invoices: number; subscriptions: number; total: number }
 interface Lane {
@@ -36,15 +37,10 @@ export function CashflowView({ businessId }: { businessId: BusinessSelection }) 
   });
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div>
-          <h1 className="font-display text-2xl font-bold text-slate-100">Cash flow</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
-            What should arrive over the next eight weeks, from invoices already out and subscriptions still to bill.
-          </p>
-        </div>
-
+    <Page>
+      <PageHeader view="cashflow" title="Cash flow"
+        subtitle="What should arrive over the next eight weeks, from invoices already out and subscriptions still to bill." />
+      <PageBody className="space-y-6">
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
         {isLoading && <div className="grid gap-4 sm:grid-cols-3"><SkeletonTile /><SkeletonTile /><SkeletonTile /></div>}
 
@@ -62,8 +58,8 @@ export function CashflowView({ businessId }: { businessId: BusinessSelection }) 
             subscriptions count in the week they bill, at what each client actually pays. Currencies are never added together.
           </p>
         )}
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }
 

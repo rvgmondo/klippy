@@ -18,6 +18,7 @@ import { BoardActions } from './BoardActions';
 import type { BoardFull, CardLabel, Column, Priority, Task, TeamUser, Folder as FolderT } from '../lib/types';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
+import { CanvasPage, PageHeader } from './PageHeader';
 import { Menu } from './Menu';
 import { BoardFilters, EMPTY_FILTERS, applyFilters, type FilterState } from './BoardFilters';
 
@@ -207,12 +208,27 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
   const activeCol = activeId?.startsWith('col-') ? data.columns.find((c) => colKey(c.id) === activeId) ?? null : null;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-slate-800 px-6 py-3">
-        <h2 className="font-display text-lg font-semibold text-slate-100">{data.board.name}</h2>
-        {data.board.description && <p className="text-sm text-slate-400">{data.board.description}</p>}
+    <CanvasPage>
+      <PageHeader view="board" title={data.board.name} subtitle={data.board.description || undefined}
+        actions={(
+          <>
+            <button onClick={() => setShowActions(true)} title="Copy this board, or start one from a template"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
+              <Copy size={13} /> Copy / template
+            </button>
+            <div className="flex shrink-0 gap-1 rounded-lg bg-slate-900 p-1">
+              {(['board', 'list'] as const).map((m) => (
+                <button key={m} onClick={() => setModeSticky(m)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize ${
+                    mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </>
+        )}>
         {client && onNavigate && (
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-500">{client.name}:</span>
             <button onClick={() => launch('billing', { new: 'invoice', folder: String(client.id) })}
               className="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-[var(--accent)] hover:text-[var(--accent)]">
@@ -234,21 +250,8 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
         )}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <BoardFilters value={filters} onChange={setFilters} />
-          <button onClick={() => setShowActions(true)} title="Copy this board, or start one from a template"
-            className="ml-auto flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-            <Copy size={13} /> Copy / template
-          </button>
-          <div className="flex shrink-0 gap-1 rounded-lg bg-slate-900 p-1">
-            {(['board', 'list'] as const).map((m) => (
-              <button key={m} onClick={() => setModeSticky(m)}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium capitalize ${
-                  mode === m ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>
-                {m}
-              </button>
-            ))}
-          </div>
         </div>
-      </div>
+      </PageHeader>
       {mode === 'list' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <BoardListView boardId={boardId} columns={data.columns}
@@ -294,7 +297,7 @@ export function BoardView({ boardId, onNavigate }: { boardId: number | null; onN
       )}
 
       {openTaskId !== null && <CardDetail taskId={openTaskId} boardId={boardId} onClose={() => setOpenTaskId(null)} />}
-    </div>
+    </CanvasPage>
   );
 }
 

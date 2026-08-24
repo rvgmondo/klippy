@@ -5,6 +5,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { ErrorNote } from './ErrorNote';
 import { money } from '../lib/money';
 import { fieldInlineClass } from './ui';
+import { Page, PageHeader, PageBody } from './PageHeader';
 
 interface ClientRow {
   folderId: number; name: string; hours: number; rate: number | null; amount: number | null;
@@ -57,19 +58,22 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   const cur = data?.currency ?? 'ZAR';
 
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-5 flex flex-wrap items-end gap-3">
-          <h2 className="mr-auto font-display text-lg font-semibold text-slate-100">Time &amp; billing</h2>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">From</label>
-            <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} />
+    <Page>
+      <PageHeader view="reports" title="Reports"
+        subtitle="Time turned into money, what is still unbilled, and what the taxman needs."
+        actions={(
+          <div className="flex items-end gap-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-slate-500">From</span>
+              <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-slate-500">To</span>
+              <input type="date" className={field} value={to} onChange={(e) => setTo(e.target.value)} />
+            </label>
           </div>
-          <div>
-            <label className="mb-1 block text-[11px] text-slate-500">To</label>
-            <input type="date" className={field} value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-        </div>
+        )} />
+      <PageBody>
 
         <UnbilledSection businessId={businessId} />
 
@@ -227,8 +231,8 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
             <EstimateAccuracy from={from} to={to} businessId={businessId} />
           </>
         )}
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }
 

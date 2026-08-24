@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { Menu } from './Menu';
+import { CanvasPage, PageHeader } from './PageHeader';
 
 interface Node {
   id: number;
@@ -95,7 +96,24 @@ export function FilesView() {
   const roots = (tree.data?.folders ?? []).filter((f) => f.parentId === null);
 
   return (
-    <div className="flex h-full">
+    <CanvasPage>
+      <PageHeader view="files" title="Files"
+        subtitle="Contracts and assets, kept next to the work."
+        actions={(
+          <>
+            <button onClick={async () => { const n = await promptDialog('Folder name'); if (n?.trim()) mkdir.mutate(n.trim()); }}
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800">
+              <FolderPlus size={14} /> New folder
+            </button>
+            <button onClick={() => fileRef.current?.click()} disabled={uploading}
+              className="flex min-h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-xs font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
+              <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload'}
+            </button>
+            <input ref={fileRef} type="file" multiple className="hidden"
+              onChange={(e) => { if (e.target.files?.length) upload(e.target.files); }} />
+          </>
+        )} />
+    <div className="flex min-h-0 flex-1">
       {/* Tree */}
       <aside className="hidden w-56 shrink-0 flex-col border-r border-slate-800 md:flex">
         <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -130,16 +148,6 @@ export function FilesView() {
               </span>
             ))}
           </div>
-          <button onClick={async () => { const n = await promptDialog('Folder name'); if (n?.trim()) mkdir.mutate(n.trim()); }}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
-            <FolderPlus size={14} /> New folder
-          </button>
-          <button onClick={() => fileRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">
-            <Upload size={14} /> {uploading ? 'Uploading...' : 'Upload'}
-          </button>
-          <input ref={fileRef} type="file" multiple className="hidden"
-            onChange={(e) => { if (e.target.files?.length) upload(e.target.files); }} />
         </div>
 
         {error && (
@@ -200,6 +208,7 @@ export function FilesView() {
         </div>
       </div>
     </div>
+    </CanvasPage>
   );
 }
 

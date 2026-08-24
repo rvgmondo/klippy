@@ -43,3 +43,15 @@ export function useUrlAction(key: string, handler: (value: string) => void): voi
     return () => window.removeEventListener(EVENT, check);
   }, [key]);
 }
+
+/**
+ * Change the current view from anywhere.
+ *
+ * The workspace owns which screen is showing, but plenty of things that are not
+ * its children need to move it: the page-header tabs, the onboarding checklist,
+ * an empty state offering the next step. Rather than threading a callback
+ * through every tree, the view lives in the URL and the workspace listens.
+ */
+export function navigateTo(view: string, params: Record<string, string> = {}): void {
+  setUrlParams({ v: view, ...params });
+}

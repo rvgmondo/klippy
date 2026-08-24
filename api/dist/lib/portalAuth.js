@@ -235,4 +235,21 @@ export function safeEqual(a, b) {
         return false;
     return timingSafeEqual(ba, bb);
 }
+/**
+ * A password a human can read down a phone line and type once: three short
+ * lowercase words plus digits, no ambiguous characters, and long enough that
+ * length rather than punctuation does the work.
+ */
+const PW_WORDS = [
+    'amber', 'anchor', 'basil', 'bridge', 'cabin', 'cedar', 'cobalt', 'copper', 'coral', 'delta',
+    'ember', 'fable', 'falcon', 'garden', 'harbor', 'indigo', 'ivory', 'jasper', 'kite', 'lantern',
+    'maple', 'meadow', 'nectar', 'onyx', 'opal', 'pebble', 'quartz', 'raven', 'river', 'saffron',
+    'summit', 'tandem', 'thistle', 'umber', 'valley', 'walnut', 'willow', 'yarrow', 'zephyr', 'zinc',
+];
+export function generatePortalPassword() {
+    const bytes = randomBytes(8);
+    const word = (i) => PW_WORDS[bytes[i] % PW_WORDS.length];
+    const digits = String(100 + (bytes[3] % 900));
+    return `${word(0)}-${word(1)}-${word(2)}-${digits}`;
+}
 //# sourceMappingURL=portalAuth.js.map
