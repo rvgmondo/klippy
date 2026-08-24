@@ -17,6 +17,13 @@ deployment:
     - /bin/cp -f api/app.js api/package.json api/package-lock.json $APIROOT/
     - /bin/rm -rf $APIROOT/dist $APIROOT/drizzle
     - /bin/cp -R api/dist api/drizzle $APIROOT/
+    # --- Stamp what was actually deployed ---
+    # This task runs inside the server's git checkout, so HEAD here is the commit
+    # being deployed. The stamp baked into dist at build time names the commit
+    # BEFORE the one carrying the build (it is written before that commit exists),
+    # which reads as "production is behind" when it is exactly current. /health
+    # prefers this file.
+    - /bin/echo "{\"commit\":\"$(git rev-parse --short HEAD)\",\"commitFull\":\"$(git rev-parse HEAD)\",\"deployedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > $APIROOT/deployed.json
     - cd $APIROOT && $NPM install --omit=dev --no-audit --no-fund
     # --- Restart the Passenger/Node app ---
     - /bin/mkdir -p $APIROOT/tmp && /usr/bin/touch $APIROOT/tmp/restart.txt

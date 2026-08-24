@@ -15,3 +15,6 @@ api/.env
 !deploy/klippy-api.zip
 !deploy/klippy-web.zip
 !klippyextension.zip
+
+# Written by the cPanel deploy on the server; never committed.
+api/deployed.json

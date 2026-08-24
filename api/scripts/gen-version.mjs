@@ -6,11 +6,15 @@
  * in at MY build time, not read from a repo that is not on the box. This writes
  * src/version.ts (compiled into dist) from git + the clock, and /health reports it.
  *
- * `builtAt` is the reliable signal: rebuild-and-commit stamps a fresh timestamp,
- * so if the live /health builtAt matches the one in the committed dist, that exact
- * build is deployed. `commit` is the tip the build was made from (informational;
- * it lags the commit that carries the build by one, since the stamp is written
- * before that commit exists).
+ * `builtAt` is the reliable signal HERE: if the live /health builtAt matches the
+ * one in the committed dist, that exact build is deployed.
+ *
+ * `commit` is NOT a deploy answer. It names the tip the build was made from,
+ * which is the commit BEFORE the one carrying the build, because this file is
+ * written before that commit exists. Reading it as "what is live" understates
+ * production by one commit every time. The deploy writes $APIROOT/deployed.json
+ * from the server's own checkout (see .cpanel.yml) and /health prefers that;
+ * `deployed.source` tells you which of the two you are being shown.
  */
 import { execSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';

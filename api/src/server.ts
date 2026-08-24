@@ -49,6 +49,7 @@ import { portalRoutes, portalAdminRoutes } from './routes/portal.js';
 import { crmRoutes } from './routes/crm.js';
 import { leadRoutes } from './routes/leads.js';
 import { VERSION } from './version.js';
+import { DEPLOYED } from './lib/deployed.js';
 
 const isProd = process.env.NODE_ENV === 'production';
 
@@ -133,9 +134,19 @@ export function buildServer() {
     ok: true,
     service: 'klippy-api',
     time: new Date().toISOString(),
-    // Baked in at build time (see scripts/gen-version.mjs). `builtAt` is the
-    // reliable "is my latest build live?" signal: it matches the timestamp in the
-    // committed dist only when that exact build is deployed.
+    /**
+     * What is actually running, and where that answer comes from.
+     *
+     * `deployed` is written by the cPanel deploy from the server's own git
+     * checkout, so it names the commit being served. `build` is the stamp baked
+     * in by gen-version.mjs, which is written before the commit that carries the
+     * build exists and therefore always names the PREVIOUS commit: useful as a
+     * build fingerprint, wrong as a deploy answer. `deployed.source` says which
+     * of the two you are looking at.
+     */
+    deployed: DEPLOYED,
+    build: VERSION,
+    // Kept so anything already reading `version` still works.
     version: VERSION,
   }));
 
