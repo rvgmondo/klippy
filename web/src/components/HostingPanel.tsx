@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPatch, apiPost, apiDelete } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
+import { confirmDialog, notify } from './ConfirmDialog';
 import { fieldClass } from './ui';
 
 interface Configured {
@@ -324,12 +325,42 @@ function HostingAccounts({ businessId }: { businessId?: number }) {
     onSuccess: () => { setErr(''); qc.invalidateQueries({ queryKey: ['hosting-accounts'] }); },
     onError: (e) => setErr(e instanceof Error ? e.message : 'Could not change that account.'),
   });
+  // The one-time reveal. Provisioning never stores a recoverable password, so
+  // "what are the logins?" is answered by setting a fresh one: WHM resets it, it
+  // is shown here once, and the client gets their credentials email again.
+  const [revealed, setRevealed] = useState<{ username: string; password: string; emailedTo: string | null } | null>(null);
+  const resetPw = useMutation({
+    mutationFn: (id: number) => apiPost<{ username: string; password: string; emailedTo: string | null }>(
+      `/hosting/accounts/${id}/reset-password`, { emailClient: true }),
+    onSuccess: (r) => { setErr(''); setRevealed(r); },
+    onError: (e) => setErr(e instanceof Error ? e.message : 'Could not reset the password.'),
+  });
+  const askReset = async (a: HostingAccount) => {
+    const yes = await confirmDialog(
+      `Set a new cPanel password for ${a.username}? The current one stops working. The new one is shown to you once and emailed to the client's billing address.`,
+      { confirmLabel: 'Reset password' });
+    if (yes) resetPw.mutate(a.id);
+  };
   const rows = data?.accounts ?? [];
 
   return (
     <section className="mt-6 border-t border-slate-800 pt-5">
       <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Hosting accounts</h3>
       {err && <p className="mb-2 text-xs text-red-400">{err}</p>}
+      {revealed && (
+        <div className="mb-3 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-xs text-green-200">
+          <div className="mb-1 font-semibold">New cPanel login for {revealed.username}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="num rounded bg-slate-950/60 px-2 py-1 text-sm tracking-wide">{revealed.password}</code>
+            <button onClick={async () => { await navigator.clipboard.writeText(revealed.password).catch(() => {}); notify('Password copied.'); }}
+              className="rounded-lg border border-green-500/40 px-2.5 py-1 text-[11px] hover:bg-green-500/10">Copy</button>
+            <button onClick={() => setRevealed(null)} className="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800">Done</button>
+          </div>
+          <p className="mt-1.5 text-[11px] text-green-300/80">
+            Shown once and not stored{revealed.emailedTo ? `. Also emailed to ${revealed.emailedTo}` : '. The client has no billing email, so only you have it'}.
+          </p>
+        </div>
+      )}
       {rows.length === 0 ? (
         <div className="rounded-lg border border-dashed border-slate-700 p-4 text-xs text-slate-400">
           Nothing provisioned yet. Accounts appear here once an invoice for a hosting offering is paid.
@@ -364,6 +395,13 @@ function HostingAccounts({ businessId }: { businessId?: number }) {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right">
+                    {(a.status === 'active' || a.status === 'suspended') && a.username && (
+                      <button onClick={() => askReset(a)} disabled={resetPw.isPending}
+                        title="Set a new cPanel password: shown to you once, emailed to the client"
+                        className="mr-1.5 rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                        Reset password
+                      </button>
+                    )}
                     {(a.status === 'active' || a.status === 'suspended') && (
                       <button
                         onClick={() => suspend.mutate({ id: a.id, suspend: a.status === 'active' })}

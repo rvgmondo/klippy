@@ -14,6 +14,8 @@ interface HostingRow {
   id: number; domain: string; username: string | null; whmPackage: string | null;
   status: string; display: string; outstanding: string; currency: string;
   unpaidInvoiceId: number | null;
+  cpanelUrl?: string;
+  isTemporary?: boolean;
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -489,11 +491,27 @@ function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: n
             </div>
           )}
 
-          {data?.cpanelUrl && h.display === 'active' && (
-            <a href={data.cpanelUrl} target="_blank" rel="noreferrer"
-              className="mt-3 inline-block rounded-lg border border-slate-300 px-3 py-1.5 text-xs hover:bg-slate-50">
-              Open control panel
-            </a>
+          {h.display === 'active' && (h.cpanelUrl || data?.cpanelUrl) && (
+            <div className="mt-3 space-y-1.5">
+              {/* The panel lives at the site's own address (/cpanel), so the link is
+                  the domain the client already knows: their own once connected, the
+                  holding address before then. */}
+              <a href={h.cpanelUrl ?? data!.cpanelUrl!} target="_blank" rel="noreferrer"
+                className="inline-block rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50">
+                Open control panel{h.isTemporary ? ' (temporary address)' : ''}
+              </a>
+              {h.isTemporary && (
+                <p className="text-[11px] text-slate-500">
+                  Your site is on a holding address until your own domain is connected; the login works the same.
+                </p>
+              )}
+              {data?.cpanelUrl && h.cpanelUrl && (
+                <p className="text-[11px] text-slate-500">
+                  Trouble reaching it? Use the{' '}
+                  <a href={data.cpanelUrl} target="_blank" rel="noreferrer" className="underline hover:text-slate-700">direct server address</a>.
+                </p>
+              )}
+            </div>
           )}
         </div>
       ))}

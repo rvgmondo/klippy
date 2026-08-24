@@ -7,7 +7,7 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { assertBusinessAccess } from '../lib/access.js';
-import { hostingSettingsFor, credsOf, provisionSubscription, setSuspended } from '../lib/hosting.js';
+import { hostingSettingsFor, credsOf, provisionSubscription, setSuspended, resetHostingPassword } from '../lib/hosting.js';
 import { cleanHost, listPackages, tempDomainFor, testConnection } from '../lib/whm.js';
 /**
  * Hosting provisioning: connecting Klippy to the WHM server that actually creates
@@ -234,6 +234,25 @@ export async function hostingRoutes(app) {
         if (!res.ok)
             return reply.code(400).send({ error: res.message });
         return { ok: true, message: res.message };
+    });
+    /**
+     * A fresh cPanel password: WHM sets it, the admin sees it once, and the client
+     * gets the credentials email again when asked. Nothing recoverable is stored.
+     */
+    app.post('/api/v1/hosting/accounts/:id/reset-password', async (req, reply) => {
+        const { accountId, role } = authOf(req);
+        if (role === 'member')
+            return reply.code(403).send({ error: 'Only admins can reset hosting passwords.' });
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const body = z.object({ emailClient: z.boolean().optional() }).safeParse(req.body ?? {});
+        if (!body.success)
+            return reply.code(400).send({ error: 'Bad request.' });
+        const res = await resetHostingPassword(accountId, id, { emailClient: body.data.emailClient ?? true });
+        if (!res.ok)
+            return reply.code(400).send({ error: res.message });
+        return res;
     });
     /** Provision a subscription by hand: the retry after a failure, or a first run. */
     app.post('/api/v1/subscriptions/:id/provision', async (req, reply) => {

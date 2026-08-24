@@ -11,7 +11,7 @@ import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import {
   accountExists, changePrimaryDomain, createAccount, generatePassword, isReservedRejection,
-  suspendAccount, tempDomainFor, unsuspendAccount, usernameFor, type WhmCreds,
+  setAccountPassword, suspendAccount, tempDomainFor, unsuspendAccount, usernameFor, type WhmCreds,
 } from './whm.js';
 
 /**
@@ -390,7 +390,71 @@ async function clientNameFor(accountId: number, folderId: number | null): Promis
  * first version for the second case is how you get a support call an hour later
  * asking why their domain does not work.
  */
-async function sendWelcome(
+
+/**
+ * A new cPanel password, on demand.
+ *
+ * Provisioning generates the password, emails it to the client, and keeps
+ * nothing: storing every client's hosting password is a liability with no
+ * upside. The cost of that decision is "what are the logins?" a month later.
+ * This is the answer: WHM sets a fresh password, it is returned ONCE for the
+ * admin to read, and (when asked) the same credentials email the client got on
+ * day one goes out again with it. Recorded like every other hosting action.
+ */
+export async function resetHostingPassword(
+  accountId: number, hostingAccountId: number, opts: { emailClient: boolean },
+): Promise<{ ok: boolean; message: string; username?: string; password?: string; emailedTo?: string | null }> {
+  const [row] = await db.select().from(hostingAccounts)
+    .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, hostingAccountId))).limit(1);
+  if (!row) return { ok: false, message: 'Hosting account not found.' };
+  if (!row.username) return { ok: false, message: 'This account has no cPanel username recorded, so there is nothing to reset.' };
+  if (row.status !== 'active' && row.status !== 'suspended') {
+    return { ok: false, message: `This account is ${row.status}; there is no live cPanel account to reset.` };
+  }
+
+  const settings = await hostingSettingsFor(accountId, row.businessId);
+  const creds = settings ? credsOf(settings) : null;
+  if (!creds) return { ok: false, message: 'No hosting server is configured for this business.' };
+  if (!settings!.live) return { ok: false, message: 'Hosting is in dry run; nothing exists on the server to reset.' };
+
+  const password = generatePassword();
+  const res = await setAccountPassword(creds, row.username, password);
+  if (!res.ok) return { ok: false, message: res.message };
+
+  // Who to tell: the client on the subscription behind this account, if any.
+  let emailedTo: string | null = null;
+  if (opts.emailClient && row.subscriptionId) {
+    const [sub] = await db.select({ folderId: subscriptions.folderId }).from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, row.subscriptionId))).limit(1);
+    const email = sub ? await billingEmailFor(accountId, sub.folderId) : null;
+    if (email) {
+      const clientName = sub ? await clientNameFor(accountId, sub.folderId) : 'there';
+      await sendWelcome(accountId, row.businessId, email, {
+        domain: row.domain, username: row.username, password, host: creds.host,
+        clientName, isTemporary: row.isTemporary,
+      }).catch(() => { /* the reset stands either way; recorded below */ });
+      emailedTo = email;
+    }
+  }
+
+  await db.insert(events).values({
+    accountId, businessId: row.businessId, name: 'hosting.provision',
+    payload: { hostingAccountId, username: row.username, domain: row.domain },
+    results: [{
+      handler: 'hosting.password-reset',
+      outcome: `Password reset for ${row.username}${emailedTo ? `, new login emailed to ${emailedTo}` : ', shown to the admin only'}.`,
+      ok: true,
+    }],
+  }).catch(() => { /* diagnostics never block the reset */ });
+
+  return {
+    ok: true,
+    message: `New password set for ${row.username}.${emailedTo ? ` Emailed to ${emailedTo}.` : ''}`,
+    username: row.username, password, emailedTo,
+  };
+}
+
+export async function sendWelcome(
   accountId: number, businessId: number | null, to: string,
   d: {
     domain: string; username: string; password: string; host: string;

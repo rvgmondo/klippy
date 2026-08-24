@@ -519,6 +519,7 @@ export async function portalRoutes(app: FastifyInstance) {
       id: hostingAccounts.id, domain: hostingAccounts.domain, username: hostingAccounts.username,
       whmPackage: hostingAccounts.whmPackage, status: hostingAccounts.status,
       subscriptionId: hostingAccounts.subscriptionId,
+      isTemporary: hostingAccounts.isTemporary, tempDomain: hostingAccounts.tempDomain,
     }).from(hostingAccounts)
       .innerJoin(subscriptions, eq(subscriptions.id, hostingAccounts.subscriptionId))
       .where(and(
@@ -527,9 +528,13 @@ export async function portalRoutes(app: FastifyInstance) {
       ));
 
     const settings = await hostingSettingsFor(c.user.accountId, c.user.businessId);
-    // The control panel address, but never the server's own hostname when there is
-    // nothing to show: an unconfigured portal should not leak infrastructure.
-    const cpanel = settings?.whmHost ? `https://${settings.whmHost}:2083` : null;
+    // The control panel is reached through the SITE's own address (cPanel proxies
+    // /cpanel to the panel), so the link is the domain the client knows: their own
+    // once connected, the holding address before then. The server's direct :2083
+    // address rides along as the fallback for the gap while DNS still points
+    // elsewhere; it is only exposed when hosting is actually configured.
+    const serverCpanel = settings?.whmHost ? `https://${settings.whmHost}:2083` : null;
+    const cpanel = serverCpanel;
 
     // What they owe on the hosting itself, which is what a suspended client needs
     // to know: how much, and paying it brings the site back.
@@ -553,7 +558,10 @@ export async function portalRoutes(app: FastifyInstance) {
       for (const u of unpaid) {
         owed += Math.max(0, unpaidBalances.get(u.id)?.outstanding ?? Number(u.total));
       }
+      // The address the client should use, and whether it is the holding one.
+      const cpanelUrl = `https://${r.domain}/cpanel`;
       return {
+        cpanelUrl,
         ...r,
         // Internal states are not the client's business: a record still being set
         // up reads as "being set up", not "pending" or "dry-run".

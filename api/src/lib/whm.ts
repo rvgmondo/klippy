@@ -252,6 +252,14 @@ export async function changePrimaryDomain(
   return call(creds, 'modifyacct', { user: username, domain: newDomain });
 }
 
+/**
+ * Set a new password on an existing cPanel account. The password travels in the
+ * POST body like createacct's, never in a URL.
+ */
+export async function setAccountPassword(creds: WhmCreds, username: string, password: string): Promise<WhmResult> {
+  return call(creds, 'passwd', { user: username, password, db_pass_update: '1' });
+}
+
 export async function suspendAccount(creds: WhmCreds, username: string, reason: string): Promise<WhmResult> {
   return call(creds, 'suspendacct', { user: username, reason: reason.slice(0, 200) });
 }
