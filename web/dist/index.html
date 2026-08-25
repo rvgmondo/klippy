@@ -9,16 +9,32 @@
     <meta name="theme-color" content="#0e1013" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <!-- The webfont sheet used to block the first paint for around 890ms. Fetched
+         as a stylesheet that applies on load instead, with a no-JS fallback, so
+         text paints immediately in the metric-matched fallback face and swaps
+         without moving anything (see marketing.css). -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" /></noscript>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Klippy" />
-    <title>Klippy</title>
-    <script type="module" crossorigin src="/assets/index-D3tiV4sP.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-BWNjQNgn.css">
+    <title>Klippy: run the work, the time and the invoice in one place</title>
+    <!-- A public page with no description is a search result with no sentence
+         under it. Same copy as the hero, so the promise a visitor reads in the
+         results is the one the page then makes. -->
+    <meta name="description" content="Klippy is the operating system for a business you run yourself. Track the work, run the timer on it, and turn those hours into an invoice that chases itself. Built for South African businesses: rands, PayFast and WhatsApp reminders." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Klippy" />
+    <meta property="og:title" content="The work, the time, the invoice. One place." />
+    <meta property="og:description" content="The operating system for a business you run yourself. Tracked hours become invoices that chase themselves." />
+    <meta property="og:image" content="/icon-512.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script type="module" crossorigin src="/assets/index-nNT49oLs.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-LNkT-dQ8.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"></div>
   </body>
 </html>

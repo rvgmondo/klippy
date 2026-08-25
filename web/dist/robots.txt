@@ -1,0 +1,9 @@
+# Klippy
+# The marketing page is the only thing worth indexing; everything behind the
+# login needs a session anyway, and the signed public links (pay, quote,
+# calendar) carry tokens that have no business in a search index.
+User-agent: *
+Allow: /$
+Disallow: /api/
+Disallow: /?portal
+Disallow: /?reset

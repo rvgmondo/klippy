@@ -1,8 +1,14 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { useAuth } from './lib/auth';
 import { AuthPage } from './pages/AuthPage';
 import { Workspace } from './pages/Workspace';
-import { LandingPage } from './pages/LandingPage';
+/**
+ * The public page is its own chunk. It carries the marketing motion stack (GSAP,
+ * Lenis) and a WebGL hero, none of which a signed-in founder should ever
+ * download to look at their invoices. Statically imported, all of it landed in
+ * the main app bundle.
+ */
+const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 
 export function Root() {
   const { user, loading } = useAuth();
@@ -25,5 +31,9 @@ export function Root() {
     return <AuthPage initialMode={auth ?? 'login'} onBack={() => setAuth(null)} />;
   }
 
-  return <LandingPage onGetStarted={() => setAuth('signup')} onLogin={() => setAuth('login')} />;
+  return (
+    <Suspense fallback={<div className="h-full bg-[#0e1013]" />}>
+      <LandingPage onGetStarted={() => setAuth('signup')} onLogin={() => setAuth('login')} />
+    </Suspense>
+  );
 }

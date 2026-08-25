@@ -1,0 +1,127 @@
+/*
+ * Midnight Signal, pushed outward for the public page.
+ *
+ * The app already owns this palette: warm charcoal, one lime signal, Bricolage
+ * Grotesque over Hanken Grotesk. The landing page used to ignore all of it and
+ * run violet-indigo gradients, so the site and the product looked like two
+ * companies. Everything here is the same identity at a louder volume, which is
+ * what "exaggerated minimalism" means in practice: no new colours, a much bigger
+ * type scale, and far more empty space.
+ */
+
+.mk {
+  --mk-bg: #0e1013;
+  --mk-fg: #e7e9ee;
+  --mk-muted: #868d99;
+  --mk-line: #242932;
+  --mk-accent: #c9f24e;
+  --mk-ink: #14180b;
+  background: var(--mk-bg);
+  color: var(--mk-fg);
+}
+
+/*
+ * A metric-matched stand-in for the display face.
+ *
+ * The fonts load with display=swap, so the browser paints a fallback and then
+ * swaps in Bricolage Grotesque. At 136px that swap moved the hero and cost a
+ * measured 0.054 of layout shift. Bricolage sets at 89.49% of Arial's width for
+ * the same string (measured in the browser, not guessed), so a fallback squeezed
+ * to that ratio occupies the same box and the swap becomes invisible. The brand
+ * face still always arrives, which display:optional would have cost us.
+ */
+@font-face {
+  font-family: "Bricolage Fallback";
+  src: local("Arial"), local("Helvetica Neue"), local("Liberation Sans");
+  size-adjust: 89.49%;
+  font-weight: 400 800;
+}
+
+/* One fluid ramp, so every heading on the page is a step on the same scale
+ * rather than a one-off pixel value. */
+.mk-display {
+  font-family: var(--font-display), "Bricolage Fallback", var(--font-body), sans-serif;
+  font-weight: 700;
+  line-height: 0.92;
+  letter-spacing: -0.04em;
+  /*
+   * Sized from the measurement, not by eye. The longest line in the hero sets at
+   * 8.07x the font size in Bricolage, so the size has to leave that much room
+   * inside the content box at every width:
+   *   390px phone: 350px usable / 8.07 = 43.4px ceiling, so the old 2.75rem
+   *     minimum (44px) overflowed by 5px, wrapped to a third line the fallback
+   *     font did not need, and moved the page 41px the moment the webfont
+   *     arrived. That single reflow was the whole of the phone's layout shift.
+   *   768px tablet: 688px / 8.07 = 85.3px ceiling, and 11vw was 84.5px, which
+   *     is passing by 0.8px and would have broken on any copy edit.
+   * 2.375rem and 10vw clear both with real margin.
+   */
+  font-size: clamp(2.375rem, 10vw, 8.5rem);
+}
+.mk-h2 {
+  font-family: var(--font-display), "Bricolage Fallback", var(--font-body), sans-serif;
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.03em;
+  font-size: clamp(2rem, 6vw, 4rem);
+}
+.mk-h3 {
+  font-family: var(--font-display), "Bricolage Fallback", var(--font-body), sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-size: clamp(1.25rem, 2.2vw, 1.625rem);
+}
+.mk-lead { font-size: clamp(1.0625rem, 1.6vw, 1.3125rem); line-height: 1.55; }
+.mk-eyebrow {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+
+.mk-accent { color: var(--mk-accent); }
+.mk-muted { color: var(--mk-muted); }
+.mk-rule { border-color: var(--mk-line); }
+
+/* The one loud control on the page. Ink on accent, never white on lime. */
+.mk-cta {
+  background: var(--mk-accent);
+  color: var(--mk-ink);
+  font-weight: 600;
+}
+.mk-cta:hover { opacity: 0.9; }
+
+/*
+ * The two groups that are scrubbed against scroll get their own compositor layer
+ * up front. Without it the first frame of the scrub pays for the promotion, which
+ * is exactly the frame the visitor notices. Confined to this handful of elements:
+ * will-change on everything is how a page runs out of memory for layers.
+ */
+.mk-scatter-item, #mk-one { will-change: transform, opacity; }
+
+/* Reveals start hidden ONLY when scripted motion is going to run. Without this
+ * guard a failed script or a no-JS visitor would be left staring at an empty
+ * page, which is the classic way scroll animation breaks a site. */
+.mk-js .mk-reveal { opacity: 0; }
+
+.mk :focus-visible {
+  outline: 2px solid var(--mk-accent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/*
+ * Tier 1 of the motion contract: with reduced motion the scripted layer never
+ * initialises, so this is the safety net for anything CSS-driven, and it also
+ * makes certain nothing is left invisible if a reveal was mid-flight when the
+ * preference changed.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .mk-js .mk-reveal { opacity: 1 !important; transform: none !important; }
+  .mk *, .mk *::before, .mk *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
