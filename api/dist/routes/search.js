@@ -32,7 +32,11 @@ export async function searchRoutes(app) {
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId))
-            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), or(like(tasks.title, term), like(tasks.description, term)))))
+            .where(tenantWhere(tasks, accountId, and(eq(tasks.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), 
+        // Tasks reach a business through board -> folder. Without this, a member's
+        // search returned cards from businesses they cannot open, the one branch
+        // here that had slipped the scope every other branch already carries.
+        await businessScope(req, folders.businessId), or(like(tasks.title, term), like(tasks.description, term)))))
             .orderBy(desc(tasks.updatedAt))
             .limit(12);
         // Clients: top-level folders. Their first board rides along so a hit can land

@@ -38,6 +38,10 @@ export async function searchRoutes(app: FastifyInstance) {
       .where(tenantWhere(tasks, accountId, and(
         eq(tasks.isArchived, false),
         isNull(boards.deletedAt), isNull(folders.deletedAt),
+        // Tasks reach a business through board -> folder. Without this, a member's
+        // search returned cards from businesses they cannot open, the one branch
+        // here that had slipped the scope every other branch already carries.
+        await businessScope(req, folders.businessId),
         or(like(tasks.title, term), like(tasks.description, term)),
       )))
       .orderBy(desc(tasks.updatedAt))

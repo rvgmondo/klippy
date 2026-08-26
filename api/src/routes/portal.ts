@@ -17,7 +17,7 @@ import { hostingSettingsFor, provisionSubscription, switchToRealDomain, cleanDom
 import { balanceOf, balancesFor } from '../lib/balances.js';
 import { isDuplicateKey } from '../lib/tenant.js';
 import {
-  PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginToken, passwordLogin, portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword, signPortalToken, signPreviewToken, normaliseEmail, type PortalContext, generatePortalPassword,
+  PORTAL_COOKIE, LINK_TTL_MINUTES, consumeLoginToken, issueLoginTokensForEmail, issueLoginTokenForUser, passwordLogin, portalContext, portalCookieOptions, setPortalPassword, clearPortalPassword, signPortalToken, signPreviewToken, normaliseEmail, type PortalContext, generatePortalPassword,
 } from '../lib/portalAuth.js';
 import { authOf } from '../lib/context.js';
 import { intId } from '../lib/http.js';
@@ -108,8 +108,11 @@ export async function portalRoutes(app: FastifyInstance) {
     const parsed = z.object({ email: z.string().email().max(150) }).safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Enter a valid email address.' });
 
-    const issued = await issueLoginToken(parsed.data.email);
-    if (issued) {
+    // One link per portal this address legitimately holds. Usually exactly one; a
+    // billing contact for two businesses gets one per business, each branded as that
+    // business, so they reach the right company rather than an arbitrary one.
+    const issuedAll = await issueLoginTokensForEmail(parsed.data.email);
+    for (const issued of issuedAll) {
       const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
       const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);
       const content = {
@@ -770,18 +773,20 @@ export async function portalAdminRoutes(app: FastifyInstance) {
     if (!(await assertMaybeBusiness(req, reply, client.businessId))) return;
 
     const email = normaliseEmail(parsed.data.email);
+    let newPortalUserId: number;
     try {
-      await db.insert(portalUsers).values({
+      const ins = await db.insert(portalUsers).values({
         accountId, businessId: client.businessId, folderId: id,
         email, name: parsed.data.name ?? null,
       });
+      newPortalUserId = Number(ins[0].insertId);
     } catch (err) {
       if (isDuplicateKey(err)) {
         return reply.code(409).send({ error: 'That address already has access to this client.' });
       }
       return reply.code(500).send({ error: 'Could not add that person. Try again.' });
     }
-    if (parsed.data.invite !== false) await sendInvite(email);
+    if (parsed.data.invite !== false) await sendInvite(newPortalUserId);
     return reply.code(201).send({ ok: true });
   });
 
@@ -893,7 +898,7 @@ export async function portalAdminRoutes(app: FastifyInstance) {
     await setPortalPassword(id, password);
     let linkSent = false;
     if (parsed.data.sendLink && u.isActive) {
-      await sendInvite(u.email).then(() => { linkSent = true; }).catch(() => { /* password still stands */ });
+      await sendInvite(u.id).then(() => { linkSent = true; }).catch(() => { /* password still stands */ });
     }
     await record(`Set a new portal password for ${u.email}${linkSent ? ' and sent a sign-in link' : ''}.`);
     return { ok: true, password, email: u.email, linkSent };
@@ -908,14 +913,21 @@ export async function portalAdminRoutes(app: FastifyInstance) {
       .where(and(eq(portalUsers.id, id), eq(portalUsers.accountId, accountId))).limit(1);
     if (!u) return reply.code(404).send({ error: 'Not found.' });
     if (!u.isActive) return reply.code(400).send({ error: 'That access is switched off. Turn it back on first.' });
-    await sendInvite(u.email);
+    await sendInvite(u.id);
     return { ok: true };
   });
 }
 
-/** One place that builds and sends a sign-in link, so staff invites and self-service match. */
-async function sendInvite(email: string): Promise<void> {
-  const issued = await issueLoginToken(email);
+/**
+ * Build and send a sign-in link for ONE specific portal user.
+ *
+ * Takes the portal user's id, never their email: staff always know exactly which
+ * client they are inviting, and re-resolving by email could send the link to a
+ * different business's portal for the same address. That mismatch is the whole
+ * reason this is by id.
+ */
+async function sendInvite(portalUserId: number): Promise<void> {
+  const issued = await issueLoginTokenForUser(portalUserId);
   if (!issued) return;
   const link = `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`;
   const brand = await emailBrandFor(issued.user.accountId, issued.user.businessId);

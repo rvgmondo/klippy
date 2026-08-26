@@ -110,20 +110,24 @@ export async function portalContext(token) {
     return { user, client, business, preview };
 }
 /**
- * Issue a sign-in link. Returns the raw token, which is sent by email and never
- * stored, or null when there is nobody to send it to.
+ * Issue a sign-in link for ONE specific portal user (a specific client of a
+ * specific business), by id. This is the primitive every caller that already knows
+ * which portal it means should use: staff inviting a client they just added, the
+ * hosting flow emailing the client it just provisioned. Resolving by email instead
+ * would re-pick an arbitrary row when the same address is a client of more than one
+ * business, and land the recipient in the wrong company's portal.
  *
- * Callers must not vary their response on null. That is the whole point.
+ * Returns the raw token, sent by email and never stored, or null when the user is
+ * gone, switched off, or was emailed a link too recently.
  */
-export async function issueLoginToken(email) {
+export async function issueLoginTokenForUser(portalUserId) {
     const [user] = await db.select().from(portalUsers)
-        .where(and(eq(portalUsers.email, normaliseEmail(email)), eq(portalUsers.isActive, true)))
-        .limit(1);
+        .where(and(eq(portalUsers.id, portalUserId), eq(portalUsers.isActive, true))).limit(1);
     if (!user)
         return null;
-    // Throttle. Without this the endpoint is a way to fill a client's inbox, or to
-    // push a shared-hosting mail queue over its limit, at one request per keystroke.
-    // The caller still answers the same either way, so this leaks nothing.
+    // Throttle per portal user. Without this the link endpoint is a way to fill a
+    // client's inbox, or push a shared-hosting mail queue over its limit, one request
+    // per keystroke. The caller still answers the same either way, so this leaks nothing.
     if (user.lastLinkAt && Date.now() - user.lastLinkAt.getTime() < LINK_MIN_GAP_SECONDS * 1000) {
         return null;
     }
@@ -139,6 +143,26 @@ export async function issueLoginToken(email) {
     });
     await db.update(portalUsers).set({ lastLinkAt: new Date() }).where(eq(portalUsers.id, user.id));
     return { raw, user };
+}
+/**
+ * Self-service by email: issue a link for EVERY portal that address legitimately
+ * holds. When someone is a client of two businesses on Klippy under one address (a
+ * bookkeeper who is the billing contact for several), email alone cannot say which
+ * they mean, and picking one arbitrarily used to drop them into the wrong tenant's
+ * portal. So each of their own doors gets its own link, every mail to the address
+ * they already own, and they pick. An unknown address yields an empty list, and the
+ * caller must answer the same either way so this never reveals who is on file.
+ */
+export async function issueLoginTokensForEmail(email) {
+    const rows = await db.select({ id: portalUsers.id }).from(portalUsers)
+        .where(and(eq(portalUsers.email, normaliseEmail(email)), eq(portalUsers.isActive, true)));
+    const issued = [];
+    for (const r of rows) {
+        const one = await issueLoginTokenForUser(r.id);
+        if (one)
+            issued.push(one);
+    }
+    return issued;
 }
 /** Spend a sign-in link. Single use: the second attempt with the same link fails. */
 export async function consumeLoginToken(raw) {
@@ -170,32 +194,54 @@ export async function consumeLoginToken(raw) {
  * response cannot be used to work out which addresses exist.
  */
 export async function passwordLogin(email, password) {
-    const [user] = await db.select().from(portalUsers)
-        .where(and(eq(portalUsers.email, normaliseEmail(email)), eq(portalUsers.isActive, true)))
-        .limit(1);
-    // Locked out: refuse without even comparing, but say nothing different to the
-    // caller, so the lockout itself is not a signal that the address is real.
-    if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now())
-        return null;
-    // Always run a comparison, even with nobody to compare against, so the timing of
-    // a miss matches the timing of a wrong password.
-    const hash = user?.passwordHash ?? '$2a$12$0000000000000000000000000000000000000000000000000000';
-    const ok = await verifyPassword(password, hash).catch(() => false);
-    if (!user || !user.passwordHash || !ok) {
-        if (user) {
-            const attempts = user.failedAttempts + 1;
+    // One address can be a client of more than one business (unique key is folder +
+    // email), so there may be several rows. A password can only ever verify against
+    // its own bcrypt hash, so this cannot cross a tenant wall; picking `limit 1` blind
+    // was a reliability hole, not a leak, wrongly rejecting a real login when it landed
+    // on the sibling row. Authenticate against whichever row the password actually fits.
+    const rows = await db.select().from(portalUsers)
+        .where(and(eq(portalUsers.email, normaliseEmail(email)), eq(portalUsers.isActive, true)));
+    const now = Date.now();
+    let matched = null;
+    let compared = false;
+    for (const u of rows) {
+        // A locked or password-less row is not a candidate, but a locked row must not
+        // become a way to tell a real address from a fake one, so we simply skip it.
+        if (u.lockedUntil && u.lockedUntil.getTime() > now)
+            continue;
+        if (!u.passwordHash)
+            continue;
+        compared = true;
+        if (await verifyPassword(password, u.passwordHash).catch(() => false)) {
+            matched = u;
+            break;
+        }
+    }
+    // Always run at least one comparison, even with nobody to compare against, so the
+    // timing of a miss matches the timing of a wrong password and the endpoint cannot
+    // be used to work out which addresses exist.
+    if (!compared) {
+        await verifyPassword(password, '$2a$12$0000000000000000000000000000000000000000000000000000').catch(() => false);
+    }
+    if (!matched) {
+        // A failed attempt counts against every password-bearing row for this address,
+        // so the lockout still bites a brute-forcer no matter which sibling they hit.
+        for (const u of rows) {
+            if (!u.passwordHash)
+                continue;
+            const attempts = u.failedAttempts + 1;
             await db.update(portalUsers).set({
                 failedAttempts: attempts,
                 lockedUntil: attempts >= PORTAL_MAX_ATTEMPTS
-                    ? new Date(Date.now() + PORTAL_LOCKOUT_SECONDS * 1000) : null,
-            }).where(eq(portalUsers.id, user.id));
+                    ? new Date(now + PORTAL_LOCKOUT_SECONDS * 1000) : null,
+            }).where(eq(portalUsers.id, u.id));
         }
         return null;
     }
     await db.update(portalUsers)
         .set({ lastLoginAt: new Date(), failedAttempts: 0, lockedUntil: null })
-        .where(eq(portalUsers.id, user.id));
-    return user;
+        .where(eq(portalUsers.id, matched.id));
+    return matched;
 }
 export async function setPortalPassword(portalUserId, password) {
     await db.update(portalUsers).set({ passwordHash: await hashPassword(password) })
@@ -213,14 +259,23 @@ export async function clearPortalPassword(portalUserId) {
  */
 export async function ensurePortalUser(accountId, businessId, folderId, email) {
     if (!businessId)
-        return;
+        return null;
     const address = normaliseEmail(email);
     const [existing] = await db.select({ id: portalUsers.id }).from(portalUsers)
         .where(and(eq(portalUsers.folderId, folderId), eq(portalUsers.email, address))).limit(1);
     if (existing)
-        return;
-    await db.insert(portalUsers).values({ accountId, businessId, folderId, email: address })
-        .catch(() => { });
+        return existing.id;
+    try {
+        const ins = await db.insert(portalUsers).values({ accountId, businessId, folderId, email: address });
+        return Number(ins[0].insertId);
+    }
+    catch {
+        // A concurrent insert already made it; return that row so the caller can still
+        // issue a link for exactly this portal rather than re-resolving by email.
+        const [again] = await db.select({ id: portalUsers.id }).from(portalUsers)
+            .where(and(eq(portalUsers.folderId, folderId), eq(portalUsers.email, address))).limit(1);
+        return again?.id ?? null;
+    }
 }
 /** Housekeeping: drop spent and expired links so the table does not grow forever. */
 export async function pruneLoginTokens() {

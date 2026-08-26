@@ -151,7 +151,8 @@ export async function hostingRoutes(app: FastifyInstance) {
    * being stored, which is the difference between "it says enabled" and "it works".
    */
   app.post('/api/v1/hosting/test', async (req, reply) => {
-    const { accountId } = authOf(req);
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can test hosting.' });
     const parsed = z.object({
       businessId: z.number().int().nonnegative().optional(),
       whmHost: z.string().trim().max(190).optional(),
@@ -172,6 +173,15 @@ export async function hostingRoutes(app: FastifyInstance) {
     if (!host) return reply.code(400).send({ error: 'Add the WHM hostname first.' });
     let token = d.whmToken || '';
     if (!token && stored?.whmTokenEnc) {
+      // The stored WHM token is a server root credential. It may only ever be sent
+      // to the host it was saved against. If the request names a DIFFERENT host, we
+      // refuse to lend it the stored token: doing so would let a caller point the
+      // token at any server they control and read it off the wire (SSRF + token
+      // exfiltration). Testing a new host means re-entering the token for it.
+      const storedHost = cleanHost(stored.whmHost || '');
+      if (d.whmHost && cleanHost(d.whmHost) !== storedHost) {
+        return reply.code(400).send({ error: 'That hostname is not the saved one. Re-enter the WHM API token to test it against a different host.' });
+      }
       const fromStore = credsOf(stored);
       token = fromStore?.token ?? '';
     }

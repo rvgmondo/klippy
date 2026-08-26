@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businessMembers, businesses, boards, folders, tasks, boardColumns, taskSubtasks, taskComments } from '../db/schema.js';
+import { memberships, businessMembers, businesses, boards, folders, tasks, boardColumns, taskSubtasks, taskComments } from '../db/schema.js';
 import { authOf } from './context.js';
 async function loadAccess(req) {
     if (req._access)
@@ -113,6 +113,27 @@ export async function businessScope(req, column) {
     if (allowed.size === 0)
         return sql `1 = 0`;
     return inArray(column, [...allowed]);
+}
+/**
+ * The businesses a user may see, resolved WITHOUT a request/session. Signed public
+ * feeds (a token-gated ICS calendar) have no JWT to read a role from, so they cannot
+ * use loadAccess. Returns null for "all" (account owner/admin), otherwise the set of
+ * their business_members ids. An absent or deactivated membership resolves to the
+ * empty set, i.e. nothing, so a removed member's stale feed link goes blank.
+ */
+export async function accessibleBusinessIdsForUser(accountId, userId) {
+    const [m] = await db.select({ role: memberships.role, isActive: memberships.isActive })
+        .from(memberships)
+        .where(and(eq(memberships.accountId, accountId), eq(memberships.userId, userId)))
+        .limit(1);
+    if (!m || !m.isActive)
+        return new Set();
+    if (m.role === 'owner' || m.role === 'admin')
+        return null;
+    const rows = await db.select({ businessId: businessMembers.businessId })
+        .from(businessMembers)
+        .where(and(eq(businessMembers.accountId, accountId), eq(businessMembers.userId, userId)));
+    return new Set(rows.map((r) => r.businessId));
 }
 /** All business ids in the account (used to expand "all" for owners/admins). */
 export async function allBusinessIds(accountId) {

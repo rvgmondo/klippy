@@ -113,6 +113,11 @@ export async function dealRoutes(app: FastifyInstance) {
     const d = parsed.data;
     const st = d.stage ?? 'lead';
     const businessId = await resolveBusinessId(accountId, d.businessId);
+    // A member may only file a deal into a business they can actually work in. Every
+    // other deal handler gates on assertMaybeBusiness; create is where it was missing,
+    // so a member could inject deals (and fire the won-deal handoff) into another
+    // team's pipeline they cannot see. Null business (uncategorised) still passes.
+    if (!(await assertMaybeBusiness(req, reply, businessId, 'member'))) return;
     const position = await nextPosition(deals, sql`account_id = ${accountId} AND stage = ${st}`);
     const ins = await db.insert(deals).values(withTenant(accountId, {
       businessId, title: d.title, company: d.company ?? null, contactName: d.contactName ?? null,

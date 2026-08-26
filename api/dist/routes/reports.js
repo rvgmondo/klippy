@@ -300,7 +300,7 @@ export async function reportRoutes(app) {
                 currency: documents.currency, subtotal: documents.subtotal, tax: documents.taxAmount,
                 total: documents.total, status: documents.status,
             }).from(documents)
-                .where(tenantWhere(documents, accountId, inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
+                .where(tenantWhere(documents, accountId, await businessScope(req, documents.businessId), inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
             csv = toCsv(['Number', 'Type', 'Issue date', 'Due date', 'Client', 'Client VAT', 'Currency', 'Subtotal', 'Tax', 'Total', 'Status'], rows.map((r) => [r.number, r.type, r.issueDate, r.dueDate, r.client, r.vat, r.currency, r.subtotal, r.tax, r.total, r.status]));
         }
         else if (kind === 'payments') {
@@ -308,7 +308,7 @@ export async function reportRoutes(app) {
                 paidOn: payments.paidOn, amount: payments.amount, method: payments.method,
                 number: documents.number, client: documents.clientName, currency: documents.currency,
             }).from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
-                .where(and(eq(payments.accountId, accountId), gte(payments.paidOn, from), lte(payments.paidOn, to)));
+                .where(and(eq(payments.accountId, accountId), await businessScope(req, documents.businessId), gte(payments.paidOn, from), lte(payments.paidOn, to)));
             csv = toCsv(['Paid on', 'Amount', 'Method', 'Invoice', 'Client', 'Currency'], rows.map((r) => [r.paidOn, r.amount, r.method, r.number, r.client, r.currency]));
         }
         else {
@@ -316,7 +316,7 @@ export async function reportRoutes(app) {
                 incurredOn: expenses.incurredOn, description: expenses.description,
                 category: expenses.category, amount: expenses.amount,
             }).from(expenses)
-                .where(and(eq(expenses.accountId, accountId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+                .where(and(eq(expenses.accountId, accountId), await businessScope(req, expenses.businessId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
             csv = toCsv(['Date', 'Description', 'Category', 'Amount'], rows.map((r) => [r.incurredOn, r.description, r.category, r.amount]));
         }
         reply.header('Content-Type', 'text/csv; charset=utf-8');
@@ -338,10 +338,10 @@ export async function reportRoutes(app) {
         const invoices = await db.select({
             currency: documents.currency, type: documents.type, tax: documents.taxAmount, total: documents.total,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
+            .where(tenantWhere(documents, accountId, await businessScope(req, documents.businessId), inArray(documents.type, ['invoice', 'credit_note']), gte(documents.issueDate, from), lte(documents.issueDate, to)));
         const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount })
             .from(expenses)
-            .where(and(eq(expenses.accountId, accountId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+            .where(and(eq(expenses.accountId, accountId), await businessScope(req, expenses.businessId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
         const round = (n) => Math.round(n * 100) / 100;
         const byCur = new Map();
         for (const r of invoices) {

@@ -56,7 +56,14 @@ export function buildServer() {
         logger: isProd
             ? true
             : { transport: undefined, level: 'info' },
-        trustProxy: true, // behind Apache/Passenger on cPanel
+        // Trust exactly ONE proxy hop: the local Apache/Passenger in front on cPanel.
+        // `true` trusted the whole X-Forwarded-For chain, so req.ip became the leftmost,
+        // client-supplied entry, which any caller can set to anything. That turned every
+        // IP-keyed rate limit (sign-in, lead and quote submission) into a one-header
+        // bypass: a fresh forged IP per request is a fresh bucket. With `1`, req.ip is the
+        // address the trusted hop appended (the real client), and anything the caller
+        // prepends sits further left and is ignored.
+        trustProxy: 1,
         // On cPanel the app is mounted at <subdomain>/api. Depending on Passenger's
         // sub-URI handling, requests may arrive with or without the /api prefix;
         // rewriteUrl runs before routing, so both shapes hit the same routes.

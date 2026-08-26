@@ -576,9 +576,12 @@ async function requestDomain(accountId, sub) {
     const email = await billingEmailFor(accountId, sub.folderId);
     if (!email)
         return false;
-    const { ensurePortalUser, issueLoginToken } = await import('./portalAuth.js');
-    await ensurePortalUser(accountId, sub.businessId, sub.folderId, email);
-    const issued = await issueLoginToken(email);
+    const { ensurePortalUser, issueLoginTokenForUser } = await import('./portalAuth.js');
+    // Issue the link for the exact portal we just ensured, not by email: this same
+    // address may be a client of another business too, and a by-email link could sign
+    // them into that other company's portal instead of the hosting they just bought.
+    const portalUserId = await ensurePortalUser(accountId, sub.businessId, sub.folderId, email);
+    const issued = portalUserId ? await issueLoginTokenForUser(portalUserId) : null;
     const brand = await emailBrandFor(accountId, sub.businessId);
     const link = issued
         ? `${appUrl()}/?portal=enter&token=${encodeURIComponent(issued.raw)}`

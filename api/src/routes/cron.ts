@@ -4,6 +4,7 @@ import { db } from '../db/client.js';
 import { safeEqual } from '../lib/portalAuth.js';
 import { jobRuns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
+import { isPlatformAdmin } from '../lib/platform.js';
 import { JOBS, runJob, runDueJobs, type JobName } from '../lib/jobs.js';
 
 /**
@@ -35,7 +36,12 @@ export async function cronRoutes(app: FastifyInstance) {
   }
 
   // ---- Signed-in automation view, for Settings ------------------------------
-  app.get('/api/v1/automation', { preHandler: app.requireAuth }, async () => {
+  // The jobs are global (each run sweeps every account, job_runs has no accountId),
+  // so this whole panel is a platform-operator concern, not a per-tenant setting.
+  // Gated to the operator, or a customer could read the platform's job state and its
+  // aggregate run messages.
+  app.get('/api/v1/automation', { preHandler: app.requireAuth }, async (req, reply) => {
+    if (!(await isPlatformAdmin(req))) return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
     const state = await db.select().from(jobRuns);
     const byName = new Map(state.map((s) => [s.name, s]));
     return {
@@ -70,6 +76,9 @@ export async function cronRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/v1/automation/:name/run', { preHandler: app.requireAuth }, async (req, reply) => {
+    // Forces a global job to run now, off-schedule (e.g. hosting suspensions across
+    // every account). Operator only.
+    if (!(await isPlatformAdmin(req))) return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
     const name = (req.params as { name: string }).name as JobName;
     if (!JOBS.some((j) => j.name === name)) return reply.code(404).send({ error: 'No such job.' });
     const res = await runJob(name);
@@ -79,6 +88,10 @@ export async function cronRoutes(app: FastifyInstance) {
   app.patch('/api/v1/automation/:name', { preHandler: app.requireAuth }, async (req, reply) => {
     const { userId } = authOf(req);
     if (!userId) return reply.code(401).send({ error: 'Not authenticated.' });
+    // Enabling or disabling a job flips it for EVERY account, so this is the operator's
+    // switch, not a customer's. Without this a customer could switch off the billing
+    // that invoices every other customer.
+    if (!(await isPlatformAdmin(req))) return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
     const name = (req.params as { name: string }).name as JobName;
     if (!JOBS.some((j) => j.name === name)) return reply.code(404).send({ error: 'No such job.' });
     const enabled = (req.body as { enabled?: boolean } | null)?.enabled;

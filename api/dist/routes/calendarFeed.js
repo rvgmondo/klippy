@@ -1,7 +1,8 @@
-import { and, eq, gte, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, boards, calendarEvents } from '../db/schema.js';
+import { tasks, boards, folders, calendarEvents } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
+import { accessibleBusinessIdsForUser } from '../lib/access.js';
 import { signCalToken, verifyCalToken } from '../lib/secretbox.js';
 import { appUrl } from '../lib/mailer.js';
 import { addDays } from '../lib/billing.js';
@@ -38,16 +39,29 @@ export async function calendarFeedRoutes(app) {
         const today = new Date().toISOString().slice(0, 10);
         const from = addDays(today, -7);
         const to = addDays(today, 180);
+        // The token proves who the feed is for, but not what they may see. A member
+        // resolves to their accessible businesses; owners/admins to "all". Without this,
+        // a member's personal feed carried every business's unassigned cards and every
+        // account calendar event, tenant data their session would never show them.
+        const allowed = await accessibleBusinessIdsForUser(accountId, userId);
+        const bizCond = (col) => {
+            if (allowed === null)
+                return undefined;
+            if (allowed.size === 0)
+                return isNull(col);
+            return or(isNull(col), inArray(col, [...allowed]));
+        };
         const cards = await db.select({
             id: tasks.id, title: tasks.title, dueDate: tasks.dueDate, isCompleted: tasks.isCompleted,
             boardName: boards.name,
         }).from(tasks)
             .leftJoin(boards, eq(boards.id, tasks.boardId))
-            .where(and(eq(tasks.accountId, accountId), eq(tasks.isArchived, false), eq(tasks.isCompleted, false), isNull(boards.deletedAt), isNotNull(tasks.dueDate), gte(tasks.dueDate, from), lte(tasks.dueDate, to), or(eq(tasks.assignedTo, userId), isNull(tasks.assignedTo))));
+            .leftJoin(folders, eq(folders.id, boards.folderId))
+            .where(and(eq(tasks.accountId, accountId), eq(tasks.isArchived, false), eq(tasks.isCompleted, false), isNull(boards.deletedAt), isNotNull(tasks.dueDate), gte(tasks.dueDate, from), lte(tasks.dueDate, to), or(eq(tasks.assignedTo, userId), isNull(tasks.assignedTo)), bizCond(folders.businessId)));
         const evStart = new Date(`${from}T00:00:00.000Z`);
         const evEnd = new Date(`${to}T23:59:59.999Z`);
         const evs = await db.select().from(calendarEvents)
-            .where(and(eq(calendarEvents.accountId, accountId), gte(calendarEvents.startAt, evStart), lte(calendarEvents.startAt, evEnd)));
+            .where(and(eq(calendarEvents.accountId, accountId), gte(calendarEvents.startAt, evStart), lte(calendarEvents.startAt, evEnd), bizCond(calendarEvents.businessId)));
         const now = dateStamp(new Date());
         const lines = [
             'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Klippy//Calendar//EN',

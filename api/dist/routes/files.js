@@ -9,6 +9,7 @@ import { taskFiles, tasks } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
+import { assertTaskAccess } from '../lib/access.js';
 export const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15MB, mirrors v1
 // Same allowlist as the v1 PHP app: images, pdf, office docs, txt/csv, zip.
 const ALLOWED_MIME = new Set([
@@ -33,6 +34,10 @@ export async function fileRoutes(app) {
             .where(tenantWhere(tasks, accountId, eq(tasks.id, id))).limit(1);
         if (!task)
             return reply.code(404).send({ error: 'Task not found.' });
+        // The task lives under a board -> folder -> business. A member may only attach
+        // files to a task in a business they can work in, not to any task in the account.
+        if (!(await assertTaskAccess(req, reply, id, 'member')))
+            return;
         const part = await req.file({ limits: { fileSize: MAX_FILE_BYTES } });
         if (!part)
             return reply.code(400).send({ error: 'No file uploaded.' });
@@ -71,6 +76,8 @@ export async function fileRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
+        if (!(await assertTaskAccess(req, reply, id, 'viewer')))
+            return;
         const files = await db.select().from(taskFiles)
             .where(tenantWhere(taskFiles, accountId, eq(taskFiles.taskId, id)));
         return { files };
@@ -85,6 +92,8 @@ export async function fileRoutes(app) {
             .where(tenantWhere(taskFiles, accountId, eq(taskFiles.id, id))).limit(1);
         if (!f)
             return reply.code(404).send({ error: 'File not found.' });
+        if (!(await assertTaskAccess(req, reply, f.taskId, 'viewer')))
+            return;
         const full = path.join(uploadDir(), f.storedName);
         try {
             await stat(full);
@@ -105,6 +114,8 @@ export async function fileRoutes(app) {
             .where(tenantWhere(taskFiles, accountId, eq(taskFiles.id, id))).limit(1);
         if (!f)
             return reply.code(404).send({ error: 'File not found.' });
+        if (!(await assertTaskAccess(req, reply, f.taskId, 'member')))
+            return;
         if (f.userId !== userId && role === 'member') {
             return reply.code(403).send({ error: 'You can only delete your own uploads.' });
         }
