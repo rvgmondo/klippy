@@ -16,7 +16,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { fieldClass } from './ui';
 import {
   money, STATUS_COLOR, type TreeFolder, type DocType, type Status, type DocSummary,
-  type Line, type DiscountType, type FullDoc,
+  type Line, type DiscountType, type DepositType, type FullDoc,
 } from './billingShared';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -312,6 +312,11 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   const [taxRate, setTaxRate] = useState(15);
   const [discountType, setDiscountType] = useState<DiscountType>('none');
   const [discountValue, setDiscountValue] = useState(0);
+  // What the client pays up front. Stated on the document and offered as its own
+  // button on the pay link, so "half to start" is something the client can act on
+  // rather than a sentence in the notes.
+  const [depositType, setDepositType] = useState<DepositType>('none');
+  const [depositValue, setDepositValue] = useState(0);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, unitPrice: 0 }]);
   const offeringsQ = useQuery({
@@ -379,6 +384,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
     setClientVat(d.clientVatNumber ?? '');
     setIssueDate(d.issueDate); setDueDate(d.dueDate ?? ''); setTaxRate(Number(d.taxRate));
     setDiscountType(d.discountType ?? 'none'); setDiscountValue(Number(d.discountValue ?? 0));
+    setDepositType(d.depositType ?? 'none'); setDepositValue(Number(d.depositValue ?? 0));
     setNotes(d.notes ?? '');
     setLines(existing.data.lines.map((l) => ({
       description: l.description, detail: l.detail ?? null,
@@ -392,6 +398,11 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   const discount = discountType === 'percent' ? subtotal * (Math.min(discountValue, 100) / 100)
     : discountType === 'amount' ? Math.min(discountValue, subtotal) : 0;
   const tax = (subtotal - discount) * (taxRate / 100);
+  // Off the total, tax included, exactly as the server computes it, so the editor
+  // and the document can never disagree about what is due up front.
+  const grand = subtotal - discount + tax;
+  const deposit = depositType === 'percent' ? grand * (Math.min(depositValue, 100) / 100)
+    : depositType === 'amount' ? Math.min(depositValue, grand) : 0;
   const currency = existing.data?.document.currency ?? 'ZAR';
 
   const save = useMutation({
@@ -400,7 +411,8 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
         type, folderId, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
         issueDate, dueDate: dueDate || null,
-        taxRate, discountType, discountValue: Number(discountValue) || 0, notes: notes.trim() || null,
+        taxRate, discountType, discountValue: Number(discountValue) || 0,
+        depositType, depositValue: Number(depositValue) || 0, notes: notes.trim() || null,
         ...(isNew && businessId ? { businessId } : {}),
         ...(isNew && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
@@ -490,6 +502,29 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
             </div>
           )}
         </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-[11px] text-slate-500">Deposit</label>
+            <select className={field} value={depositType} onChange={(e) => setDepositType(e.target.value as DepositType)}>
+              <option value="none">No deposit</option>
+              <option value="percent">Percent of total (%)</option>
+              <option value="amount">Fixed amount</option>
+            </select>
+          </div>
+          {depositType !== 'none' && (
+            <div>
+              <label className="mb-1 block text-[11px] text-slate-500">{depositType === 'percent' ? 'Percent up front' : 'Amount up front'}</label>
+              <input type="number" min={0} className={field} value={depositValue} onChange={(e) => setDepositValue(Number(e.target.value))} />
+            </div>
+          )}
+        </div>
+        {depositType !== 'none' && (
+          <p className="mt-1.5 text-[11px] text-slate-500">
+            Printed under the total, and the pay link offers it as its own button. The invoice keeps its
+            full amount: a deposit is a payment against it, so what is still owed stays right.
+          </p>
+        )}
 
         {/* Pull from tracked time */}
         {type === 'invoice' && (
@@ -625,6 +660,18 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
             {discount > 0 && <div className="flex justify-between text-slate-400"><span>Discount</span><span className="num">-{money(discount, currency)}</span></div>}
             <div className="flex justify-between text-slate-400"><span>Tax ({taxRate}%)</span><span className="num">{money(tax, currency)}</span></div>
             <div className="flex justify-between border-t border-slate-800 pt-1 font-semibold text-slate-100"><span>Total</span><span className="num">{money(subtotal - discount + tax, currency)}</span></div>
+            {deposit > 0 && (
+              <>
+                <div className="flex justify-between pt-1 text-[var(--accent)]">
+                  <span>Deposit{depositType === 'percent' ? ` (${depositValue}%)` : ''}</span>
+                  <span className="num">{money(deposit, currency)}</span>
+                </div>
+                <div className="flex justify-between text-slate-400">
+                  <span>Balance afterwards</span>
+                  <span className="num">{money(subtotal - discount + tax - deposit, currency)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

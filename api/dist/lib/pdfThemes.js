@@ -203,6 +203,15 @@ function drawTotals(c, y, opts) {
         fitText(c, d.totals.total, valueX, y - 2, valueW, f.bold, 14);
         y += 24;
     }
+    // The deposit sits UNDER the total rather than replacing it, so the document
+    // still says what the job costs and then what is needed to begin. Printing the
+    // deposit as the headline figure is how a client pays half and believes they
+    // are square.
+    if (d.totals.deposit && d.totals.balanceAfterDeposit) {
+        y += 2;
+        line(d.totals.depositLabel || 'Deposit to start', d.totals.deposit);
+        line('Balance afterwards', d.totals.balanceAfterDeposit);
+    }
     return y;
 }
 /** A template block (header/footer HTML), keeping its emphasis. */

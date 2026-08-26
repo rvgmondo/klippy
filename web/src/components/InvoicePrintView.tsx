@@ -18,6 +18,7 @@ export function PrintView({ id, onClose }: { id: number; onClose: () => void }) 
   const label = isQuote ? 'Quotation' : issuer.vatRegistered ? 'Tax Invoice' : 'Invoice';
   const paid = d.status === 'paid';
   const discountAmt = Number(d.discountAmount ?? 0);
+  const depositAmt = Number(d.depositAmount ?? 0);
   loadFont(issuer.fontDisplay); loadFont(issuer.fontBody);
 
   return (
@@ -137,6 +138,22 @@ export function PrintView({ id, onClose }: { id: number; onClose: () => void }) 
                 <div className="mt-1 flex justify-between rounded-md px-3 py-2 text-base font-bold text-white" style={{ background: accent }}>
                   <span>Total</span><span className="num">{money(d.total, cur)}</span>
                 </div>
+                {/* Under the total, never instead of it: the page still says what
+                    the job costs, then what is needed to begin. */}
+                {depositAmt > 0 && (
+                  <>
+                    <div className="flex justify-between pt-1.5">
+                      <span className="text-slate-500">
+                        Deposit to start{d.depositType === 'percent' ? ` (${Number(d.depositValue)}%)` : ''}
+                      </span>
+                      <span className="num font-semibold text-slate-800">{money(depositAmt, cur)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Balance afterwards</span>
+                      <span className="num text-slate-700">{money(Number(d.total) - depositAmt, cur)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 

@@ -37,6 +37,10 @@ async function shouldTokenize(doc: { subscriptionId: number | null; accountId: n
   return !!sub?.autoDebit && !sub.token;
 }
 
+/** The pay pages are hand-built HTML, so anything from the database is escaped. */
+const esc = (v: string) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
 export async function paymentRoutes(app: FastifyInstance) {
   // PayFast posts the ITN as application/x-www-form-urlencoded, which Fastify does
   // not parse by default. Capture the RAW body (needed verbatim for the server-side
@@ -264,12 +268,47 @@ export async function paymentRoutes(app: FastifyInstance) {
         : `Invoices in ${doc.currency} cannot be paid by card here. Please use the bank details on your invoice.`);
     }
 
-    const owed = (await balanceOf(doc.accountId, doc.id, Number(doc.total))).outstanding;
+    const balance = await balanceOf(doc.accountId, doc.id, Number(doc.total));
+    const owed = balance.outstanding;
     if (owed <= 0.001) return page('Already paid', `Invoice ${doc.number} is already settled. Thank you.`);
 
+    /**
+     * A deposit is only a deposit before anything has been paid. Once the client
+     * has put something down, the only meaningful figure is what is left, so the
+     * choice disappears rather than offering to take the deposit twice.
+     */
+    const deposit = Number(doc.depositAmount);
+    const depositOpen = deposit > 0.001 && deposit < owed - 0.001 && balance.paid <= 0.001;
+    const choice = (req.query as { pay?: string }).pay;
+
+    // With a deposit outstanding and no choice made yet, ask instead of assuming.
+    // Sending a client straight to a card form for the full amount when the
+    // agreement was "half to start" is how a job stalls at the payment step.
+    if (depositOpen && choice !== 'deposit' && choice !== 'full') {
+      const link = (q: string, label: string, amount: number, primary: boolean) =>
+        `<a href="/api/v1/pay/${doc.id}?t=${encodeURIComponent(token)}&pay=${q}" `
+        + `style="display:block;padding:14px 18px;border-radius:10px;margin-bottom:10px;text-decoration:none;font-size:15px;`
+        + (primary
+          ? `background:#0f172a;color:#fff;font-weight:600;`
+          : `border:1px solid #cbd5e1;color:#0f172a;`)
+        + `">${label}<span style="float:right">${formatMoney(amount, doc.currency)}</span></a>`;
+      return reply.type('text/html').send(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+        + `<title>Pay invoice ${esc(doc.number)}</title>`
+        + `<body style="margin:0;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a">`
+        + `<div style="max-width:420px;margin:10vh auto;padding:0 24px">`
+        + `<h1 style="font-size:20px;margin-bottom:4px">Invoice ${esc(doc.number)}</h1>`
+        + `<p style="color:#64748b;font-size:14px;margin-bottom:20px">`
+        + `The total is ${formatMoney(owed, doc.currency)}. You can settle it in full, or pay the deposit now and the rest later.</p>`
+        + link('deposit', 'Pay the deposit', deposit, true)
+        + link('full', 'Pay in full', owed, false)
+        + `</div></body>`);
+    }
+
+    const amount = choice === 'deposit' && depositOpen ? deposit : owed;
     const base = appUrl();
     const { url, fields } = buildCheckout(creds, {
-      amount: owed, itemName: `Invoice ${doc.number}`, mPaymentId: `doc-${doc.id}`,
+      amount, itemName: `Invoice ${doc.number}${choice === 'deposit' ? ' (deposit)' : ''}`, mPaymentId: `doc-${doc.id}`,
       returnUrl: `${base}/?paid=${doc.number}`, cancelUrl: `${base}/?cancelled=${doc.number}`,
       notifyUrl: `${base}/api/v1/payfast/notify`, buyerEmail: doc.clientEmail,
       tokenize: await shouldTokenize(doc),

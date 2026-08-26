@@ -101,7 +101,11 @@ export interface DocData {
   };
   client: { name: string; email: string | null; address: string | null; vat: string | null };
   lines: DocLine[];
-  totals: { subtotal: string; discount: string | null; taxLabel: string | null; tax: string | null; total: string };
+  totals: {
+    subtotal: string; discount: string | null; taxLabel: string | null; tax: string | null; total: string;
+    /** Set only when a deposit is asked for and the document is unpaid. */
+    depositLabel?: string | null; deposit?: string | null; balanceAfterDeposit?: string | null;
+  };
   notes: string | null;
   headerHtml: string | null;
   footerHtml: string | null;
@@ -274,6 +278,16 @@ function drawTotals(c: Ctx, y: number, opts: { boxed?: boolean; left?: number; w
     pdf.fillColor(INK_STRONG);
     fitText(c, d.totals.total, valueX, y - 2, valueW, f.bold, 14);
     y += 24;
+  }
+
+  // The deposit sits UNDER the total rather than replacing it, so the document
+  // still says what the job costs and then what is needed to begin. Printing the
+  // deposit as the headline figure is how a client pays half and believes they
+  // are square.
+  if (d.totals.deposit && d.totals.balanceAfterDeposit) {
+    y += 2;
+    line(d.totals.depositLabel || 'Deposit to start', d.totals.deposit);
+    line('Balance afterwards', d.totals.balanceAfterDeposit);
   }
   return y;
 }

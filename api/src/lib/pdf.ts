@@ -135,6 +135,16 @@ export async function renderDocumentPdf(
       taxLabel: Number(doc.taxRate) > 0 ? `Tax (${Number(doc.taxRate)}%)` : null,
       tax: Number(doc.taxRate) > 0 ? money(doc.taxAmount) : null,
       total: money(doc.total),
+      // A percentage deposit keeps saying "50%" on the page: the client agreed to
+      // a proportion, and seeing it restated is what makes the figure checkable.
+      depositLabel: Number(doc.depositAmount) > 0
+        ? (doc.depositType === 'percent'
+          ? `Deposit to start (${Number(doc.depositValue)}%)`
+          : 'Deposit to start')
+        : null,
+      deposit: Number(doc.depositAmount) > 0 ? money(doc.depositAmount) : null,
+      balanceAfterDeposit: Number(doc.depositAmount) > 0
+        ? money(Number(doc.total) - Number(doc.depositAmount)) : null,
     },
     notes: doc.notes,
     headerHtml: business?.invoiceHeaderHtml ? fillTemplate(business.invoiceHeaderHtml, tplData) : null,

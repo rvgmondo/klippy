@@ -59,6 +59,9 @@ const bodySchema = z.object({
     taxRate: z.number().min(0).max(100).optional(),
     discountType: z.enum(['none', 'percent', 'amount']).optional(),
     discountValue: z.number().min(0).max(100_000_000).optional(),
+    /** What is due up front. A percentage of the total, or a flat figure. */
+    depositType: z.enum(['none', 'percent', 'amount']).optional(),
+    depositValue: z.number().min(0).max(100_000_000).optional(),
     notes: z.string().max(5000).nullable().optional(),
     lines: z.array(lineSchema).max(200),
 });
@@ -67,7 +70,7 @@ const PREFIX = { quote: 'QUO-', invoice: 'INV-', credit_note: 'CN-' };
  * Totals with an optional discount taken off the subtotal before tax, so tax is
  * charged on the discounted amount (the correct order for VAT).
  */
-function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0, currency = DEFAULT_CURRENCY) {
+function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0, currency = DEFAULT_CURRENCY, depositType = 'none', depositValue = 0) {
     // Every figure is rounded to what the currency can express, and each one is then
     // built from figures that are ALREADY rounded. Rounding each part independently
     // from the raw arithmetic gives an invoice that does not add up: a yen invoice
@@ -89,7 +92,17 @@ function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0,
         discountAmount = r(Math.min(discountValue, subtotal));
     const taxable = r(subtotal - discountAmount);
     const taxAmount = r(taxable * (taxRate / 100));
-    return { priced, subtotal, discountAmount, taxAmount, total: r(taxable + taxAmount) };
+    const total = r(taxable + taxAmount);
+    // The deposit comes off the TOTAL, tax included, because that is the number
+    // that was agreed: "half up front" means half of what the client is asked for.
+    // Capped at the total, so a fat-fingered fixed deposit cannot ask for more
+    // than the invoice.
+    let depositAmount = 0;
+    if (depositType === 'percent')
+        depositAmount = r(total * (Math.min(depositValue, 100) / 100));
+    else if (depositType === 'amount')
+        depositAmount = r(Math.min(depositValue, total));
+    return { priced, subtotal, discountAmount, taxAmount, total, depositAmount };
 }
 /**
  * What is still owed on an invoice: its total, less payments taken (a refund is a
@@ -503,7 +516,9 @@ export async function documentRoutes(app) {
         const taxRate = d.taxRate ?? 0;
         const discountType = d.discountType ?? 'none';
         const discountValue = d.discountValue ?? 0;
-        const totals = computeTotals(d.lines, taxRate, discountType, discountValue, currency);
+        const depositType = d.depositType ?? 'none';
+        const depositValue = d.depositValue ?? 0;
+        const totals = computeTotals(d.lines, taxRate, discountType, discountValue, currency, depositType, depositValue);
         // A member can only raise a document in a business they can work in.
         if (businessId && !(await canSeeBusiness(req, businessId))) {
             return reply.code(403).send({ error: 'You do not have access to that business.' });
@@ -517,6 +532,7 @@ export async function documentRoutes(app) {
                 clientVatNumber: d.clientVatNumber || null,
                 issueDate: d.issueDate, dueDate: d.dueDate ?? null, currency,
                 discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
+                depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
                 taxRate: money(taxRate), subtotal: money(totals.subtotal),
                 taxAmount: money(totals.taxAmount), total: money(totals.total),
                 notes: d.notes ?? null, createdBy: userId,
@@ -583,13 +599,16 @@ export async function documentRoutes(app) {
         // The document's own currency, not the business's current setting: editing an
         // old invoice must not silently re-round it into whatever the business bills in
         // today.
-        const totals = computeTotals(d.lines, taxRate, discountType, discountValue, existing.currency);
+        const depositType = d.depositType ?? 'none';
+        const depositValue = d.depositValue ?? 0;
+        const totals = computeTotals(d.lines, taxRate, discountType, discountValue, existing.currency, depositType, depositValue);
         await db.transaction(async (tx) => {
             await tx.update(documents).set({
                 folderId: d.folderId ?? null, clientName: d.clientName, clientEmail: d.clientEmail || null,
                 clientAddress: d.clientAddress ?? null, clientVatNumber: d.clientVatNumber || null,
                 issueDate: d.issueDate, dueDate: d.dueDate ?? null,
                 discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
+                depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
                 taxRate: money(taxRate), subtotal: money(totals.subtotal),
                 taxAmount: money(totals.taxAmount), total: money(totals.total), notes: d.notes ?? null,
             }).where(tenantWhere(documents, accountId, eq(documents.id, id)));
@@ -700,6 +719,9 @@ export async function documentRoutes(app) {
                 clientVatNumber: quote.clientVatNumber,
                 issueDate: today, dueDate, currency: quote.currency, taxRate: quote.taxRate,
                 discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
+                // The deposit was part of what the client accepted, so it comes across
+                // with the numbers rather than being retyped from memory.
+                depositType: quote.depositType, depositValue: quote.depositValue, depositAmount: quote.depositAmount,
                 subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
                 notes: quote.notes, createdBy: userId,
             }));

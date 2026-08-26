@@ -25,12 +25,15 @@ export interface Line {
   recurringMonths?: number | null;
 }
 export type DiscountType = 'none' | 'percent' | 'amount';
+/** A deposit is stated the same two ways a discount is: a share, or a figure. */
+export type DepositType = 'none' | 'percent' | 'amount';
 export interface FullDoc {
   document: DocSummary & {
     clientEmail: string | null; clientAddress: string | null; clientVatNumber: string | null; taxRate: string;
     /** The client this belongs to, so editing keeps the link rather than dropping it. */
     folderId: number | null;
     discountType: DiscountType; discountValue: string; discountAmount: string;
+    depositType: DepositType; depositValue: string; depositAmount: string;
     subtotal: string; taxAmount: string; notes: string | null;
   };
   lines: (Line & { amount: string })[];

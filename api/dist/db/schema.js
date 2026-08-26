@@ -684,6 +684,23 @@ export const documents = mysqlTable('documents', {
     currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
     // Discount applied to the subtotal before tax. 'none' | 'percent' | 'amount';
     // discountAmount is the resolved money value, stored so totals are self-contained.
+    /**
+     * What the client pays up front to start the work.
+     *
+     * Taken off the TOTAL, not the subtotal, because that is how the number is
+     * agreed out loud: "50% deposit" means half of what the invoice says, tax
+     * included. Stored as the type and the figure as typed, plus the resolved
+     * money value, so a percentage deposit stays readable on the document ("50%")
+     * while every screen and the pay link work from one settled amount.
+     *
+     * This states and collects a deposit; it does not split the invoice in two.
+     * The document keeps its full total and the deposit is a payment against it,
+     * which is what makes the existing balance, statement and chasing arithmetic
+     * carry on being right without knowing deposits exist.
+     */
+    depositType: mysqlEnum('deposit_type', ['none', 'percent', 'amount']).default('none').notNull(),
+    depositValue: decimal('deposit_value', { precision: 12, scale: 2 }).default('0').notNull(),
+    depositAmount: decimal('deposit_amount', { precision: 12, scale: 2 }).default('0').notNull(),
     discountType: mysqlEnum('discount_type', ['none', 'percent', 'amount']).default('none').notNull(),
     discountValue: decimal('discount_value', { precision: 12, scale: 2 }).default('0').notNull(),
     discountAmount: decimal('discount_amount', { precision: 12, scale: 2 }).default('0').notNull(),
