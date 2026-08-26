@@ -88,6 +88,19 @@ export async function userRoutes(app) {
             const current = await getMembership(accountId, existing.id);
             if (current?.isActive)
                 return reply.code(409).send({ error: 'That person is already in this workspace.' });
+            // A login that already belongs to ANOTHER workspace cannot be pulled into
+            // this one silently. Doing so was the first half of an account-takeover:
+            // an attacker added a victim by email to gain a foothold, then reset their
+            // password. Someone with their own Klippy identity has to ask for, or accept,
+            // access rather than be conscripted into it. (A login that exists only here,
+            // e.g. one this workspace created and later switched off, can be re-added.)
+            const otherRows = await db.select({ other: sql `count(*)` }).from(memberships)
+                .where(and(eq(memberships.userId, existing.id), ne(memberships.accountId, accountId)));
+            if (Number(otherRows[0]?.other ?? 0) > 0) {
+                return reply.code(409).send({
+                    error: 'That email already has a Klippy login used in another workspace. Ask them to sign in and request access, rather than adding them here.',
+                });
+            }
             await addMember(accountId, existing.id, parsed.data.role);
             return reply.code(201).send({
                 user: { id: existing.id, name: existing.name, email: existing.email, role: parsed.data.role, isActive: true },
@@ -148,10 +161,35 @@ export async function userRoutes(app) {
         if (Object.keys(memPatch).length) {
             await db.update(memberships).set(memPatch).where(eq(memberships.id, target.id));
         }
-        // An admin resetting a password changes the person's global login.
+        // A password reset writes the person's GLOBAL login, not a per-workspace one,
+        // so it is fenced hard. Without this fence the route was a full cross-tenant
+        // account takeover: sign up, spin up a throwaway workspace (instant owner),
+        // add a victim by email (POST /users silently made them a member), then reset
+        // their password here and sign in as them. Two rules close it:
+        //   1. Only a login that belongs to THIS account and nowhere else can be
+        //      reset. A login that also exists in another workspace is an independent
+        //      identity; this admin has no authority over its credential.
+        //   2. An admin cannot reset the OWNER's password (only the owner themselves
+        //      can), or resetting it would promote admin to owner.
         if (parsed.data.password) {
+            const otherRows = await db.select({ other: sql `count(*)` }).from(memberships)
+                .where(and(eq(memberships.userId, id), ne(memberships.accountId, accountId)));
+            if (Number(otherRows[0]?.other ?? 0) > 0) {
+                return reply.code(403).send({
+                    error: 'This person has a Klippy login they use in another workspace, so their password is theirs to change. Send them to the sign-in page to reset it.',
+                });
+            }
+            if (target.role === 'owner' && id !== userId) {
+                return reply.code(403).send({ error: "You can't reset the workspace owner's password." });
+            }
+            // Bump the session epoch, exactly as a self-service reset does, so any
+            // session opened under the old password dies now rather than lingering for
+            // up to a week. Defence in depth: even a permitted reset should not leave a
+            // stale session behind.
+            const [me] = await db.select({ se: users.sessionEpoch }).from(users).where(eq(users.id, id)).limit(1);
             await db.update(users).set({
                 passwordHash: await hashPassword(parsed.data.password), failedAttempts: 0, lockedUntil: null,
+                sessionEpoch: (me?.se ?? 0) + 1,
             }).where(eq(users.id, id));
         }
         const updated = (await membersOf(accountId)).find((m) => m.id === id) ?? null;
