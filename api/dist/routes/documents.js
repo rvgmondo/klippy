@@ -13,7 +13,7 @@ import { resolveBusinessId } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
-import { onInvoicePaid } from '../lib/hosting.js';
+import { settleIfCovered } from '../lib/settle.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor } from '../lib/numbering.js';
@@ -602,6 +602,52 @@ export async function documentRoutes(app) {
         const depositType = d.depositType ?? 'none';
         const depositValue = d.depositValue ?? 0;
         const totals = computeTotals(d.lines, taxRate, discountType, discountValue, existing.currency, depositType, depositValue);
+        /**
+         * A document somebody has already acted on cannot be quietly restated.
+         *
+         * This route recomputed and overwrote subtotal, tax, total, rate and issue date
+         * with no reference to status at all, and never touched `status`, which is stored
+         * rather than derived. So an invoice showing "paid", with the client's money
+         * against it, could be edited to a different figure and still show paid. The
+         * client holds the document that was sent; the books would no longer agree with
+         * it, and the VAT already declared on it would change under the return.
+         *
+         * Three details this checks that the obvious "did the total change" version
+         * misses, each of which is a way to restate a filed period with the total held
+         * constant:
+         *  - `issueDate` decides which VAT period the document falls in.
+         *  - `taxRate`/`taxAmount` can be swung while the total stays put (10,000 at 15%
+         *    and 11,500 at 0% are both a total of 11,500).
+         *  - Credit notes come through this same route, and editing one silently
+         *    restates the outstanding balance of the invoice it credits.
+         *
+         * The test is whether money was ever RECORDED, not whether a balance is
+         * outstanding: an invoice paid and then refunded nets to zero while remaining a
+         * document the client was issued and paid.
+         *
+         * Deliberately still editable on a settled document: address, VAT number, notes,
+         * due date and the client it is filed under. The everyday typo fix keeps working;
+         * only the figures and the date are frozen.
+         */
+        const [everPaid] = await db.select({ n: sql `COUNT(*)` }).from(payments)
+            .where(tenantWhere(payments, accountId, eq(payments.documentId, id)));
+        const bal = await balanceOf(accountId, id, Number(existing.total));
+        const hasMoney = Number(everPaid?.n ?? 0) > 0 || Math.abs(bal.credited) > 0.001;
+        const restated = Math.abs(totals.total - Number(existing.total)) > 0.001
+            || Math.abs(totals.taxAmount - Number(existing.taxAmount)) > 0.001
+            || Math.abs(totals.subtotal - Number(existing.subtotal)) > 0.001
+            || Math.abs(taxRate - Number(existing.taxRate)) > 0.001
+            || d.issueDate !== existing.issueDate;
+        if (restated && hasMoney) {
+            return reply.code(400).send({
+                error: `${existing.number} has ${formatMoney(bal.paid, existing.currency)} recorded against it, so its figures are fixed. Raise a credit note to reduce it, or a new invoice for the difference.`,
+            });
+        }
+        if (restated && existing.type === 'credit_note' && existing.status !== 'draft') {
+            return reply.code(400).send({
+                error: `${existing.number} is an issued credit note, so its figures are fixed. Void it and raise a new one.`,
+            });
+        }
         await db.transaction(async (tx) => {
             await tx.update(documents).set({
                 folderId: d.folderId ?? null, clientName: d.clientName, clientEmail: d.clientEmail || null,
@@ -636,12 +682,24 @@ export async function documentRoutes(app) {
         const parsed = z.object({ status: z.enum(['draft', 'sent', 'accepted', 'paid', 'void']) }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: 'Bad status.' });
-        const [own] = await db.select({ businessId: documents.businessId }).from(documents)
+        const [own] = await db.select({ businessId: documents.businessId, status: documents.status, number: documents.number })
+            .from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
         if (!own)
             return reply.code(404).send({ error: 'Not found.' });
         if (!(await assertMaybeBusiness(req, reply, own.businessId)))
             return;
+        // Once a document has been issued it cannot go back to being a draft. A draft is
+        // "not yet a document"; an issued invoice is one the client holds and one the VAT
+        // report counts, so dropping it to draft would remove a real tax invoice from a
+        // period that may already be filed. Void is the way to cancel something issued,
+        // and it leaves the number and the trail in place. The UI already hides this, but
+        // the API is the boundary.
+        if (parsed.data.status === 'draft' && own.status !== 'draft') {
+            return reply.code(400).send({
+                error: `${own.number} has already been issued, so it cannot go back to a draft. Void it instead if it should not stand.`,
+            });
+        }
         const res = await db.update(documents).set({ status: parsed.data.status })
             .where(tenantWhere(documents, accountId, eq(documents.id, id)));
         if (!res[0].affectedRows)
@@ -808,12 +866,22 @@ export async function documentRoutes(app) {
             })));
             return cid;
         });
-        // Settle the invoice if the credit clears whatever was left.
+        /**
+         * Settle the invoice if the credit clears whatever was left.
+         *
+         * Through the shared rule, so that a credit note landing AFTER a part payment
+         * provisions what was sold, exactly as the payment landing after the credit note
+         * already did. Without it the outcome depended on which arrived second, and the
+         * client who paid could end up with an invoice marked paid and the service never
+         * set up.
+         *
+         * settleIfCovered only provisions when money was actually received, which is the
+         * behaviour this path needs: an invoice written off in full by a credit note is
+         * settled and reads as paid, but nobody paid for anything, so it must not start
+         * a hosting account.
+         */
         const after = await balanceOf(accountId, id, Number(inv.total));
-        if (after.outstanding <= 0.001 && inv.status !== 'paid') {
-            await db.update(documents).set({ status: 'paid' })
-                .where(tenantWhere(documents, accountId, eq(documents.id, id)));
-        }
+        await settleIfCovered(accountId, id, Number(inv.total), inv.status);
         const [created] = await db.select().from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, newId))).limit(1);
         return reply.code(201).send({ document: created, invoiceBalance: after });
@@ -873,14 +941,10 @@ export async function documentRoutes(app) {
         }));
         // Auto-flip to paid once nothing is outstanding, and back to sent if a refund
         // re-opens a balance on an invoice that had been settled.
-        const bal = await balanceOf(accountId, id, Number(doc.total));
-        const settled = bal.outstanding <= 0.001;
-        if (settled && doc.status !== 'paid') {
-            await db.update(documents).set({ status: 'paid' })
-                .where(tenantWhere(documents, accountId, eq(documents.id, id)));
-            await onInvoicePaid(accountId, id);
-        }
-        else if (!settled && doc.status === 'paid' && parsed.data.amount >= 0) {
+        // Settling goes through the shared rule (claimed, so two payments entered at once
+        // cannot both provision); reopening is specific to this route and stays here.
+        const { bal, settled } = await settleIfCovered(accountId, id, Number(doc.total), doc.status);
+        if (!settled && doc.status === 'paid' && parsed.data.amount >= 0) {
             // Only a genuine reopening (a correcting entry, not a refund) reverts to
             // 'sent'. A refund is money you GAVE BACK: flipping the invoice back to 'sent'
             // used to re-enter it into the reminder + auto-suspend pipeline and chase, or

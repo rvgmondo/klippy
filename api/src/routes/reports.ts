@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, gte, isNotNull, lte, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, lte, ne, inArray, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY, roundMoney } from '../lib/currency.js';
 import { mrrByCurrency, chargeFor } from '../lib/mrr.js';
 import { addMonths, anchorDayOf, addDays } from '../lib/billing.js';
@@ -386,6 +386,17 @@ export async function reportRoutes(app: FastifyInstance) {
       .where(tenantWhere(documents, accountId,
         await businessScope(req, documents.businessId),
         inArray(documents.type, ['invoice', 'credit_note']),
+        // Only ISSUED, non-void documents belong in a VAT return. Without these two
+        // the report counted drafts (an invoice still being written, never sent to
+        // anyone) and voids, and because credit notes carry a negative sign it cut
+        // both ways: a voided invoice overstated the VAT owed, a voided credit note
+        // understated it. This is the figure a SARS return is filed from.
+        //
+        // Two `ne` rather than inArray(['sent','paid']): the status route also
+        // accepts 'accepted', and an accepted invoice has been issued. Credit notes
+        // are always inserted as 'sent' (documents.ts), so excluding drafts cannot
+        // silently drop the credit side of the return.
+        ne(documents.status, 'void'), ne(documents.status, 'draft'),
         gte(documents.issueDate, from), lte(documents.issueDate, to)));
     const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount })
       .from(expenses)

@@ -3,7 +3,8 @@ import { db } from '../db/client.js';
 import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
 import { payfastSupports } from './currency.js';
-import { onInvoicePaid } from './hosting.js';
+import { settleIfCovered } from './settle.js';
+import { notifyAdmins } from './notify.js';
 import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
 import { decryptSecret } from './secretbox.js';
 import { chargeToken } from './payfast.js';
@@ -59,7 +60,10 @@ export async function attemptAutoDebit(r) {
     }
     catch (err) {
         if (isDuplicateKey(err)) {
-            return { outcome: 'skipped', detail: 'Already attempted for this invoice.' };
+            // Recorded rather than returned silently. This branch is also what a STUCK
+            // attempt looks like on the next run (a row left pending because a previous
+            // run died mid-charge), and that is exactly the case somebody needs to see.
+            return done('skipped', 'Already attempted for this invoice.');
         }
         // Anything else means the claim never landed, so nothing was charged and a
         // later run should try again. Saying "already attempted" here would send
@@ -92,24 +96,55 @@ export async function attemptAutoDebit(r) {
         await finish('failed', res.message);
         return done('failed', res.message);
     }
-    // Record the money. PayFast also sends an ITN for this charge; that handler is
-    // idempotent on the PayFast payment id, so whichever arrives second does nothing.
+    /**
+     * Record the money, keyed on PayFast's own payment id.
+     *
+     * PayFast also sends an ITN for this charge, and that handler dedupes on
+     * `pf_payment_id`. This insert used to leave that column NULL and put the id in
+     * the note instead, and MySQL allows unlimited NULLs in a unique index, so the two
+     * rows never collided: one charge, two payment rows, the invoice showing twice the
+     * money and a negative outstanding. Writing the id is what makes the claimed
+     * idempotency actually true.
+     *
+     * A duplicate here means the ITN beat us to it, which is a normal race and not a
+     * failure: fall through and settle, rather than raising an alarm for money that is
+     * already correctly recorded. And when the gateway gives us no id we still write
+     * the row, because `chargeToken` sends no notify_url: if we left it to an ITN that
+     * may never arrive, the card would be debited with nothing recorded anywhere, and a
+     * payment nobody can see is worse than one recorded twice.
+     */
     const today = new Date().toISOString().slice(0, 10);
-    await db.insert(payments).values(withTenant(r.accountId, {
-        documentId: r.documentId, amount: r.amount.toFixed(2), paidOn: today,
-        method: 'PayFast', note: res.pfPaymentId ? `PayFast ${res.pfPaymentId}` : 'PayFast auto-debit',
-        createdBy: null,
-    }));
-    const paidRows = await db.select({ amount: payments.amount }).from(payments)
-        .where(tenantWhere(payments, r.accountId, eq(payments.documentId, r.documentId)));
-    const paid = paidRows.reduce((s, p) => s + Number(p.amount), 0);
+    try {
+        await db.insert(payments).values(withTenant(r.accountId, {
+            documentId: r.documentId, amount: r.amount.toFixed(2), paidOn: today,
+            method: 'PayFast', pfPaymentId: res.pfPaymentId ?? null,
+            note: res.pfPaymentId ? `PayFast ${res.pfPaymentId}` : 'PayFast auto-debit',
+            createdBy: null,
+        }));
+    }
+    catch (err) {
+        if (!isDuplicateKey(err)) {
+            // The card WAS charged and we could not write it down. Say so loudly: the
+            // attempt row is closed as charged (the money did move), and the owners are
+            // told to reconcile it by hand against the PayFast dashboard.
+            await finish('charged', `Charged ${r.amount.toFixed(2)} but the payment could not be recorded. Check this invoice against PayFast.`, res.pfPaymentId);
+            await notifyAdmins(r.accountId, {
+                kind: 'payment',
+                title: `Charged but not recorded: ${r.invoiceNumber}`,
+                body: `Auto-debit took ${r.amount.toFixed(2)} for ${r.invoiceNumber} and Klippy could not save the payment. Check it against your PayFast dashboard.`,
+                url: '/?v=billing',
+            });
+            return done('failed', `Charged ${r.amount.toFixed(2)} but could not record the payment: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+    // Settle through the shared rule, so a credit note counts here exactly as it does
+    // on the pay link and in the webhook. The hand-rolled sum this replaces ignored
+    // credit notes, so it could flip an invoice to paid, and provision what was sold,
+    // on less money than was actually due.
     const [doc] = await db.select({ total: documents.total, status: documents.status }).from(documents)
         .where(tenantWhere(documents, r.accountId, eq(documents.id, r.documentId))).limit(1);
-    if (doc && paid + 0.001 >= Number(doc.total) && doc.status !== 'paid') {
-        await db.update(documents).set({ status: 'paid' })
-            .where(tenantWhere(documents, r.accountId, eq(documents.id, r.documentId)));
-        await onInvoicePaid(r.accountId, r.documentId);
-    }
+    if (doc)
+        await settleIfCovered(r.accountId, r.documentId, Number(doc.total), doc.status);
     await finish('charged', `Charged ${r.amount.toFixed(2)}.`, res.pfPaymentId);
     return done('charged', `Charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`, { pfPaymentId: res.pfPaymentId });
 }

@@ -8,11 +8,11 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { appUrl, sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
-import { balanceOf } from '../lib/balances.js';
+import { balanceOf, type Balance } from '../lib/balances.js';
+import { settleIfCovered } from '../lib/settle.js';
 import { formatMoney } from '../lib/currency.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
 import { credsFor, settingsFor } from '../lib/paymentSettings.js';
-import { onInvoicePaid } from '../lib/hosting.js';
 import { notifyAdmins } from '../lib/notify.js';
 import { assertBusinessAccess } from '../lib/access.js';
 import { isDuplicateKey } from '../lib/tenant.js';
@@ -384,6 +384,20 @@ export async function paymentRoutes(app: FastifyInstance) {
     const body = payload?.parsed ?? {};
     const raw = payload?.raw ?? '';
     const ok = () => reply.code(200).send('OK');
+    /**
+     * When we may ask PayFast to send this again.
+     *
+     * PayFast re-sends an ITN only when it does not get a 200, so answering 200 to
+     * our OWN failure threw away the gateway's retry and, with it, the payment: the
+     * money had moved, and no row, no event and no notification survived here.
+     *
+     * A retry is only safe when the notification carries a pf_payment_id, because
+     * that is the column the unique index dedupes on. MySQL allows unlimited NULLs
+     * in a unique index, so retrying an id-less ITN would insert one payment row per
+     * delivery. An id-less ITN is therefore still answered 200 and never retried.
+     */
+    const canRetry = !!(payload?.parsed?.pf_payment_id);
+    const fail = () => (canRetry ? reply.code(500).send('ERROR') : ok());
 
     try {
       const mId = body.m_payment_id || '';
@@ -452,10 +466,17 @@ export async function paymentRoutes(app: FastifyInstance) {
       }
 
       // Definitive check: PayFast confirms it sent this exact payload.
-      const serverOk = await validateItnWithServer(raw, settings.sandbox);
-      if (!serverOk) {
-        req.log.warn({ docId }, 'payfast ITN failed server validation');
-        await record('Rejected: PayFast did not confirm this notification when we handed it back. If the sandbox is unreachable from the server this check cannot pass.', false);
+      const serverCheck = await validateItnWithServer(raw, settings.sandbox);
+      if (!serverCheck.ok) {
+        req.log.warn({ docId, reason: serverCheck.reason }, 'payfast ITN failed server validation');
+        if (serverCheck.reason === 'unreachable') {
+          // Our side could not reach PayFast, which says nothing about the payment.
+          // Record it and ask for the notification again rather than discarding a
+          // payment that may well be genuine.
+          await record('Could not reach PayFast to confirm this notification, so nothing was recorded yet. We have asked them to send it again.', false);
+          return fail();
+        }
+        await record('Rejected: PayFast did not confirm this notification when we handed it back.', false);
         return ok();
       }
 
@@ -465,6 +486,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       // makes the second insert fail, and we treat that failure as "already recorded".
       const pfId = body.pf_payment_id || '';
       const today = new Date().toISOString().slice(0, 10);
+      let duplicate = false;
       try {
         await db.insert(payments).values(withTenant(doc.accountId, {
           documentId: docId, amount: Number(body.amount_gross).toFixed(2), paidOn: today,
@@ -472,8 +494,51 @@ export async function paymentRoutes(app: FastifyInstance) {
           note: pfId ? `PayFast ${pfId}` : 'PayFast', createdBy: null,
         }));
       } catch (e) {
-        if (isDuplicateKey(e)) { await record('Duplicate ITN ignored; this payment was already recorded.', true); return ok(); }
-        throw e;
+        if (isDuplicateKey(e)) duplicate = true;
+        else {
+          // Everything has passed: the signature, the amount, and PayFast itself. The
+          // money HAS moved and we could not write it down. This used to rethrow into
+          // the outer catch, which answered 200, so the gateway never sent it again
+          // and the payment was gone for good. Ask for a retry instead, and say so
+          // where somebody will see it. Both of those writes can fail too if the
+          // database is what broke; the 500 is the part that still works.
+          req.log.error({ err: e, docId }, 'payfast ITN could not record the payment');
+          await record(`Could not record this payment (${body.amount_gross}). PayFast has been asked to send it again.`, false);
+          await notifyAdmins(doc.accountId, {
+            kind: 'payment',
+            title: `Payment may not be recorded: ${doc.number}`,
+            body: `${doc.clientName} paid ${formatMoney(Number(body.amount_gross), doc.currency)} but Klippy could not save it. Check the invoice against your PayFast dashboard.`,
+            url: '/?v=billing',
+          });
+          return fail();
+        }
+      }
+
+      /**
+       * Settle, credit notes included.
+       *
+       * This ran on a hand-rolled sum against the invoice's FACE value, with no term
+       * for credit notes, while the pay link and the portal both charge the
+       * outstanding amount. Any invoice with a credit note against it was therefore
+       * charged the reduced figure and tested against the full one, so it could never
+       * settle: the client paid, and the invoice stayed unpaid and kept being chased.
+       *
+       * Wrapped, because the token capture below is worth real money later: if this
+       * throws to the outer catch we lose the stored card and auto-debit has nothing
+       * to charge. The payment row is already written either way.
+       */
+      let bal: Balance | null = null;
+      let settled = false;
+      try {
+        ({ bal, settled } = await settleIfCovered(doc.accountId, docId, Number(doc.total), doc.status));
+      } catch { /* the payment is recorded either way */ }
+
+      // A redelivery still reconciles above before returning, so an invoice whose
+      // first delivery recorded the payment and then failed to flip the status is
+      // repaired by the retry rather than chased forever.
+      if (duplicate) {
+        await record('Duplicate ITN ignored; this payment was already recorded.', true);
+        return ok();
       }
 
       await notifyAdmins(doc.accountId, {
@@ -483,31 +548,26 @@ export async function paymentRoutes(app: FastifyInstance) {
         url: '/?v=billing',
       });
 
-      // Mark paid once covered.
-      const paidRows = await db.select({ amount: payments.amount }).from(payments)
-        .where(tenantWhere(payments, doc.accountId, eq(payments.documentId, docId)));
-      const paid = paidRows.reduce((s, p) => s + Number(p.amount), 0);
-      const settled = paid + 0.001 >= Number(doc.total);
-      if (settled && doc.status !== 'paid') {
-        await db.update(documents).set({ status: 'paid' })
-          .where(tenantWhere(documents, doc.accountId, eq(documents.id, docId)));
-        // Set up whatever was sold. Never allowed to fail the payment.
-        await onInvoicePaid(doc.accountId, docId);
-      }
-
       // Email the client a receipt. Without one, a client whose PayFast return was
       // interrupted has no confirmation the payment landed and may pay again. Purely
       // a notification: a send failure must never affect the recorded payment.
       if (doc.clientEmail) {
         try {
-          const bal = await balanceOf(doc.accountId, docId, Number(doc.total));
           const brand = await emailBrandFor(doc.accountId, doc.businessId);
           const content = {
             heading: `Payment received for ${doc.number}`,
             body: [
               `Hi ${doc.clientName},`,
               `Thank you. We have received your payment of ${formatMoney(Number(body.amount_gross), doc.currency)} for ${doc.number}.`,
-              settled ? 'This invoice is now fully paid.' : `The remaining balance is ${formatMoney(bal.outstanding, doc.currency)}.`,
+              // Only state the standing of the invoice when we actually know it. If
+              // the balance could not be read, the payment is still recorded and
+              // confirmed above; claiming either "fully paid" or a figure we did not
+              // compute would be telling a paying client something untrue.
+              ...(bal
+                ? [settled
+                  ? 'This invoice is now fully paid.'
+                  : `The remaining balance is ${formatMoney(bal.outstanding, doc.currency)}.`]
+                : []),
             ],
             facts: [
               ['Invoice', doc.number] as [string, string],
@@ -543,8 +603,12 @@ export async function paymentRoutes(app: FastifyInstance) {
       await record(`Payment of ${body.amount_gross} recorded against ${doc.number}${token ? ' (card stored for auto-debit)' : ''}`, true);
       return ok();
     } catch (err) {
+      // Everything reachable from here happens BEFORE any payment row is written, so
+      // asking for the notification again is strictly safe. It used to answer 200 on
+      // our own internal failure, which spent the gateway's only retry on a request
+      // we had not managed to process.
       req.log.error({ err }, 'payfast ITN handler error');
-      return ok(); // never make PayFast retry on our internal error
+      return fail();
     }
   });
 }

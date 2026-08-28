@@ -296,7 +296,24 @@ export async function runSubscriptionBilling(): Promise<string> {
           });
           if (res.outcome === 'charged') debited++;
         }
-      } catch { /* the invoice stands; the charge can be retried by hand */ }
+      } catch (err) {
+        // The invoice stands and the charge can be retried by hand, but this used to
+        // be a bare catch, so anything escaping attemptAutoDebit vanished without a
+        // trace. Recorded where the rest of the money trail is read, like its sibling
+        // below.
+        await db.insert(events).values({
+          accountId: sub.accountId, businessId: sub.businessId, name: 'payfast.autodebit',
+          payload: {
+            subscriptionId: sub.id, documentId: docId,
+            detail: err instanceof Error ? err.message : String(err),
+          },
+          results: [{
+            handler: 'payfast.autodebit',
+            outcome: `The charge could not be attempted: ${err instanceof Error ? err.message : String(err)}`,
+            ok: false,
+          }],
+        }).catch(() => { /* never fail a billing run over a log write */ });
+      }
 
       // nextBillDate was already advanced by the atomic claim above.
       billed++;

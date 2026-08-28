@@ -98,9 +98,22 @@ export function verifyItnSignature(body: Record<string, string>, passphrase: str
 
 /**
  * Fourth ITN check: hand the exact payload back to PayFast and let them confirm it
- * is one they sent. Returns true only on a literal "VALID" reply.
+ * is one they sent. Only a literal "VALID" reply passes.
+ *
+ * The answer is a discriminated result rather than a boolean because the two ways
+ * of failing are opposites, and collapsing them into `false` threw away real money:
+ * "PayFast says this is not ours" is a forgery and must be rejected forever, while
+ * "we could not reach PayFast" is a blip on our side that says nothing about the
+ * payment. A single outbound hiccup used to permanently reject a genuine, signed,
+ * COMPLETE payment. The caller retries the second and never the first.
+ *
+ * `unreachable` is set ONLY inside the catch. A `boolean | 'unreachable'` union
+ * would be worse than the bug: any surviving `if (!ok)` would read the truthy
+ * string as success and accept an unverified notification.
  */
-export async function validateItnWithServer(rawBody: string, sandbox: boolean): Promise<boolean> {
+export type ItnValidation = { ok: true } | { ok: false; reason: 'invalid' | 'unreachable' };
+
+export async function validateItnWithServer(rawBody: string, sandbox: boolean): Promise<ItnValidation> {
   try {
     const res = await fetch(validateUrl(sandbox), {
       method: 'POST',
@@ -108,9 +121,9 @@ export async function validateItnWithServer(rawBody: string, sandbox: boolean): 
       body: rawBody,
     });
     const text = (await res.text()).trim();
-    return text === 'VALID';
+    return text === 'VALID' ? { ok: true } : { ok: false, reason: 'invalid' };
   } catch {
-    return false;
+    return { ok: false, reason: 'unreachable' };
   }
 }
 

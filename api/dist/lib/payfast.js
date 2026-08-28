@@ -56,10 +56,6 @@ export function verifyItnSignature(body, passphrase) {
         return false;
     return signature(body, passphrase) === given.toLowerCase();
 }
-/**
- * Fourth ITN check: hand the exact payload back to PayFast and let them confirm it
- * is one they sent. Returns true only on a literal "VALID" reply.
- */
 export async function validateItnWithServer(rawBody, sandbox) {
     try {
         const res = await fetch(validateUrl(sandbox), {
@@ -68,10 +64,10 @@ export async function validateItnWithServer(rawBody, sandbox) {
             body: rawBody,
         });
         const text = (await res.text()).trim();
-        return text === 'VALID';
+        return text === 'VALID' ? { ok: true } : { ok: false, reason: 'invalid' };
     }
     catch {
-        return false;
+        return { ok: false, reason: 'unreachable' };
     }
 }
 /**
