@@ -791,6 +791,75 @@ export async function switchToRealDomain(
  * block the status change the operator asked for; the hosting row keeps its old
  * status and the next manual action (or the sweep) can retry.
  */
+export interface LiveHosting {
+  hostingAccountId: number;
+  subscriptionId: number;
+  folderId: number;
+  domain: string;
+  username: string | null;
+  status: string;
+}
+
+/**
+ * Hosting rows that stand for something REAL on the WHM box.
+ *
+ * The guard in front of every path that can destroy a subscription. Deleting a
+ * subscription nulls hosting_accounts.subscription_id (the FK is set-null), and the
+ * overdue sweep then skips that row forever, so the site keeps serving, keeps using
+ * a server slot, and can never be invoiced again because the subscription that
+ * invoiced it is gone. The subscription delete route already suspends first for
+ * exactly this reason; the folder and offering cascades did not, so they could
+ * silently strand a live customer site.
+ *
+ * 'failed' and 'dry-run' are excluded deliberately: nothing exists on the server for
+ * those, and provisioning reuses those rows. 'pending' counts, because it may be
+ * mid-provision and become real a second later.
+ */
+export async function liveHostingForSubscriptions(
+  accountId: number, subscriptionIds: number[],
+): Promise<LiveHosting[]> {
+  if (!subscriptionIds.length) return [];
+  return db.select({
+    hostingAccountId: hostingAccounts.id, subscriptionId: subscriptions.id,
+    folderId: subscriptions.folderId, domain: hostingAccounts.domain,
+    username: hostingAccounts.username, status: hostingAccounts.status,
+  }).from(hostingAccounts)
+    .innerJoin(subscriptions, eq(subscriptions.id, hostingAccounts.subscriptionId))
+    // tenantWhere scopes one table, so the joined table is scoped explicitly.
+    .where(tenantWhere(hostingAccounts, accountId,
+      eq(subscriptions.accountId, accountId),
+      inArray(subscriptions.id, subscriptionIds),
+      inArray(hostingAccounts.status, ['pending', 'active', 'suspended'])));
+}
+
+/**
+ * Anything live on the server anywhere in this workspace.
+ *
+ * Its own query, without the subscription join, because deleting a WORKSPACE is the
+ * one cascade that destroys the hosting_accounts rows themselves rather than nulling
+ * their link. That leaves a real cPanel account with no record anywhere in Klippy,
+ * not even the orphan row on the Hosting screen, so no query can ever find it again.
+ */
+export async function liveHostingForAccount(accountId: number): Promise<LiveHosting[]> {
+  return db.select({
+    hostingAccountId: hostingAccounts.id, subscriptionId: hostingAccounts.subscriptionId,
+    folderId: hostingAccounts.id, domain: hostingAccounts.domain,
+    username: hostingAccounts.username, status: hostingAccounts.status,
+  }).from(hostingAccounts)
+    .where(tenantWhere(hostingAccounts, accountId,
+      inArray(hostingAccounts.status, ['pending', 'active', 'suspended']))) as Promise<LiveHosting[]>;
+}
+
+/** The same question asked through the clients that own the subscriptions. */
+export async function liveHostingForFolders(
+  accountId: number, folderIds: number[],
+): Promise<LiveHosting[]> {
+  if (!folderIds.length) return [];
+  const subs = await db.select({ id: subscriptions.id }).from(subscriptions)
+    .where(tenantWhere(subscriptions, accountId, inArray(subscriptions.folderId, folderIds)));
+  return liveHostingForSubscriptions(accountId, subs.map((s) => s.id));
+}
+
 export async function suspendForSubscription(
   accountId: number, subscriptionId: number, suspend: boolean, reason = 'Subscription cancelled',
 ): Promise<void> {

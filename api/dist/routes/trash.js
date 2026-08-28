@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import { eq, isNull, isNotNull, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders, boards } from '../db/schema.js';
+import { folders, boards, subscriptions } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, assertMaybeBusiness } from '../lib/access.js';
+import { liveHostingForFolders } from '../lib/hosting.js';
+import { subtreeIds } from '../lib/folderTree.js';
+import { addMonths, anchorDayOf } from '../lib/billing.js';
 /**
  * The Trash: where deleted clients and boards wait out their 30 days.
  *
@@ -19,28 +22,6 @@ import { accessibleBusinessIds, assertMaybeBusiness } from '../lib/access.js';
  * exactly the rows carrying that stamp, so a board someone deleted separately
  * last week stays deleted when this week's folder mistake is undone.
  */
-/** Every folder id in the subtree rooted at `rootId`, root included. */
-async function subtreeIds(accountId, rootId) {
-    const all = await db.select({ id: folders.id, parentId: folders.parentId })
-        .from(folders).where(tenantWhere(folders, accountId));
-    const children = new Map();
-    for (const f of all) {
-        if (f.parentId == null)
-            continue;
-        const list = children.get(f.parentId) ?? [];
-        list.push(f.id);
-        children.set(f.parentId, list);
-    }
-    const out = [];
-    const queue = [rootId];
-    while (queue.length) {
-        const id = queue.pop();
-        out.push(id);
-        for (const c of children.get(id) ?? [])
-            queue.push(c);
-    }
-    return out;
-}
 export async function trashRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
     app.get('/api/v1/trash', async (req) => {
@@ -101,6 +82,37 @@ export async function trashRoutes(app) {
                 .where(tenantWhere(folders, accountId, inArray(folders.id, ids), eq(folders.deletedAt, f.deletedAt)));
             await db.update(boards).set({ deletedAt: null })
                 .where(tenantWhere(boards, accountId, inArray(boards.folderId, ids), eq(boards.deletedAt, f.deletedAt)));
+            /**
+             * Roll any frozen billing schedule forward before the client goes live again.
+             *
+             * Billing skips a trashed client, so nextBillDate stays where it was. Restoring
+             * without this hands the biller a date weeks in the past, and it raises one
+             * back-invoice per daily run, each of which goes straight to auto-debit: a
+             * client trashed for forty days and restored gets several card debits inside a
+             * day. The per-invoice idempotency guard does not help, because each catch-up
+             * cycle is a different invoice.
+             *
+             * Cycles spent in the Trash are forgiven. If they genuinely should be billed,
+             * that is a person raising them from the Subscriptions screen where they can
+             * see the amount first.
+             */
+            const today = new Date().toISOString().slice(0, 10);
+            const frozen = await db.select({
+                id: subscriptions.id, nextBillDate: subscriptions.nextBillDate,
+                intervalMonths: subscriptions.intervalMonths, startedOn: subscriptions.startedOn,
+            }).from(subscriptions)
+                .where(tenantWhere(subscriptions, accountId, inArray(subscriptions.folderId, ids), eq(subscriptions.status, 'active')));
+            for (const s of frozen) {
+                if (s.nextBillDate >= today)
+                    continue;
+                const anchor = anchorDayOf(s.startedOn);
+                let next = s.nextBillDate;
+                // Bounded: 600 monthly cycles is fifty years, far past any real gap.
+                for (let i = 0; i < 600 && next < today; i++)
+                    next = addMonths(next, s.intervalMonths, anchor);
+                await db.update(subscriptions).set({ nextBillDate: next })
+                    .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, s.id)));
+            }
             return { ok: true };
         }
         const [b] = await db.select({ deletedAt: boards.deletedAt, businessId: folders.businessId })
@@ -128,6 +140,28 @@ export async function trashRoutes(app) {
                 return reply.code(404).send({ error: 'Not in the trash.' });
             if (!(await assertMaybeBusiness(req, reply, f.businessId)))
                 return;
+            /**
+             * Refuse while anything is still live on the server.
+             *
+             * Deleting the client cascades away its subscriptions, and the FK then nulls
+             * hosting_accounts.subscription_id. The overdue sweep skips a null one for
+             * good, so the site keeps serving and can never be invoiced again: free
+             * hosting, indefinitely, with only a blank client name on the Hosting screen
+             * to show for it.
+             *
+             * Refusing rather than suspending is deliberate. Suspending takes a paying
+             * client's website and mail dark, and this route is reachable by a member
+             * while suspending by hand is admin-only, so switching it off here would route
+             * around that. Refusing needs no privilege and destroys nothing.
+             */
+            const ids = await subtreeIds(accountId, id);
+            const live = await liveHostingForFolders(accountId, ids);
+            if (live.length) {
+                const names = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');
+                return reply.code(409).send({
+                    error: `This client still has hosting on the server (${names}). Switch it off on the Hosting screen first, then delete the client.`,
+                });
+            }
             await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, id)));
             return { ok: true };
         }

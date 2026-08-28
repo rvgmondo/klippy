@@ -1,7 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
-  autoDebitAttempts, documents, payments, subscriptions, events,
+  autoDebitAttempts, documents, folders, payments, subscriptions, events,
 } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
 import { payfastSupports } from './currency.js';
@@ -92,6 +92,13 @@ export async function attemptAutoDebit(r: DebitRequest): Promise<{ outcome: Debi
   if (!sub.payfastToken) {
     return done('skipped', 'No saved card yet. The client has to pay one invoice online before a card can be stored.');
   }
+  // Charging the saved card of a client the founder has deleted is the worst version
+  // of this whole feature. The biller gates on it too; this file is where every other
+  // guard lives, so it is stated here as well. Refused BEFORE the attempt row is
+  // claimed, so a restore does not then meet "already attempted for this invoice".
+  const [client] = await db.select({ id: folders.id }).from(folders)
+    .where(tenantWhere(folders, r.accountId, eq(folders.id, sub.folderId), isNull(folders.deletedAt))).limit(1);
+  if (!client) return done('skipped', 'This client is in the Trash, so nothing was charged.');
 
   const cap = Number(settings.autoDebitMax);
   if (r.amount > cap) {

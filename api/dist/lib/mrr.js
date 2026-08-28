@@ -1,6 +1,6 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { accounts, businesses, offerings, subscriptions } from '../db/schema.js';
+import { accounts, businesses, folders, offerings, subscriptions } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
 import { DEFAULT_CURRENCY, roundMoney } from './currency.js';
 /**
@@ -36,7 +36,11 @@ export async function mrrByCurrency(accountId, filters = []) {
         businessId: subscriptions.businessId,
     }).from(subscriptions)
         .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
-        .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'), ...filters));
+        // A client in the Trash is not billed, so their subscription is not recurring
+        // revenue. Without this the dashboard reports money the biller has deliberately
+        // stopped raising, which is the same mistake this figure was rebuilt to fix.
+        .innerJoin(folders, eq(folders.id, subscriptions.folderId))
+        .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'), isNull(folders.deletedAt), ...filters));
     if (!rows.length)
         return [];
     // One lookup for the currencies involved, rather than a join that would have to

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, isNull, sql } from 'drizzle-orm';
 import { money } from './money.js';
 import { formatMoney, roundMoney } from './currency.js';
 import { currencyFor } from './currencyFor.js';
@@ -82,9 +82,15 @@ export async function generateSubscriptionInvoice(accountId: number, sub: {
 }): Promise<number> {
   const [offering] = await db.select().from(offerings)
     .where(tenantWhere(offerings, accountId, eq(offerings.id, sub.offeringId))).limit(1);
+  // A trashed client is not a client. The row still exists (the Trash is a stamp,
+  // not a delete) so this used to pass straight through and copy the deleted client's
+  // name and billing email onto a fresh invoice. The nightly run gates on this too,
+  // before it claims the cycle; this is the choke point that also covers the manual
+  // path and anything added later.
   const [folder] = await db.select().from(folders)
-    .where(tenantWhere(folders, accountId, eq(folders.id, sub.folderId))).limit(1);
-  if (!offering || !folder) throw new Error('Offering or client no longer exists.');
+    .where(tenantWhere(folders, accountId, eq(folders.id, sub.folderId), isNull(folders.deletedAt))).limit(1);
+  if (!offering) throw new Error('Offering no longer exists.');
+  if (!folder) throw new Error('This client is in the Trash, so no invoice was raised.');
 
   const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
   // Brand the invoice email from the business it belongs to, not the account.

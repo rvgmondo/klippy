@@ -8,10 +8,13 @@ import { payLinkFor } from './paylink.js';
 import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { mrrByCurrency } from './mrr.js';
-import { runHostingSuspensions } from './hosting.js';
+import { runHostingSuspensions, liveHostingForFolders } from './hosting.js';
+import { folderNodes, subtreeIdsFrom } from './folderTree.js';
+import { tenantWhere } from './tenant.js';
 import { pruneLoginTokens } from './portalAuth.js';
 import { buildAccountExport } from './export.js';
 import { phoneForClient, sendReminderMessage } from './messaging.js';
+import { notifyAdmins } from './notify.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -33,7 +36,7 @@ export const JOBS: { name: JobName; label: string; description: string; hour: nu
   {
     name: 'backup-email',
     label: 'Weekly backup',
-    description: 'On Sunday mornings, emails each workspace owner a full JSON export of their workspace. A backup that exists before the day it is needed.',
+    description: 'On Sunday mornings, emails each workspace owner a JSON export of their workspace, holding no passwords or payment credentials. A backup that exists before the day it is needed.',
     hour: 5,
   },
   {
@@ -101,12 +104,59 @@ export async function runDailyDigest(): Promise<string> {
   // deleted them, so the table only grew; hung off the digest because it already
   // runs once a day and this is not worth a schedule of its own.
   await pruneLoginTokens().catch(() => { /* never let housekeeping stop the digest */ });
-  // Empty the trash of anything past its 30 days. Folders cascade their whole
-  // subtree (boards, columns, cards, time) through the FKs, exactly like the old
-  // hard delete, just a month later and after every chance to change your mind.
+  /**
+   * Empty the trash of anything past its 30 days.
+   *
+   * A folder cascades its whole subtree through the FKs, and that reaches further
+   * than this comment used to claim: not only boards, columns, cards and time, but
+   * the client's SUBSCRIPTIONS (negotiated price, saved card, billing cycle) and
+   * their portal login. Deleting a subscription then nulls the hosting row's link,
+   * and the overdue sweep skips a null one for good, so a real cPanel account would
+   * be left serving forever with nothing able to bill it.
+   *
+   * So this holds back any client with something live on the server rather than
+   * deleting it, and says so in the digest summary. Held is recoverable; deleted is
+   * not, and this runs unattended.
+   *
+   * No WHM call belongs in this job. Each one is a live request with a 30 second
+   * timeout, and the run is stamped as done before the work, so one stalled call
+   * means nobody gets a digest that day and it is not retried. A database read
+   * cannot stall it.
+   */
   const trashCutoff = new Date(Date.now() - 30 * 86_400_000);
+  let held = 0;
   await db.delete(boards).where(lt(boards.deletedAt, trashCutoff)).catch(() => {});
-  await db.delete(folders).where(lt(folders.deletedAt, trashCutoff)).catch(() => {});
+  try {
+    const expired = await db.select({ id: folders.id, accountId: folders.accountId })
+      .from(folders).where(lt(folders.deletedAt, trashCutoff));
+    const byAccount = new Map<number, number[]>();
+    for (const f of expired) byAccount.set(f.accountId, [...(byAccount.get(f.accountId) ?? []), f.id]);
+
+    for (const [accountId, roots] of byAccount) {
+      // Walk parentId, not the deletedAt stamp: the cascade follows parentId, and a
+      // live child under a trashed parent is reachable, so the stamp would check a
+      // smaller set than the delete actually destroys.
+      const nodes = await folderNodes(accountId);
+      for (const rootId of roots) {
+        const ids = subtreeIdsFrom(nodes, rootId);
+        const live = await liveHostingForFolders(accountId, ids);
+        if (live.length) {
+          held++;
+          await db.insert(events).values({
+            accountId, businessId: null, name: 'hosting.orphan-risk',
+            payload: { folderId: rootId, domains: [...new Set(live.map((h) => h.domain))] },
+            results: [{
+              handler: 'trash.purge',
+              outcome: `Held in the Trash: this client still has hosting on the server (${[...new Set(live.map((h) => h.domain))].join(', ')}). Switch it off on the Hosting screen and it will be removed on a later run.`,
+              ok: false,
+            }],
+          }).catch(() => { /* never let a log write stop housekeeping */ });
+          continue;
+        }
+        await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, rootId))).catch(() => {});
+      }
+    }
+  } catch { /* housekeeping must never stop the digest */ }
   // One row per (person, workspace) so someone in two workspaces gets each.
   const recipients = await db.select({
     id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,
@@ -153,7 +203,11 @@ export async function runDailyDigest(): Promise<string> {
     await sendMail(u.email, subject, renderDigest(u.name, dueToday, overdue), digestHtml);
     sent++;
   }
-  return `${sent} sent of ${recipients.length} considered`;
+  // The held count rides along on the digest's own summary, which is what Settings
+  // shows as the job's last message. A client kept out of the purge is something
+  // somebody has to act on, so it must not be silent.
+  return `${sent} sent of ${recipients.length} considered`
+    + (held ? `, ${held} client(s) held in the Trash: live hosting` : '');
 }
 
 /**
@@ -252,10 +306,26 @@ export async function runSubscriptionBilling(): Promise<string> {
   const due = await db.select().from(subscriptions)
     .where(and(eq(subscriptions.status, 'active'), lte(subscriptions.nextBillDate, today)));
 
+  /**
+   * Which of these clients still exist as far as the user is concerned.
+   *
+   * Trashing a client stamps folders.deletedAt and touches nothing else, so a
+   * subscription under it kept invoicing, and kept feeding auto-debit, for the whole
+   * 30 days before the purge. The founder deletes a client and Klippy carries on
+   * charging their saved card. Restore rolls the schedule forward, so cycles spent
+   * in the Trash are forgiven rather than raised in a burst afterwards.
+   */
+  const folderIds = [...new Set(due.map((s) => s.folderId))];
+  const liveIds = new Set(folderIds.length
+    ? (await db.select({ id: folders.id }).from(folders)
+      .where(and(inArray(folders.id, folderIds), isNull(folders.deletedAt)))).map((f) => f.id)
+    : []);
+
   let billed = 0;
   let failed = 0;
   let debited = 0;
   let skipped = 0;
+  let trashed = 0;
   for (const sub of due) {
     // Claim THIS cycle before billing it: advance nextBillDate only while it still
     // equals the date we read. Two overlapping runs (or a manual re-run after the
@@ -264,6 +334,9 @@ export async function runSubscriptionBilling(): Promise<string> {
     // charged at most once, even if the job-level guard is somehow bypassed. Claiming
     // BEFORE billing means a crash mid-invoice skips the cycle (visible, recoverable)
     // rather than risking a second charge.
+    // Before the claim, deliberately: the claim advances nextBillDate, so skipping
+    // after it would silently eat a cycle the client still owes.
+    if (!liveIds.has(sub.folderId)) { trashed++; continue; }
     const nextDate = addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, anchorDayOf(sub.startedOn));
     const claim = await db.update(subscriptions)
       .set({ nextBillDate: nextDate, lastBilledAt: new Date() })
@@ -336,7 +409,7 @@ export async function runSubscriptionBilling(): Promise<string> {
       }).catch(() => { /* the run must finish even if the note cannot be written */ });
     }
   }
-  return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} already billed (skipped)` : ''}`;
+  return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} already billed (skipped)` : ''}${trashed ? `, ${trashed} skipped (client in the Trash)` : ''}`;
 }
 
 /**
@@ -436,6 +509,21 @@ export async function runInvoiceReminders(): Promise<string> {
     isNotNull(documents.dueDate),
   ));
 
+  /**
+   * Never chase a client who is in the Trash.
+   *
+   * This does not only email: it sends SMS and WhatsApp to the number on the client
+   * record. Texting somebody the founder believes they have deleted is the same harm
+   * as invoicing them, and more embarrassing. An invoice with no client attached
+   * (folderId null, e.g. one whose client was purged) is still chased, because that
+   * invoice is still owed.
+   */
+  const chaseFolderIds = [...new Set(rows.map((r) => r.folderId).filter((n): n is number => n != null))];
+  const trashedClients = new Set(chaseFolderIds.length
+    ? (await db.select({ id: folders.id }).from(folders)
+      .where(and(inArray(folders.id, chaseFolderIds), isNotNull(folders.deletedAt)))).map((f) => f.id)
+    : []);
+
   // Each invoice is chased on its own business's schedule, so cache the schedule
   // per business rather than re-reading it for every invoice.
   const bizCache = new Map<number, { enabled: boolean; offsets: number[]; suspendAfter: number | null; brand: string }>();
@@ -460,6 +548,7 @@ export async function runInvoiceReminders(): Promise<string> {
   let sent = 0;
   let suspended = 0;
   for (const doc of rows) {
+    if (doc.folderId != null && trashedClients.has(doc.folderId)) continue;
     const cfg = await scheduleFor(doc.businessId);
     if (!cfg.enabled) continue;
     if (doc.lastReminderOn === today) continue; // never twice in a day
@@ -600,18 +689,36 @@ export async function runBackupEmail(): Promise<string> {
   }
 
   let sent = 0;
+  let failedAccounts = 0;
+  let tooBig = 0;
+  // Most mail servers refuse an attachment much past this once base64 encoding has
+  // inflated it by a third. Better to say so than to send nothing and count it.
+  const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
   const today = new Date().toISOString().slice(0, 10);
   for (const [accountId, list] of byAccount) {
     try {
       const data = await buildAccountExport(accountId);
       const json = JSON.stringify(data);
-      const attachment = { filename: `klippy-backup-${today}.json`, content: Buffer.from(json, 'utf-8') };
+      const content = Buffer.from(json, 'utf-8');
+      if (content.byteLength > MAX_ATTACHMENT_BYTES) {
+        // Silently attempting it would look like a delivered backup in the summary.
+        tooBig++;
+        await notifyAdmins(accountId, {
+          kind: 'backup',
+          title: 'Your weekly backup was too big to email',
+          body: 'Download it from Settings instead, and keep a copy somewhere that is not this server.',
+          url: '/?v=settings',
+        });
+        continue;
+      }
+      const attachment = { filename: `klippy-backup-${today}.json`, content };
       const bkBrand = await emailBrandFor(accountId, null);
       const bkContent = {
         heading: 'Your weekly backup',
         body: [
           `Hi there,`,
-          `Attached is this week's full export of ${list[0]!.accountName}: clients, boards, cards, time, contacts, deals, documents, payments, offerings, subscriptions and expenses.`,
+          `Attached is this week's export of ${list[0]!.accountName}: clients, boards, cards and their subtasks, comments and labels, time, files, the calendar, contacts, deals, documents, payments, offerings, subscriptions, hosting and expenses.`,
+          'It holds no passwords or payment credentials, so it cannot be used to sign in as you.',
           'Keep a copy somewhere that is not this server. That is the whole point of it.',
         ],
       };
@@ -621,10 +728,16 @@ export async function runBackupEmail(): Promise<string> {
         sent++;
       }
     } catch {
-      // One workspace failing must not stop the rest.
+      // One workspace failing must not stop the rest, but it must not be invisible
+      // either: a backup that quietly never arrives is the same as having none, and
+      // this used to report a clean count with nothing delivered.
+      failedAccounts++;
     }
   }
-  return sent ? `Sent ${sent} backup email(s).` : 'No owners to send backups to.';
+  const parts = [sent ? `Sent ${sent} backup email(s).` : 'No backups sent.'];
+  if (tooBig) parts.push(`${tooBig} too large to email (download from Settings).`);
+  if (failedAccounts) parts.push(`${failedAccounts} workspace(s) FAILED.`);
+  return parts.join(' ');
 }
 
 const RUNNERS: Record<JobName, () => Promise<string>> = {

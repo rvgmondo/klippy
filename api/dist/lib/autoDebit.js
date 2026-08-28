@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm';
+import { eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { autoDebitAttempts, documents, payments, subscriptions, events, } from '../db/schema.js';
+import { autoDebitAttempts, documents, folders, payments, subscriptions, events, } from '../db/schema.js';
 import { settingsFor } from './paymentSettings.js';
 import { payfastSupports } from './currency.js';
 import { settleIfCovered } from './settle.js';
@@ -45,6 +45,14 @@ export async function attemptAutoDebit(r) {
     if (!sub.payfastToken) {
         return done('skipped', 'No saved card yet. The client has to pay one invoice online before a card can be stored.');
     }
+    // Charging the saved card of a client the founder has deleted is the worst version
+    // of this whole feature. The biller gates on it too; this file is where every other
+    // guard lives, so it is stated here as well. Refused BEFORE the attempt row is
+    // claimed, so a restore does not then meet "already attempted for this invoice".
+    const [client] = await db.select({ id: folders.id }).from(folders)
+        .where(tenantWhere(folders, r.accountId, eq(folders.id, sub.folderId), isNull(folders.deletedAt))).limit(1);
+    if (!client)
+        return done('skipped', 'This client is in the Trash, so nothing was charged.');
     const cap = Number(settings.autoDebitMax);
     if (r.amount > cap) {
         return done('skipped', `Refused: ${r.amount.toFixed(2)} is over the ${cap.toFixed(2)} per-charge limit. Raise the limit in Settings > Payments if this is correct.`, { cap: cap.toFixed(2) });

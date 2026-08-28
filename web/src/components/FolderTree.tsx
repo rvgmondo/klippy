@@ -202,7 +202,7 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
             // Only top-level folders are clients, and only a client has a portal.
             ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
-            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Move "${folder.name}"${hasKids ? ' and everything inside it' : ''} to the Trash? It can be restored from Settings for 30 days.`, { danger: true })) deleteFolder.mutate(); } },
+            { label: 'Delete', danger: true, onClick: async () => { if (await confirmDialog(`Move "${folder.name}"${hasKids ? ' and everything inside it' : ''} to the Trash? Recurring invoices and card debits stop now, and start again if you restore it. Restorable from Settings for 30 days.`, { danger: true })) deleteFolder.mutate(); } },
           ]}
         />
       </div>

@@ -6,6 +6,7 @@ import { authOf, sessionEpochOf } from '../lib/context.js';
 import { getMembership, workspacesFor } from '../lib/membership.js';
 import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, signToken, slugify } from '../lib/auth.js';
+import { liveHostingForAccount } from '../lib/hosting.js';
 async function uniqueSlug(base) {
     const slug = slugify(base);
     for (let n = 1; n < 1000; n++) {
@@ -94,6 +95,17 @@ export async function workspaceRoutes(app) {
             return reply.code(400).send({ error: 'You need at least one workspace.' });
         }
         const { accountId: activeAccountId } = authOf(req);
+        // Hosting accounts cascade off the workspace, so this is the one delete that
+        // destroys the RECORD of a live cPanel account rather than just unlinking it.
+        // After that no query in Klippy can find the site, and it keeps serving on the
+        // server for good. Refuse while anything is still up.
+        const live = await liveHostingForAccount(id);
+        if (live.length) {
+            const names = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');
+            return reply.code(409).send({
+                error: `This workspace still has hosting on the server (${names}). Switch it off on the Hosting screen first, or the sites stay up with no record of them here.`,
+            });
+        }
         // Schema uses onDelete: 'cascade', so this also removes the memberships,
         // businesses, folders, boards, tasks and documents underneath it.
         await db.delete(accounts).where(eq(accounts.id, id));

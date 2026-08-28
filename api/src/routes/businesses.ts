@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, accounts, businessMembers, businessEmail, memberships, users } from '../db/schema.js';
+import { businesses, accounts, businessMembers, businessEmail, memberships, users, subscriptions } from '../db/schema.js';
+import { liveHostingForSubscriptions } from '../lib/hosting.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -195,6 +196,17 @@ export async function businessRoutes(app: FastifyInstance) {
     const [countRow] = await db.select({ n: sql<number>`count(*)` }).from(businesses)
       .where(tenantWhere(businesses, accountId));
     if (Number(countRow?.n ?? 0) <= 1) return reply.code(400).send({ error: 'You need at least one business.' });
+    // Its clients and their subscriptions cascade away with it, which would strand
+    // any cPanel account those subscriptions had provisioned.
+    const subs = await db.select({ id: subscriptions.id }).from(subscriptions)
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.businessId, id)));
+    const live = await liveHostingForSubscriptions(accountId, subs.map((s) => s.id));
+    if (live.length) {
+      const names = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');
+      return reply.code(409).send({
+        error: `This business still has hosting on the server (${names}). Switch it off on the Hosting screen first.`,
+      });
+    }
     const res = await db.delete(businesses).where(tenantWhere(businesses, accountId, eq(businesses.id, id)));
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Business not found.' });
     return { ok: true };

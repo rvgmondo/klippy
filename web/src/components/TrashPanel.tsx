@@ -45,7 +45,7 @@ export function TrashPanel() {
   const askPurge = async (i: TrashItem) => {
     const yes = await confirmDialog(
       i.kind === 'folder'
-        ? `Delete "${i.name}" forever? This permanently deletes the client with every subfolder, board, card and time entry under it. There is no undo after this one.`
+        ? `Delete "${i.name}" forever? This permanently deletes the client with every subfolder, board, card and time entry under it, their recurring subscriptions and their portal login. Invoices and payments are kept. There is no undo after this one.`
         : `Delete "${i.name}" forever? This permanently deletes the board with every card and time entry on it. There is no undo after this one.`,
       { confirmLabel: 'Delete forever', danger: true },
     );

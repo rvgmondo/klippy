@@ -35,7 +35,7 @@ const AUTOMATIC = [
   ['Chases what is owed', 'Overdue invoices get chased on your schedule, by email and WhatsApp, with a pay link and their statement attached.'],
   ['Bills the recurring work', 'Subscriptions raise their own invoices on the right day, whether that is monthly, quarterly or yearly.'],
   ['Catches the leads', 'Your lead form drops enquiries straight into the pipeline and tells you the moment one lands.'],
-  ['Backs itself up', 'A full export of everything, emailed to you every Sunday, so the worst case is a week old.'],
+  ['Backs itself up', 'Your whole workspace exported and emailed to you every Sunday, so the worst case is a week old.'],
 ];
 
 export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => void; onLogin: () => void }) {

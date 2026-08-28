@@ -9,6 +9,7 @@ import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
 import { mrrByCurrency } from '../lib/mrr.js';
+import { liveHostingForSubscriptions } from '../lib/hosting.js';
 const createSchema = z.object({
     businessId: z.number().int().positive().optional(),
     name: z.string().trim().min(1).max(150),
@@ -103,6 +104,19 @@ export async function offeringRoutes(app) {
             return reply.code(404).send({ error: 'Offering not found.' });
         if (!(await assertMaybeBusiness(req, reply, own.businessId)))
             return;
+        // Subscriptions cascade off an offering, and deleting one strands whatever it
+        // provisioned on the real server. One click, no Trash, no 30 days to change your
+        // mind, so this is the only thing standing between a mis-click and a live client
+        // site that can never be billed again.
+        const subs = await db.select({ id: subscriptions.id }).from(subscriptions)
+            .where(tenantWhere(subscriptions, accountId, eq(subscriptions.offeringId, id)));
+        const live = await liveHostingForSubscriptions(accountId, subs.map((s) => s.id));
+        if (live.length) {
+            const names = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');
+            return reply.code(409).send({
+                error: `Clients on this offering still have hosting on the server (${names}). Switch it off on the Hosting screen first.`,
+            });
+        }
         const res = await db.delete(offerings).where(tenantWhere(offerings, accountId, eq(offerings.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Offering not found.' });
