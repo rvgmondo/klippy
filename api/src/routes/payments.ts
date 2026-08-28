@@ -542,6 +542,25 @@ export async function paymentRoutes(app: FastifyInstance) {
         ({ bal, settled } = await settleIfCovered(doc.accountId, docId, Number(doc.total), doc.status));
       } catch { /* the payment is recorded either way */ }
 
+      // If this checkout asked PayFast to store the card, the reusable token comes
+      // back on the ITN and this is the only place it is ever offered. Miss it and
+      // auto-debit has nothing to charge, so it is saved against the subscription
+      // straight away. Never overwritten: a token already stored is the one the
+      // client agreed to, and replacing it silently would be the wrong card.
+      //
+      // ABOVE the duplicate return on purpose. If the first delivery recorded the
+      // payment and then died before this line, the card would be lost for good,
+      // because every retry is a duplicate and used to return before reaching here.
+      const token = body.token || '';
+      if (token && doc.subscriptionId) {
+        await db.update(subscriptions).set({ payfastToken: token })
+          .where(and(
+            tenantWhere(subscriptions, doc.accountId, eq(subscriptions.id, doc.subscriptionId)),
+            isNull(subscriptions.payfastToken),
+          ))
+          .catch(() => { /* the payment itself must still be recorded */ });
+      }
+
       // A redelivery still reconciles above before returning, so an invoice whose
       // first delivery recorded the payment and then failed to flip the status is
       // repaired by the retry rather than chased forever.
@@ -612,21 +631,6 @@ export async function paymentRoutes(app: FastifyInstance) {
           });
         } catch { /* a receipt that fails to send must not disturb the payment */ }
       }
-      // If this checkout asked PayFast to store the card, the reusable token comes
-      // back on the ITN and this is the only place it is ever offered. Miss it and
-      // auto-debit has nothing to charge, so it is saved against the subscription
-      // straight away. Never overwritten: a token already stored is the one the
-      // client agreed to, and replacing it silently would be the wrong card.
-      const token = body.token || '';
-      if (token && doc.subscriptionId) {
-        await db.update(subscriptions).set({ payfastToken: token })
-          .where(and(
-            tenantWhere(subscriptions, doc.accountId, eq(subscriptions.id, doc.subscriptionId)),
-            isNull(subscriptions.payfastToken),
-          ))
-          .catch(() => { /* the payment itself must still be recorded */ });
-      }
-
       req.log.info({ docId, pfId }, 'payfast payment recorded');
       await record(`Payment of ${body.amount_gross} recorded against ${doc.number}${token ? ' (card stored for auto-debit)' : ''}`, true);
       return ok();

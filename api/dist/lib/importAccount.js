@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
@@ -66,6 +66,7 @@ export async function importAccountData(accountId, importerUserId, data) {
     const counts = {};
     const notes = [];
     let reattributed = 0;
+    let leftoverBusinesses = 0;
     // ---- people, by email --------------------------------------------------
     const teamRows = await db.select({ id: users.id, email: users.email }).from(memberships)
         .innerJoin(users, eq(users.id, memberships.userId))
@@ -512,39 +513,29 @@ export async function importAccountData(accountId, importerUserId, data) {
             });
         }
         /**
-         * Retire the workspace's own starter business, but only if it is genuinely empty
-         * and only if the restore brought others to replace it.
+         * The workspace's own starter business is LEFT ALONE.
          *
-         * Nothing here can reach a business somebody actually used: the precondition
-         * already established there is no real work in this workspace, the seed content
-         * has just been cleared, and every table is checked before the delete.
+         * Removing it would tidy the business switcher, and an earlier version did. But
+         * business_email, business_members and the payment, hosting and messaging
+         * settings all hang off a business, so anyone who had set up their gateway on the
+         * fresh workspace before restoring would have had that configuration deleted as a
+         * side effect of a restore. Worse, the check would have to be updated every time
+         * a new per-business table is added, and forgetting once is silent data loss.
+         *
+         * So it stays, and the report says it is there. Deleting a business is already a
+         * button with its own guards; this is not the place to do it.
          */
         if (preExisting.length && (maps.businesses?.size ?? 0) > 0) {
-            const imported = [...(maps.businesses?.values() ?? [])];
-            if (imported.length) {
-                for (const bid of preExisting) {
-                    const used = await Promise.all([
-                        tx.select({ n: sql `count(*)` }).from(folders).where(and(tenantWhere(folders, accountId), eq(folders.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(deals).where(and(tenantWhere(deals, accountId), eq(deals.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(offerings).where(and(tenantWhere(offerings, accountId), eq(offerings.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(documents).where(and(tenantWhere(documents, accountId), eq(documents.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(subscriptions).where(and(tenantWhere(subscriptions, accountId), eq(subscriptions.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(hostingAccounts).where(and(tenantWhere(hostingAccounts, accountId), eq(hostingAccounts.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(expenses).where(and(tenantWhere(expenses, accountId), eq(expenses.businessId, bid))),
-                        tx.select({ n: sql `count(*)` }).from(contacts).where(and(tenantWhere(contacts, accountId), eq(contacts.businessId, bid))),
-                    ]);
-                    if (used.some((r) => Number(r[0]?.n ?? 0) > 0))
-                        continue;
-                    await tx.delete(businesses)
-                        .where(and(tenantWhere(businesses, accountId), eq(businesses.id, bid), notInArray(businesses.id, imported)));
-                }
-            }
+            leftoverBusinesses = preExisting.length;
         }
     });
     // ---- what was deliberately left behind -----------------------------------
     const skippedFiles = arr(data, 'attachments').length + arr(data, 'files').length;
     if (skippedFiles) {
         notes.push(`${skippedFiles} attachment(s) and file(s) were listed in the backup but their contents are not in it, so they were not restored.`);
+    }
+    if (leftoverBusinesses) {
+        notes.push(`This workspace's own empty business is still in the list beside the restored ones. Delete it from Settings if you do not want it.`);
     }
     if (trashClamped) {
         notes.push(`${trashClamped} item(s) came back in the Trash with their 30 days restarted, so tonight's clear-out cannot destroy them. Restore anything you want to keep.`);

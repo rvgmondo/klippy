@@ -285,7 +285,16 @@ export async function accountRoutes(app: FastifyInstance) {
    *
    * Everything about what it deliberately will not do lives in lib/importAccount.ts.
    */
-  app.post('/api/v1/account/import', async (req, reply) => {
+  app.post('/api/v1/account/import', {
+    /**
+     * A real backup is bigger than Fastify's 1 MiB default, and a workspace with a
+     * year of cards, time and invoices in it is very much bigger. Without this the
+     * restore returns 413 for every workspace worth restoring, which is to say it
+     * fails exactly when it is needed. Raised only on this one route: a global raise
+     * would let every other endpoint be flooded.
+     */
+    bodyLimit: 96 * 1024 * 1024,
+  }, async (req, reply) => {
     const { accountId, userId, role } = authOf(req);
     if (role !== 'owner') {
       return reply.code(403).send({ error: 'Only the workspace owner can restore a backup.' });

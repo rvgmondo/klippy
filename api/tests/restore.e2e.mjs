@@ -160,8 +160,11 @@ ok((report.counts?.documents ?? 0) === (backup.documents?.length ?? -1),
     return out;
   };
   const a = shape(backup); const bshape = shape(exp2);
-  const differing = Object.keys(a).filter((k) => a[k] !== bshape[k]);
-  ok(differing.length === 0, 'the second export has the same shape as the first',
+  // Every table must match exactly. `businesses` is the one allowed difference, and
+  // only by exactly one: the workspace's own starter business, which is deliberately
+  // left in place rather than deleted (see below).
+  const differing = Object.keys(a).filter((k) => k !== 'businesses' && a[k] !== bshape[k]);
+  ok(differing.length === 0, 'every table round-trips with the same number of rows',
     differing.map((k) => k + ' ' + a[k] + '->' + bshape[k]).join(', ') || 'identical');
 
   const client = exp2.clients.find((c) => c.name === 'Verboten Spirits');
@@ -171,9 +174,15 @@ ok((report.counts?.documents ?? 0) === (backup.documents?.length ?? -1),
   // The SOURCE workspace genuinely had the signup samples in it, so a faithful
   // restore brings them back; what must not survive is the TARGET's own starter
   // business sitting empty beside the restored ones.
-  ok(exp2.businesses.length === backup.businesses.length,
-    'the target keeps no empty starter business of its own',
+  // The target's own starter business is deliberately LEFT in place: deleting it
+  // would cascade away business_email, business_members and the payment, hosting and
+  // messaging settings, so a founder who configured their gateway before restoring
+  // would silently lose it. The report says it is there instead.
+  ok(exp2.businesses.length === backup.businesses.length + 1,
+    'the restored businesses arrive alongside the one this workspace already had',
     backup.businesses.length + ' -> ' + exp2.businesses.length);
+  ok((report.notes ?? []).some((n) => /own empty business/i.test(n)),
+    'and the report says the empty one is still there');
 
   const inv = exp2.documents.find((d) => d.number === 'INV-0041');
   ok(!!inv && String(inv.total) === '11500.00' && String(inv.taxAmount) === '1500.00' && inv.seq === 41,
