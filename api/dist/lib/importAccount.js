@@ -3,6 +3,7 @@ import { db } from '../db/client.js';
 import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
+import { addMonths, anchorDayOf } from './billing.js';
 const arr = (data, key) => {
     const v = data[key];
     return Array.isArray(v) ? v : [];
@@ -37,6 +38,28 @@ export async function workspaceHoldsRealWork(accountId) {
     const extra = realFolders.filter((f) => !names.folders.includes(f.name));
     if (extra.length)
         return `this workspace already has clients in it (for example "${extra[0].name}")`;
+    /**
+     * Somebody can have worked here without ever making a client or an invoice: tracked
+     * time on a seeded card, a comment, a contact, an expense, a diary entry. Checking
+     * names alone would call that workspace untouched and overwrite it.
+     *
+     * Only tables the signup seed provably never writes are checked. Cards, deals and
+     * offerings are deliberately absent from this list, because the seed creates all
+     * three and counting them would refuse every genuine restore.
+     */
+    const counted = await Promise.all([
+        db.select({ n: sql `count(*)` }).from(timeEntries).where(tenantWhere(timeEntries, accountId)),
+        db.select({ n: sql `count(*)` }).from(taskSubtasks).where(tenantWhere(taskSubtasks, accountId)),
+        db.select({ n: sql `count(*)` }).from(taskComments).where(tenantWhere(taskComments, accountId)),
+        db.select({ n: sql `count(*)` }).from(contacts).where(tenantWhere(contacts, accountId)),
+        db.select({ n: sql `count(*)` }).from(expenses).where(tenantWhere(expenses, accountId)),
+        db.select({ n: sql `count(*)` }).from(calendarEvents).where(tenantWhere(calendarEvents, accountId)),
+    ]);
+    const labels = ['tracked time', 'card checklists', 'card comments', 'contacts', 'expenses', 'calendar entries'];
+    for (let i = 0; i < counted.length; i++) {
+        if (Number(counted[i][0]?.n ?? 0) > 0)
+            return `this workspace already has ${labels[i]} in it`;
+    }
     return null;
 }
 export async function importAccountData(accountId, importerUserId, data) {
@@ -79,6 +102,30 @@ export async function importAccountData(accountId, importerUserId, data) {
     const [me] = await db.select({ email: users.email }).from(users)
         .where(eq(users.id, importerUserId)).limit(1);
     const today = todayStr();
+    let trashClamped = 0;
+    /**
+     * Anything restored INTO the Trash gets its 30 days back.
+     *
+     * A backup carries the original deletion date, and the nightly sweep purges
+     * anything past 30 days. Restored verbatim, a client trashed two months before the
+     * backup was taken would be permanently destroyed by the first sweep after the
+     * restore, on the same night the founder recovered it. The displayed date is then
+     * not the original, which is a smaller untruth than deleting something somebody
+     * just asked to have back.
+     */
+    const trashStamp = (v) => {
+        if (!v)
+            return null;
+        const was = new Date(String(v));
+        const floor = new Date(Date.now() - 25 * 86_400_000);
+        if (Number.isNaN(was.getTime()))
+            return floor;
+        if (was < floor) {
+            trashClamped++;
+            return floor;
+        }
+        return was;
+    };
     await db.transaction(async (tx) => {
         /**
          * Clear the signup samples first, so a restored workspace looks like the one it
@@ -146,7 +193,7 @@ export async function importAccountData(accountId, importerUserId, data) {
                 billingVatNumber: f.billingVatNumber ?? null, billingAddress: f.billingAddress ?? null,
                 hourlyRate: f.hourlyRate ?? null, monthlyHoursBudget: f.monthlyHoursBudget ?? null,
                 notes: f.notes ?? null, isArchived: !!f.isArchived,
-                deletedAt: f.deletedAt ? new Date(String(f.deletedAt)) : null,
+                deletedAt: trashStamp(f.deletedAt),
                 position: f.position ?? 0, createdBy: importerUserId,
             });
         }
@@ -162,7 +209,7 @@ export async function importAccountData(accountId, importerUserId, data) {
             await insert('boards', boards, b.id, {
                 folderId: ref('folders', b.folderId), name: b.name ?? 'Board',
                 description: b.description ?? null, isArchived: !!b.isArchived,
-                deletedAt: b.deletedAt ? new Date(String(b.deletedAt)) : null,
+                deletedAt: trashStamp(b.deletedAt),
                 position: b.position ?? 0, createdBy: importerUserId,
             });
         }
@@ -300,13 +347,30 @@ export async function importAccountData(accountId, importerUserId, data) {
          * from the Subscriptions screen where they can see the amount first.
          */
         let disarmed = 0;
+        let rolled = 0;
         for (const s of arr(data, 'subscriptions')) {
             const businessId = ref('businesses', s.businessId);
             const offeringId = ref('offerings', s.offeringId);
             const folderId = ref('folders', s.folderId);
             if (!businessId || !offeringId || !folderId)
                 continue;
-            const next = typeof s.nextBillDate === 'string' && s.nextBillDate >= today ? s.nextBillDate : today;
+            /**
+             * Roll the schedule forward past today, not on to it.
+             *
+             * Clamping to today made every restored subscription due the moment the restore
+             * finished, so the first nightly run invoiced the entire client list on day one
+             * of a recovery. Rolling on its own cadence from its own anchor day lands it
+             * where the next real cycle would have fallen. Cycles missed while the backup
+             * sat on a disk are forgiven; if they are genuinely owed, a person raises them
+             * from the Subscriptions screen where the amount is visible first.
+             */
+            const anchor = anchorDayOf(typeof s.startedOn === 'string' ? s.startedOn : today);
+            const every = Number(s.intervalMonths ?? 1) || 1;
+            let next = typeof s.nextBillDate === 'string' ? s.nextBillDate : today;
+            for (let i = 0; i < 600 && next <= today; i++)
+                next = addMonths(next, every, anchor);
+            if (next !== s.nextBillDate)
+                rolled++;
             if (s.autoDebit)
                 disarmed++;
             await insert('subscriptions', subscriptions, s.id, {
@@ -321,6 +385,9 @@ export async function importAccountData(accountId, importerUserId, data) {
         }
         if (disarmed) {
             notes.push(`${disarmed} subscription(s) had auto-debit on. It is switched off, and no card is stored, so nothing can be charged until you set it up again.`);
+        }
+        if (rolled) {
+            notes.push(`${rolled} subscription(s) were overdue in the backup. Their next invoice is set to the next normal cycle, and nothing was raised for the months in between. Raise those by hand if they are genuinely owed.`);
         }
         // ---- documents, then the credit notes that point at them ---------------
         for (const d of arr(data, 'documents')) {
@@ -478,6 +545,9 @@ export async function importAccountData(accountId, importerUserId, data) {
     const skippedFiles = arr(data, 'attachments').length + arr(data, 'files').length;
     if (skippedFiles) {
         notes.push(`${skippedFiles} attachment(s) and file(s) were listed in the backup but their contents are not in it, so they were not restored.`);
+    }
+    if (trashClamped) {
+        notes.push(`${trashClamped} item(s) came back in the Trash with their 30 days restarted, so tonight's clear-out cannot destroy them. Restore anything you want to keep.`);
     }
     if (reattributed) {
         notes.push(`${reattributed} entries belonged to people who are not in this workspace, so they are recorded against you. Check tracked time before invoicing from it.`);

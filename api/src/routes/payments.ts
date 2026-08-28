@@ -128,8 +128,14 @@ export async function paymentRoutes(app: FastifyInstance) {
     if (d.autoDebitLive) {
       const on = d.enabled ?? existing?.enabled;
       const auto = d.autoDebitEnabled ?? existing?.autoDebitEnabled;
+      const sand = d.sandbox ?? existing?.sandbox;
       if (!on || !auto) {
         return reply.code(400).send({ error: 'Switch PayFast and auto-debit on before enabling live charging.' });
+      }
+      // Live charging against the test gateway is the worst of both: no money moves,
+      // and Klippy would record that it did.
+      if (sand) {
+        return reply.code(400).send({ error: 'Switch PayFast out of sandbox mode before enabling live charging, or nothing will actually be charged.' });
       }
     }
 
@@ -140,6 +146,9 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
     if (d.enabled === false) patch.autoDebitLive = false;
     if (d.autoDebitLive !== undefined) patch.autoDebitLive = d.autoDebitLive;
+    // Going back into sandbox disarms live charging with it, rather than leaving it
+    // armed for whoever switches sandbox off again months later.
+    if (d.sandbox === true) patch.autoDebitLive = false;
     if (d.autoDebitMax !== undefined) patch.autoDebitMax = d.autoDebitMax.toFixed(2);
     if (d.merchantId !== undefined) patch.merchantId = d.merchantId || null;
     if (d.merchantKey) patch.merchantKeyEnc = encryptSecret(d.merchantKey);
@@ -547,6 +556,25 @@ export async function paymentRoutes(app: FastifyInstance) {
         body: `${doc.clientName} paid invoice ${doc.number} via PayFast.`,
         url: '/?v=billing',
       });
+
+      /**
+       * Say so when a client has paid too much.
+       *
+       * Recording the payment is right: PayFast confirmed it, so the money really did
+       * leave their account, and refusing it here would hide a charge that actually
+       * happened. But nothing anywhere looked at a NEGATIVE balance, so a client who
+       * paid twice (two tabs, or a retry after a timeout) was quietly out of pocket
+       * with no screen in Klippy saying so. The money is theirs to get back, and the
+       * only way anyone finds out is if this says it.
+       */
+      if (bal && bal.outstanding < -0.01) {
+        await notifyAdmins(doc.accountId, {
+          kind: 'payment',
+          title: `${doc.number} has been overpaid`,
+          body: `${doc.clientName} has paid ${formatMoney(Math.abs(bal.outstanding), doc.currency)} more than this invoice asks for. They may have paid twice, in which case you owe them a refund.`,
+          url: '/?v=billing',
+        });
+      }
 
       // Email the client a receipt. Without one, a client whose PayFast return was
       // interrupted has no confirmation the payment landed and may pay again. Purely

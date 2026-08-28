@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import { formatMoney } from './currency.js';
 import { db } from '../db/client.js';
 import { tasks, users, boards, folders, memberships, subscriptions, documents, payments, accounts, jobRuns, businesses, deals, events } from '../db/schema.js';
@@ -125,7 +125,11 @@ export async function runDailyDigest(): Promise<string> {
    */
   const trashCutoff = new Date(Date.now() - 30 * 86_400_000);
   let held = 0;
-  await db.delete(boards).where(lt(boards.deletedAt, trashCutoff)).catch(() => {});
+  // Boards are swept AFTER the folder pass, because a client held back for live
+  // hosting must keep everything under it. Deleting expired boards up front undid
+  // the hold: the folder survived and its boards, cards and tracked time did not,
+  // which is the exact loss this guard exists to prevent.
+  const heldFolderIds: number[] = [];
   try {
     const expired = await db.select({ id: folders.id, accountId: folders.accountId })
       .from(folders).where(lt(folders.deletedAt, trashCutoff));
@@ -151,12 +155,21 @@ export async function runDailyDigest(): Promise<string> {
               ok: false,
             }],
           }).catch(() => { /* never let a log write stop housekeeping */ });
+          heldFolderIds.push(...ids);
           continue;
         }
         await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, rootId))).catch(() => {});
       }
     }
   } catch { /* housekeeping must never stop the digest */ }
+
+  // What is left is boards somebody trashed on their own: a deleted folder has
+  // already taken its own boards with it through the FK. Anything under a held
+  // client is excluded. The empty-array check matters, because notInArray with no
+  // values is not reliably a no-op.
+  await db.delete(boards).where(heldFolderIds.length
+    ? and(lt(boards.deletedAt, trashCutoff), notInArray(boards.folderId, heldFolderIds))
+    : lt(boards.deletedAt, trashCutoff)).catch(() => {});
   // One row per (person, workspace) so someone in two workspaces gets each.
   const recipients = await db.select({
     id: users.id, name: users.name, email: users.email, accountId: memberships.accountId,

@@ -82,9 +82,21 @@ export async function attemptAutoDebit(r) {
         await db.update(autoDebitAttempts).set({ status, detail, pfPaymentId: pfPaymentId ?? null })
             .where(tenantWhere(autoDebitAttempts, r.accountId, eq(autoDebitAttempts.documentId, r.documentId)));
     };
-    if (!settings.autoDebitLive) {
-        await finish('dry-run', `Would have charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`);
-        return done('dry-run', `Dry run: would have charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}. Nothing was taken. Switch on live charging when this list looks right.`);
+    /**
+     * Nothing is charged, and nothing is RECORDED, unless this is real money.
+     *
+     * Sandbox was the dangerous half. chargeToken talks to whichever PayFast the
+     * credentials point at, so with sandbox on and live charging armed it came back
+     * successful, a payment row was written and the invoice was marked paid: Klippy
+     * would show a client as having settled an invoice they had never been charged
+     * for. A test gateway must never be able to write real money into the books.
+     */
+    if (!settings.autoDebitLive || settings.sandbox) {
+        const why = settings.sandbox
+            ? `Sandbox mode is on, so nothing was charged and nothing was recorded. Would have taken ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`
+            : `Dry run: would have charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}. Nothing was taken. Switch on live charging when this list looks right.`;
+        await finish('dry-run', why);
+        return done('dry-run', why);
     }
     if (!settings.merchantId || !settings.merchantKeyEnc) {
         await finish('failed', 'PayFast credentials are incomplete.');
@@ -151,8 +163,20 @@ export async function attemptAutoDebit(r) {
     // on less money than was actually due.
     const [doc] = await db.select({ total: documents.total, status: documents.status }).from(documents)
         .where(tenantWhere(documents, r.accountId, eq(documents.id, r.documentId))).limit(1);
-    if (doc)
-        await settleIfCovered(r.accountId, r.documentId, Number(doc.total), doc.status);
+    if (doc) {
+        const { bal } = await settleIfCovered(r.accountId, r.documentId, Number(doc.total), doc.status);
+        // Charging a card for an invoice somebody had already settled by hand takes real
+        // money the client does not owe. The charge stands (it happened), but nobody was
+        // told, so it is said here where the rest of the money trail is read.
+        if (bal.outstanding < -0.01) {
+            await notifyAdmins(r.accountId, {
+                kind: 'payment',
+                title: `${r.invoiceNumber} has been overpaid`,
+                body: `Auto-debit charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}, which is now paid more than it asks for. Check whether it was already settled, and refund the difference.`,
+                url: '/?v=billing',
+            });
+        }
+    }
     await finish('charged', `Charged ${r.amount.toFixed(2)}.`, res.pfPaymentId);
     return done('charged', `Charged ${r.amount.toFixed(2)} for ${r.invoiceNumber}.`, { pfPaymentId: res.pfPaymentId });
 }

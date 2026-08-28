@@ -153,6 +153,69 @@ await db.query(
   ok(!d2.quadrants.now.some((i) => i.kind === 'task'), 'completing the card takes it off too');
 }
 
+// ---- what is OWED, not the face value ----------------------------------------
+{
+  const [[inv]] = await db.query("SELECT id FROM documents WHERE number = 'E2E-INV-1'");
+  await db.query("UPDATE documents SET status = 'sent' WHERE id = ?", [inv.id]);
+  await db.query(
+    "INSERT INTO payments (account_id, document_id, amount, paid_on, method) VALUES (1, ?, '900.00', ?, 'EFT')",
+    [inv.id, today]);
+  const d = await getFocus();
+  const row = d.quadrants.now.find((i) => i.kind === 'invoice');
+  ok(!!row, 'a part-paid overdue invoice is still on the matrix');
+  ok(row && row.title.includes('250.00') && !row.title.includes('1,150'),
+    'and it shows what is STILL OWED, not the face value', row && row.title);
+
+  await db.query(
+    "INSERT INTO payments (account_id, document_id, amount, paid_on, method) VALUES (1, ?, '250.00', ?, 'EFT')",
+    [inv.id, today]);
+  const after = await getFocus();
+  ok(!after.quadrants.now.some((i) => i.kind === 'invoice'),
+    'once it is covered it leaves the matrix, with no status change needed');
+  await db.query('DELETE FROM payments WHERE document_id = ?', [inv.id]);
+}
+
+// ---- judging something you cannot see -----------------------------------------
+{
+  const [b2] = await db.query(
+    "INSERT INTO businesses (account_id, name, secondary_types) VALUES (1, ?, '[]')", [TAG + ' Hidden']);
+  const [other] = await db.query(
+    "INSERT INTO documents (account_id, business_id, type, seq, number, client_name, issue_date, due_date, currency, status, tax_rate, subtotal, tax_amount, total) VALUES (1, ?, 'invoice', 9803, 'E2E-HIDDEN-1', ?, ?, ?, 'ZAR', 'sent', '15.00', '100.00', '15.00', '115.00')",
+    [b2.insertId, TAG + ' Hidden Co', day(-30), day(-5)]);
+
+  const memberEmail = 'e2e-focus-member@test.local';
+  await db.query('DELETE bm FROM business_members bm JOIN users u ON u.id = bm.user_id WHERE u.email = ?', [memberEmail]);
+  await db.query('DELETE m FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', [memberEmail]);
+  await db.query('DELETE FROM users WHERE email = ?', [memberEmail]);
+  const mk = await post('/users', { email: memberEmail, name: 'Focus Member', password: 'memberpass123' });
+  const MID = (await mk.json()).user?.id;
+  ok(!!MID, 'a scoped member exists to test with');
+  const [[mainBiz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 ORDER BY position LIMIT 1');
+  await db.query("INSERT INTO business_members (account_id, business_id, user_id, role) VALUES (1, ?, ?, 'member')",
+    [mainBiz.id, MID]);
+
+  const ml = await fetch(API + '/auth/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: memberEmail, password: 'memberpass123' }),
+  });
+  const mCookie = cookieOf(ml);
+  const blocked = await fetch(API + '/focus/judge', {
+    method: 'PATCH', headers: { 'content-type': 'application/json', cookie: mCookie },
+    body: JSON.stringify({ kind: 'invoice', refId: other.insertId, important: false }),
+  });
+  ok(blocked.status === 404 || blocked.status === 403,
+    'a member cannot judge an invoice in a business they cannot see', String(blocked.status));
+  const [[stored]] = await db.query(
+    "SELECT COUNT(*) n FROM focus_items WHERE kind = 'invoice' AND ref_id = ?", [other.insertId]);
+  ok(Number(stored.n) === 0, 'and no opinion about it was stored');
+
+  await db.query('DELETE FROM documents WHERE id = ?', [other.insertId]);
+  await db.query('DELETE FROM business_members WHERE user_id = ?', [MID]);
+  await db.query('DELETE FROM memberships WHERE user_id = ?', [MID]);
+  await db.query('DELETE FROM users WHERE id = ?', [MID]);
+  await db.query('DELETE FROM businesses WHERE id = ?', [b2.insertId]);
+}
+
 await clean();
 console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURES');
 await db.end();

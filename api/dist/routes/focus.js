@@ -5,8 +5,9 @@ import { focusItems, tasks, boards, folders, businesses, documents, deals } from
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant, isDuplicateKey } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
-import { accessibleBusinessIds } from '../lib/access.js';
+import { accessibleBusinessIds, assertMaybeBusiness, assertTaskAccess } from '../lib/access.js';
 import { formatMoney } from '../lib/currency.js';
+import { balancesFor } from '../lib/balances.js';
 /**
  * Home as an Eisenhower matrix, across every business at once.
  *
@@ -90,11 +91,26 @@ export async function focusRoutes(app) {
             .where(tenantWhere(documents, accountId, and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lte(documents.dueDate, today))))
             .orderBy(asc(documents.dueDate))
             .limit(PER_SOURCE_CAP);
+        /**
+         * What is still OWED, not the face value.
+         *
+         * status='sent' does not mean "nothing has been paid": settleIfCovered only flips
+         * an invoice to 'paid' once the balance reaches zero, so a part-paid invoice, or
+         * one carrying a credit note, sits here at 'sent' with its full total. Printing
+         * that total on the page the founder makes decisions from meant chasing a client
+         * for money they had already sent. Same helper the collections list and the
+         * reminder job use, batched into two queries whatever the row count.
+         */
+        const owedBy = await balancesFor(accountId, overdueRows);
         for (const d of overdueRows) {
+            const owed = owedBy.get(d.id)?.outstanding ?? Number(d.total);
+            // Covered but not yet flipped: it is not owed, so it is not urgent.
+            if (owed <= 0.001)
+                continue;
             const by = d.dueDate ? -daysBetween(d.dueDate, today) : 0;
             push({
                 key: 'invoice:' + d.id, kind: 'invoice', refId: d.id,
-                title: d.clientName + ' owes ' + formatMoney(d.total, d.currency),
+                title: d.clientName + ' owes ' + formatMoney(owed, d.currency),
                 detail: by > 0 ? d.number + ', ' + by + ' days overdue' : d.number + ', due today',
                 businessId: d.businessId, urgent: true, important: importance('invoice', d.id),
                 due: d.dueDate, overdueBy: by, view: 'collections',
@@ -185,12 +201,11 @@ export async function focusRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
-        if (d.businessId) {
-            const allowed = await accessibleBusinessIds(req);
-            if (allowed && !allowed.has(d.businessId)) {
-                return reply.code(403).send({ error: 'You do not have access to that business.' });
-            }
-        }
+        // assertMaybeBusiness rather than a bare accessible-ids check: the latter waves
+        // owners and admins straight through, so a business id belonging to ANOTHER
+        // account would have been stored unverified.
+        if (!(await assertMaybeBusiness(req, reply, d.businessId ?? null, 'viewer')))
+            return;
         const ins = await db.insert(focusItems).values(withTenant(accountId, {
             kind: 'manual', title: d.title, businessId: d.businessId ?? null,
             important: d.important ?? true, dueDate: d.dueDate ?? null, createdBy: userId,
@@ -215,6 +230,36 @@ export async function focusRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const { kind, refId, important } = parsed.data;
+        /**
+         * Prove the thing being judged is one this person can actually see.
+         *
+         * The judgement is stored per account and read by everyone in it, so without this
+         * a member scoped to one business could reach an id belonging to another and move
+         * that invoice out of the owner's Do-today quadrant. Ids are sequential, so
+         * guessing one takes no knowledge of the other business at all. The business is
+         * taken from the resolved row rather than from the request body for the same
+         * reason: the body is the caller's claim, not a fact.
+         */
+        let businessId = null;
+        if (kind === 'task') {
+            if (!(await assertTaskAccess(req, reply, refId, 'viewer')))
+                return;
+            const [row] = await db.select({ businessId: folders.businessId }).from(tasks)
+                .innerJoin(boards, eq(boards.id, tasks.boardId))
+                .leftJoin(folders, eq(folders.id, boards.folderId))
+                .where(tenantWhere(tasks, accountId, eq(tasks.id, refId))).limit(1);
+            businessId = row?.businessId ?? null;
+        }
+        else {
+            const table = kind === 'deal' ? deals : documents;
+            const [row] = await db.select({ businessId: table.businessId }).from(table)
+                .where(tenantWhere(table, accountId, eq(table.id, refId))).limit(1);
+            if (!row)
+                return reply.code(404).send({ error: 'That is no longer there.' });
+            businessId = row.businessId;
+            if (!(await assertMaybeBusiness(req, reply, businessId, 'viewer')))
+                return;
+        }
         const [existing] = await db.select({ id: focusItems.id }).from(focusItems)
             .where(tenantWhere(focusItems, accountId, eq(focusItems.kind, kind), eq(focusItems.refId, refId)))
             .limit(1);
@@ -225,7 +270,7 @@ export async function focusRoutes(app) {
         }
         try {
             const ins = await db.insert(focusItems).values(withTenant(accountId, {
-                kind, refId, important, businessId: parsed.data.businessId ?? null, createdBy: userId,
+                kind, refId, important, businessId, createdBy: userId,
             }));
             return { ok: true, id: Number(ins[0].insertId) };
         }
