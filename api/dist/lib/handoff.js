@@ -1,6 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { money } from './money.js';
 import { currencyFor } from './currencyFor.js';
+import { taxRateFor } from './taxRateFor.js';
 import { db } from './../db/client.js';
 import { deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses, memberships, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -79,7 +80,9 @@ on('deal.won', 'draft-opening-invoice', async (p, ctx) => {
         ? await db.select().from(businesses)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, p.businessId))).limit(1)
         : [undefined];
-    const taxRate = Number(business?.defaultTaxRate ?? account?.defaultTaxRate ?? 0);
+    // One implementation of the business-then-workspace rule, shared with the
+    // subscription biller, rather than a second copy that can drift from it.
+    const taxRate = await taxRateFor(accountId, p.businessId);
     const dueDays = business?.defaultDueDays ?? account?.defaultDueDays ?? 14;
     const issueDate = new Date().toISOString().slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00.000Z`);

@@ -262,6 +262,65 @@ const { settleIfCovered } = await import('file:///C:/CC/klippy-v2/api/dist/lib/s
     'auto-debit writes the gateway id onto the payment row');
 }
 
+// ===========================================================================
+// 7. Subscription invoices carry the business VAT rate, like every other path.
+// ===========================================================================
+{
+  const { generateSubscriptionInvoice } = await import('file:///C:/CC/klippy-v2/api/dist/lib/billing.js');
+  const [[biz]] = await db.query('SELECT id, default_tax_rate FROM businesses WHERE account_id = 1 ORDER BY position LIMIT 1');
+  const [[folder]] = await db.query('SELECT id FROM folders WHERE account_id = 1 AND deleted_at IS NULL ORDER BY id LIMIT 1');
+  const [off] = await db.query(
+    "INSERT INTO offerings (account_id, business_id, name, price) VALUES (1, ?, 'E2E VAT Offering', '7500.00')", [biz.id]);
+  const OFF = off.insertId;
+  const restore = biz.default_tax_rate;
+
+  const raise = async () => {
+    const id = await generateSubscriptionInvoice(1, {
+      businessId: biz.id, offeringId: OFF, folderId: folder.id, createdBy: null, autoSend: false,
+    });
+    const [[row]] = await db.query('SELECT tax_rate, subtotal, tax_amount, total FROM documents WHERE id = ?', [id]);
+    await db.query('DELETE FROM document_lines WHERE document_id = ?', [id]);
+    await db.query('DELETE FROM documents WHERE id = ?', [id]);
+    return row;
+  };
+
+  // (a) no rate configured: nothing changes, which is the state Ruben is in today.
+  await db.query('UPDATE businesses SET default_tax_rate = NULL WHERE id = ?', [biz.id]);
+  const noRate = await raise();
+  ok(Number(noRate.total) === 7500 && Number(noRate.tax_amount) === 0,
+    'with no VAT rate set a subscription invoice is unchanged', `total ${noRate.total}`);
+
+  // (b) 15% configured: VAT is added on top, exactly as a manual invoice would.
+  await db.query("UPDATE businesses SET default_tax_rate = '15.00' WHERE id = ?", [biz.id]);
+  const vat = await raise();
+  ok(Number(vat.tax_rate) === 15 && Number(vat.subtotal) === 7500
+    && Number(vat.tax_amount) === 1125 && Number(vat.total) === 8625,
+    'with 15% set the subscription invoice carries the VAT',
+    `sub ${vat.subtotal} tax ${vat.tax_amount} total ${vat.total}`);
+
+  // (c) it agrees with the manual path on the same figure.
+  const manual = await post('/documents', {
+    type: 'invoice', clientName: TAG, issueDate: today, taxRate: 15,
+    lines: [{ description: 'E2E VAT Offering', quantity: 1, unitPrice: 7500 }],
+  });
+  const MID = (await manual.json()).document?.id;
+  const [[m]] = await db.query('SELECT subtotal, tax_amount, total FROM documents WHERE id = ?', [MID]);
+  ok(Number(m.total) === Number(vat.total) && Number(m.tax_amount) === Number(vat.tax_amount),
+    'the recurring invoice and the hand-written one now agree exactly',
+    `manual ${m.total} vs recurring ${vat.total}`);
+
+  // (d) an explicit 0.00 on the business is respected, not overridden by the account.
+  await db.query("UPDATE accounts SET default_tax_rate = '15.00' WHERE id = 1");
+  await db.query("UPDATE businesses SET default_tax_rate = '0.00' WHERE id = ?", [biz.id]);
+  const zeroed = await raise();
+  ok(Number(zeroed.tax_amount) === 0,
+    'a business that deliberately sets 0% does not inherit the workspace rate', `tax ${zeroed.tax_amount}`);
+
+  await db.query('UPDATE accounts SET default_tax_rate = NULL WHERE id = 1');
+  await db.query('UPDATE businesses SET default_tax_rate = ? WHERE id = ?', [restore, biz.id]);
+  await db.query('DELETE FROM offerings WHERE id = ?', [OFF]);
+}
+
 await clean();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 await db.end();

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { money } from './money.js';
 import { formatMoney, roundMoney } from './currency.js';
 import { currencyFor } from './currencyFor.js';
+import { taxRateFor } from './taxRateFor.js';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
@@ -75,6 +76,26 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     const brand = business?.brandName || business?.name || account?.brandName || 'Invoice';
     const currency = await currencyFor(accountId, sub.businessId);
     const price = roundMoney(sub.price ?? Number(offering.price), currency);
+    /**
+     * VAT, at the same rate the rest of the app uses.
+     *
+     * This used to write a hardcoded zero, so a business charging 15% on everything it
+     * invoiced by hand sent out every recurring invoice with no VAT at all: the same
+     * offering, at the same price, to the same client, taxed one way in month one and
+     * another way forever after. The output VAT on all recurring revenue was reported
+     * as nil, and where the business is registered the PDF was still headed "Tax
+     * Invoice", which is not a document the client can validly claim against either.
+     *
+     * Offering prices are VAT-exclusive everywhere else (the editor puts offering.price
+     * into a line and computeTotals adds tax on top), so tax goes on top here too.
+     * Each figure is built from figures that are already rounded, the same discipline
+     * as computeTotals, or the invoice does not add up in the column.
+     *
+     * A business with no rate set resolves to 0 and nothing about its invoices changes.
+     */
+    const taxRate = await taxRateFor(accountId, sub.businessId);
+    const taxAmount = roundMoney(price * (taxRate / 100), currency);
+    const total = roundMoney(price + taxAmount, currency);
     const issueDate = new Date().toISOString().slice(0, 10);
     const dueDate = addDays(issueDate, 7);
     // Numbering honours this business's prefix and starting number.
@@ -85,7 +106,8 @@ export async function generateSubscriptionInvoice(accountId, sub) {
             subscriptionId: sub.subscriptionId ?? null,
             clientName: folder.name, clientEmail: folder.billingEmail ?? null, clientAddress: null,
             issueDate, dueDate, currency,
-            taxRate: '0', subtotal: money(price), taxAmount: '0', total: money(price),
+            taxRate: money(taxRate), subtotal: money(price),
+            taxAmount: money(taxAmount), total: money(total),
             notes: `Auto-generated for the ${offering.name} subscription.`, createdBy: sub.createdBy,
         }));
         const newId = Number(ins[0].insertId);
@@ -118,7 +140,10 @@ export async function generateSubscriptionInvoice(accountId, sub) {
                     `Your invoice for ${offering.name} is attached.`,
                 ],
                 facts: [
-                    ['Amount', formatMoney(price, currency)],
+                    // The total, not the bare price: with VAT on top these differ, and an
+                    // email quoting one figure beside an attached invoice showing another is
+                    // the kind of thing a client stops to query instead of paying.
+                    ['Amount', formatMoney(total, currency)],
                     ['Due', dueDate],
                 ],
                 ...(payLink ? { button: { label: 'Pay online', url: payLink } } : {}),
