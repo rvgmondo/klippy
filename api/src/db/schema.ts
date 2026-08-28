@@ -1028,6 +1028,55 @@ export const paymentSettings = mysqlTable('payment_settings', {
  * needs no password to store, reset or support; a password can be set afterwards by
  * anyone who would rather have one, or whose email is slow.
  */
+/**
+ * The Eisenhower matrix on Home: one page, every business.
+ *
+ * Ruben plans on paper by drawing a cross and writing everything from all of his
+ * businesses into four quadrants. The machine can do the half of that which is
+ * mechanical: URGENCY is computed from dates it already holds (an invoice past due,
+ * a card due today, a quote about to expire, a follow-up promised and missed), so
+ * nobody sits in front of a blank cross. What it cannot do is decide what MATTERS,
+ * so importance is the one judgement stored here.
+ *
+ * Two kinds of row:
+ *  - kind='manual': something he typed straight onto the matrix. This is mostly the
+ *    top-right quadrant, the work that builds the business and has no deadline to
+ *    make it urgent, which is exactly the work that gets starved.
+ *  - anything else: a JUDGEMENT about a live record elsewhere (a task, an invoice, a
+ *    quote, a deal). The row carries no copy of the title or the date; those are read
+ *    from the source every time, so the matrix can never drift from reality. The row
+ *    exists only to remember "I decided this one is not important".
+ *
+ * Auto items therefore default to important and are demoted by hand, which is why
+ * a brand-new workspace shows a useful matrix with nothing configured at all.
+ */
+export const focusItems = mysqlTable('focus_items', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  // Which business it belongs to, so every item can wear its colour on the one page.
+  businessId: int('business_id', { unsigned: true })
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  kind: mysqlEnum('kind', ['manual', 'task', 'invoice', 'quote', 'deal']).default('manual').notNull(),
+  /** The source row for a judgement. Null for a manual item. */
+  refId: int('ref_id', { unsigned: true }),
+  /** Only manual items carry their own words; the rest read theirs from the source. */
+  title: varchar('title', { length: 200 }),
+  /** The human half of the matrix. Urgency is computed, never stored. */
+  important: boolean('important').default(true).notNull(),
+  /** Manual items can carry a date, which is what makes one of them urgent. */
+  dueDate: date('due_date', { mode: 'string' }),
+  doneAt: datetime('done_at'),
+  position: int('position', { unsigned: true }).default(0).notNull(),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  // One judgement per source row, so two clicks cannot leave two opinions behind.
+  uniqueIndex('uniq_focus_ref').on(t.accountId, t.kind, t.refId),
+  index('idx_focus_account').on(t.accountId, t.doneAt),
+]);
+
 export const portalUsers = mysqlTable('portal_users', {
   id: pk(),
   accountId: int('account_id', { unsigned: true }).notNull()

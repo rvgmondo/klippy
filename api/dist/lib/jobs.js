@@ -31,7 +31,7 @@ export const JOBS = [
     {
         name: 'backup-email',
         label: 'Weekly backup',
-        description: 'On Sunday mornings, emails each workspace owner a full JSON export of their workspace. A backup that exists before the day it is needed.',
+        description: 'On Sunday mornings, emails each workspace owner a JSON export of their workspace, holding no passwords or payment credentials. A backup that exists before the day it is needed.',
         hour: 5,
     },
     {

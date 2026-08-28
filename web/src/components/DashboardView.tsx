@@ -3,6 +3,7 @@ import { Target, Truck, Settings2, ArrowRight, ArrowUpRight, StickyNote, Palette
 import { useState, type ReactNode } from 'react';
 import { apiGet, apiPost } from '../lib/api';
 import { TodayBriefing } from './TodayBriefing';
+import { FocusMatrix } from './FocusMatrix';
 import { SkeletonTile } from './ui';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { setUrlParams } from '../lib/urlAction';
@@ -173,6 +174,13 @@ export function DashboardView({ businessId, onNavigate, onPickBusiness }: {
             <p className="mt-2 text-[11px] text-slate-500">You can add the client while writing the invoice.</p>
           </div>
         )}
+
+        {/* The cross, before anything else on the page.
+            Everything below this is a roll-up; this is the only part that asks a
+            question, so it goes where the eye lands first. It is deliberately not
+            filtered by the business switcher: seeing all of them together is the
+            entire point of drawing one cross instead of four. */}
+        <FocusMatrix onNavigate={(v) => onNavigate?.(v)} />
 
         {/* What needs you today, and the one thing holding the business back. */}
         <TodayBriefing businessId={businessId} onNavigate={(v) => onNavigate?.(v)} />
