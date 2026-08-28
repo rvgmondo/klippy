@@ -265,6 +265,49 @@ export async function hostingRoutes(app) {
             return reply.code(400).send({ error: res.message });
         return res;
     });
+    /**
+     * Forget a hosting record, once the account is really gone from the server.
+     *
+     * There has to be a way out. Every delete path now refuses while a hosting row is
+     * pending, active or suspended, which is right, but nothing could ever move a row
+     * out of those states, so a workspace that once sold hosting could never be deleted
+     * and its clients could never be purged. That is a dead end, not a guard.
+     *
+     * This does not touch WHM. It says "I have dealt with this on the server", which is
+     * a claim only a person can make, so it is admin only and it refuses while the
+     * account is still marked active: suspend it first, or mark the provisioning
+     * failed, and only then forget it. The domain and username are written into the
+     * event log before the row goes, because after this there is no other record.
+     */
+    app.delete('/api/v1/hosting/accounts/:id', async (req, reply) => {
+        const { accountId, role, userId } = authOf(req);
+        if (role === 'member')
+            return reply.code(403).send({ error: 'Only admins can remove hosting records.' });
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const [row] = await db.select().from(hostingAccounts)
+            .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, id))).limit(1);
+        if (!row)
+            return reply.code(404).send({ error: 'Not found.' });
+        if (row.status === 'active') {
+            return reply.code(409).send({
+                error: `${row.domain} is still marked active. Suspend it first, so nobody removes the record of a site that is still serving.`,
+            });
+        }
+        await db.insert(events).values({
+            accountId, businessId: row.businessId, name: 'hosting.forgotten',
+            payload: { domain: row.domain, username: row.username, status: row.status, byUserId: userId },
+            results: [{
+                    handler: 'hosting.forget',
+                    outcome: `Removed the record of ${row.domain}${row.username ? ` (${row.username})` : ''}. Klippy no longer tracks it; check the server itself if you are unsure.`,
+                    ok: true,
+                }],
+        }).catch(() => { });
+        await db.delete(hostingAccounts)
+            .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.id, id)));
+        return { ok: true };
+    });
     /** Provision a subscription by hand: the retry after a failure, or a first run. */
     app.post('/api/v1/subscriptions/:id/provision', async (req, reply) => {
         const { accountId, role } = authOf(req);

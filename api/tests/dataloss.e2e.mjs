@@ -243,6 +243,57 @@ const mkClient = async (name, { hosting = 'active', trashed = false } = {}) => {
   ok('prefixInvoice' in (data.businesses[0] ?? {}), 'businesses carry their invoice prefix');
 }
 
+// ===========================================================================
+// 7. There is always a way out: a dealt-with hosting record can be forgotten.
+// ===========================================================================
+{
+  const c = await mkClient('forget');
+  const active = await del(`/hosting/accounts/${c.hostingId}`);
+  ok(active.status === 409, 'an ACTIVE hosting record cannot just be forgotten', String(active.status));
+
+  await db.query("UPDATE hosting_accounts SET status = 'suspended' WHERE id = ?", [c.hostingId]);
+  const gone = await del(`/hosting/accounts/${c.hostingId}`);
+  ok(gone.ok, 'once suspended, the record can be removed', String(gone.status));
+  const [[left]] = await db.query('SELECT COUNT(*) n FROM hosting_accounts WHERE id = ?', [c.hostingId]);
+  ok(Number(left.n) === 0, 'and it is really gone');
+  const [[logged]] = await db.query(
+    "SELECT COUNT(*) n FROM events WHERE name = 'hosting.forgotten' AND account_id = 1");
+  ok(Number(logged.n) > 0, 'with the domain written to the log first, since nothing else remembers it');
+
+  // And now the client can actually be purged, which was the dead end.
+  await db.query('UPDATE folders SET deleted_at = ? WHERE id = ?', [new Date(), c.folderId]);
+  const purged = await post('/trash/purge', { kind: 'folder', id: c.folderId });
+  ok(purged.ok, 'and the client that was blocked by it can finally be deleted', String(purged.status));
+  await db.query('DELETE FROM offerings WHERE id = ?', [c.offeringId]);
+}
+
+// ===========================================================================
+// 8. A dry run must not permanently block the real charge.
+// ===========================================================================
+{
+  const c = await mkClient('dryrun', { hosting: null });
+  const [d] = await db.query(
+    `INSERT INTO documents (account_id, business_id, folder_id, subscription_id, type, seq, number, client_name, issue_date, due_date, currency, status, tax_rate, subtotal, tax_amount, total)
+     VALUES (1, ?, ?, ?, 'invoice', 9701, 'E2E-DRY-1', ?, ?, ?, 'ZAR', 'sent', '0.00', '500.00', '0.00', '500.00')`,
+    [BID, c.folderId, c.subId, TAG + ' dryrun', today, today]);
+  // A dry run leaves an attempt row keyed on the invoice.
+  await db.query(
+    "INSERT INTO auto_debit_attempts (account_id, subscription_id, document_id, status, amount) VALUES (1, ?, ?, 'dry-run', '500.00')",
+    [c.subId, d.insertId]);
+
+  const { attemptAutoDebit } = await import('file:///C:/CC/klippy-v2/api/dist/lib/autoDebit.js');
+  const res = await attemptAutoDebit({
+    accountId: 1, businessId: BID, subscriptionId: c.subId, documentId: d.insertId,
+    amount: 500, currency: 'ZAR', itemName: 'E2E', invoiceNumber: 'E2E-DRY-1',
+  });
+  ok(res.detail !== 'Already attempted for this invoice.',
+    'a dry-run row does not permanently block the invoice from ever being charged', res.detail);
+
+  await db.query('DELETE FROM auto_debit_attempts WHERE document_id = ?', [d.insertId]);
+  await db.query('DELETE FROM documents WHERE id = ?', [d.insertId]);
+  await db.query('DELETE FROM offerings WHERE id = ?', [c.offeringId]);
+}
+
 await clean();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 await db.end();

@@ -7,6 +7,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { buildAccountExport } from '../lib/export.js';
 import { importAccountData, workspaceHoldsRealWork } from '../lib/importAccount.js';
+import { liveHostingForFolders } from '../lib/hosting.js';
 import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
 import { publicAccount } from '../lib/publicAccount.js';
 import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings, boards, boardColumns, tasks, timeEntries, contacts, documents, documentLines, payments, subscriptions, expenses } from '../db/schema.js';
@@ -217,6 +218,27 @@ export async function accountRoutes(app: FastifyInstance) {
     const { accountId, role } = authOf(req);
     if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can clear example data.' });
     const names = sampleNames();
+
+    /**
+     * Never clear an example that somebody has started using for real.
+     *
+     * This is a hard delete with no Trash behind it, and the name list grew when it
+     * was fixed to cover the operations pillar too, so it now matches more folders
+     * than it used to. A founder who renamed nothing and simply started working in
+     * "Getting Clients" has real work under a seed name, and a subscription there may
+     * have provisioned a live cPanel account. Same rule as every other delete path:
+     * refuse while something is live on the server, and name it.
+     */
+    const seedFolders = await db.select({ id: folders.id, name: folders.name }).from(folders)
+      .where(and(eq(folders.accountId, accountId), isNull(folders.parentId), inArray(folders.name, names.folders)));
+    const live = await liveHostingForFolders(accountId, seedFolders.map((x) => x.id));
+    if (live.length) {
+      const domains = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');
+      return reply.code(409).send({
+        error: `One of the example clients has hosting on the server (${domains}), so it is not an example any more. Switch that off, or rename the client, before clearing the rest.`,
+      });
+    }
+
     // Folders cascade to their boards and cards.
     const f = await db.delete(folders)
       .where(and(eq(folders.accountId, accountId), isNull(folders.parentId), inArray(folders.name, names.folders)));

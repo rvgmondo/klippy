@@ -68,15 +68,32 @@ export async function attemptAutoDebit(r) {
     }
     catch (err) {
         if (isDuplicateKey(err)) {
-            // Recorded rather than returned silently. This branch is also what a STUCK
-            // attempt looks like on the next run (a row left pending because a previous
-            // run died mid-charge), and that is exactly the case somebody needs to see.
-            return done('skipped', 'Already attempted for this invoice.');
+            /**
+             * A DRY RUN is not an attempt at money, so it must not block a real one.
+             *
+             * The unique index is on documentId alone, so the row a dry run leaves behind
+             * used to make that invoice permanently unchargeable: the recommended way to
+             * set auto-debit up is to dry run it, read the list, then switch live charging
+             * on, and doing exactly that guaranteed every invoice you had checked would be
+             * skipped for ever after. Reclaiming is a conditional update, so if two runs
+             * race only one wins and the loser still sees "already attempted".
+             */
+            const reclaimed = await db.update(autoDebitAttempts)
+                .set({ status: 'pending', detail: null, amount: r.amount.toFixed(2) })
+                .where(tenantWhere(autoDebitAttempts, r.accountId, eq(autoDebitAttempts.documentId, r.documentId), eq(autoDebitAttempts.status, 'dry-run')));
+            if (!reclaimed[0].affectedRows) {
+                // Recorded rather than returned silently. This branch is also what a STUCK
+                // attempt looks like on the next run (a row left pending because a previous
+                // run died mid-charge), and that is exactly the case somebody needs to see.
+                return done('skipped', 'Already attempted for this invoice.');
+            }
         }
-        // Anything else means the claim never landed, so nothing was charged and a
-        // later run should try again. Saying "already attempted" here would send
-        // somebody hunting for a charge that was never made.
-        return done('failed', `Could not record the attempt, so nothing was charged: ${err instanceof Error ? err.message : String(err)}`);
+        else {
+            // Anything else means the claim never landed, so nothing was charged and a
+            // later run should try again. Saying "already attempted" here would send
+            // somebody hunting for a charge that was never made.
+            return done('failed', `Could not record the attempt, so nothing was charged: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
     const finish = async (status, detail, pfPaymentId) => {
         await db.update(autoDebitAttempts).set({ status, detail, pfPaymentId: pfPaymentId ?? null })

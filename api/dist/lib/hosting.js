@@ -61,6 +61,24 @@ export async function onInvoicePaid(accountId, documentId) {
             .where(tenantWhere(documents, accountId, eq(documents.id, documentId))).limit(1);
         if (!doc)
             return;
+        /**
+         * Never set anything up for a client who is in the Trash.
+         *
+         * A payment can still land on a trashed client's invoice: an old pay link, a
+         * bank transfer entered by hand, or a gateway notification arriving after the
+         * delete. Provisioning off the back of that creates a real cPanel account, on a
+         * real server, for a client the founder believes they have deleted, and the
+         * suspension sweep will not touch it because the subscription is on its way out.
+         * The payment is still recorded and the invoice still settles; only the
+         * side effect is refused.
+         */
+        if (doc.folderId != null) {
+            const [client] = await db.select({ id: folders.id }).from(folders)
+                .where(tenantWhere(folders, accountId, eq(folders.id, doc.folderId), isNull(folders.deletedAt)))
+                .limit(1);
+            if (!client)
+                return;
+        }
         // An invoice raised BY a subscription: carry on with that one.
         if (doc.subscriptionId) {
             await provisionSubscription(accountId, doc.subscriptionId, doc.number);
