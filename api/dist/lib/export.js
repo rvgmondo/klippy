@@ -1,5 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
 /**
  * Everything in one workspace as one plain JSON object.
@@ -34,17 +35,17 @@ import { tenantWhere } from './tenant.js';
  * say "download" and not "restore".
  */
 /** Bumped when the SHAPE changes, so a future importer can tell what it is holding. */
-export const EXPORT_SCHEMA_VERSION = 2;
+export const EXPORT_SCHEMA_VERSION = 3;
 export async function buildAccountExport(accountId) {
     const own = (t) => tenantWhere(t, accountId);
-    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows,] = await Promise.all([
+    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows,] = await Promise.all([
         db.select({ id: businesses.id, name: businesses.name, type: businesses.type, currency: businesses.currency, brandName: businesses.brandName, bizAddress: businesses.bizAddress, bizTaxNumber: businesses.bizTaxNumber, bizRegNumber: businesses.bizRegNumber, bankDetails: businesses.bankDetails, defaultTaxRate: businesses.defaultTaxRate, defaultDueDays: businesses.defaultDueDays, prefixInvoice: businesses.prefixInvoice, prefixQuote: businesses.prefixQuote, prefixCreditNote: businesses.prefixCreditNote, seqStartInvoice: businesses.seqStartInvoice, seqStartQuote: businesses.seqStartQuote, seqStartCreditNote: businesses.seqStartCreditNote, position: businesses.position }).from(businesses).where(own(businesses)),
         db.select({ id: folders.id, name: folders.name, parentId: folders.parentId, businessId: folders.businessId, pillar: folders.pillar, billingEmail: folders.billingEmail, billingPhone: folders.billingPhone, billingVatNumber: folders.billingVatNumber, billingAddress: folders.billingAddress, hourlyRate: folders.hourlyRate, monthlyHoursBudget: folders.monthlyHoursBudget, notes: folders.notes, isArchived: folders.isArchived, deletedAt: folders.deletedAt, position: folders.position }).from(folders).where(own(folders)),
         db.select({ id: boards.id, folderId: boards.folderId, name: boards.name, description: boards.description, isArchived: boards.isArchived, deletedAt: boards.deletedAt, position: boards.position }).from(boards).where(own(boards)),
         db.select({ id: boardColumns.id, boardId: boardColumns.boardId, name: boardColumns.name, position: boardColumns.position }).from(boardColumns).where(own(boardColumns)),
         db.select({ id: tasks.id, boardId: tasks.boardId, columnId: tasks.columnId, title: tasks.title, description: tasks.description, priority: tasks.priority, dueDate: tasks.dueDate, estimateMinutes: tasks.estimateMinutes, scheduledStart: tasks.scheduledStart, recurrence: tasks.recurrence, assignedTo: tasks.assignedTo, position: tasks.position, isCompleted: tasks.isCompleted, completedAt: tasks.completedAt, isArchived: tasks.isArchived }).from(tasks).where(own(tasks)),
         db.select({ id: timeEntries.id, taskId: timeEntries.taskId, userId: timeEntries.userId, startTime: timeEntries.startTime, durationSeconds: timeEntries.durationSeconds }).from(timeEntries).where(own(timeEntries)),
-        db.select({ id: contacts.id, name: contacts.name, email: contacts.email, phone: contacts.phone, company: contacts.company, role: contacts.role, notes: contacts.notes, folderId: contacts.folderId }).from(contacts).where(own(contacts)),
+        db.select({ id: contacts.id, businessId: contacts.businessId, name: contacts.name, email: contacts.email, phone: contacts.phone, company: contacts.company, role: contacts.role, notes: contacts.notes, folderId: contacts.folderId }).from(contacts).where(own(contacts)),
         db.select({ id: deals.id, title: deals.title, company: deals.company, value: deals.value, stage: deals.stage, source: deals.source, lostReason: deals.lostReason, notes: deals.notes, businessId: deals.businessId, clientFolderId: deals.clientFolderId }).from(deals).where(own(deals)),
         db.select({ id: dealActivities.id, dealId: dealActivities.dealId, kind: dealActivities.kind, body: dealActivities.body, occurredAt: dealActivities.occurredAt }).from(dealActivities).where(own(dealActivities)),
         // seq and the deposit/discount split are here so invoice numbering and every
@@ -76,6 +77,14 @@ export async function buildAccountExport(accountId) {
         // Who can reach the client portal. Never passwordHash.
         db.select({ id: portalUsers.id, businessId: portalUsers.businessId, folderId: portalUsers.folderId, email: portalUsers.email, name: portalUsers.name, isActive: portalUsers.isActive }).from(portalUsers).where(own(portalUsers)),
         db.select({ id: productNotes.id, title: productNotes.title, body: productNotes.body, kind: productNotes.kind, status: productNotes.status, priority: productNotes.priority }).from(productNotes).where(own(productNotes)),
+        db.select({ id: focusItems.id, businessId: focusItems.businessId, kind: focusItems.kind, refId: focusItems.refId, title: focusItems.title, important: focusItems.important, dueDate: focusItems.dueDate, doneAt: focusItems.doneAt }).from(focusItems).where(own(focusItems)),
+        // Who the team are, by EMAIL and nothing else that could sign anyone in. An
+        // import has to attribute tracked time and comments to real people, and without
+        // this it can only guess, which quietly falsifies who is owed for billable
+        // hours. Never passwordHash, resetTokenHash or totpSecret.
+        db.select({ id: users.id, name: users.name, email: users.email, role: memberships.role, isActive: memberships.isActive })
+            .from(memberships).innerJoin(users, eq(users.id, memberships.userId))
+            .where(eq(memberships.accountId, accountId)),
     ]);
     return {
         exportedOn: new Date().toISOString().slice(0, 10),
@@ -108,6 +117,8 @@ export async function buildAccountExport(accountId) {
         portalUsers: portalRows,
         expenses: expenseRows,
         notes: noteRows,
+        focus: focusRows,
+        people: peopleRows,
     };
 }
 //# sourceMappingURL=export.js.map

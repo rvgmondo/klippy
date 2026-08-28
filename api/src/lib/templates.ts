@@ -260,3 +260,41 @@ export const TEMPLATES: Record<BusinessType, Template> = {
     ],
   },
 };
+
+
+/**
+ * The exact names the signup seed uses, derived from the templates themselves so the
+ * two can never drift.
+ *
+ * Matching is by exact name and never by pattern, so a real client somebody happened
+ * to call "Sample..." is left alone. Two things rely on this: the Clear examples
+ * button, and the import precondition, which has to tell "a workspace with only the
+ * seed in it" apart from "a workspace with somebody's actual business in it".
+ */
+export function sampleNames(): { folders: string[]; companies: string[]; dealTitles: string[]; offerings: string[] } {
+  const foldersList: string[] = [];
+  const companies: string[] = [];
+  const dealTitles: string[] = [];
+  const offeringsList: string[] = [];
+  for (const t of Object.values(TEMPLATES)) {
+    // BOTH pillars. seedNewBusiness creates a top-level folder for every delivery
+    // area AND every operations area, so collecting only delivery left the
+    // operations samples ("Getting Clients" and friends) behind: Clear examples
+    // silently failed to remove them, and anything asking "is this workspace still
+    // untouched?" was told no by the seed's own leftovers.
+    for (const area of [...t.delivery, ...t.operations]) foldersList.push(area.name);
+    // A seeded deal does not always carry a company, and matching on company alone
+    // left those behind for ever.
+    for (const dl of t.deals) {
+      if (dl.company) companies.push(dl.company);
+      dealTitles.push(dl.title);
+    }
+    for (const of2 of t.offerings) offeringsList.push(of2.name);
+  }
+  return {
+    folders: [...new Set(foldersList)],
+    companies: [...new Set(companies)],
+    dealTitles: [...new Set(dealTitles)],
+    offerings: [...new Set(offeringsList)],
+  };
+}

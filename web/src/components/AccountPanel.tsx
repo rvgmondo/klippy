@@ -100,6 +100,7 @@ export function AccountPanel() {
             className="inline-block rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800">
             Download everything (JSON)
           </a>
+          {isOwner && <RestoreBackup />}
         </div>
       )}
 
@@ -107,6 +108,81 @@ export function AccountPanel() {
       {isOwner && account?.id && (
         <div className="pt-4 border-t border-slate-800">
           <DeleteWorkspaceButton workspaceId={account.id} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Reading a backup back in.
+ *
+ * Owner only, and it refuses rather than merges: it will only fill a workspace that
+ * is still empty. That is not a limitation to apologise for, it is the whole safety
+ * of the thing, so the copy says it up front rather than letting somebody discover
+ * it from a 409. The report afterwards is not decoration either: it is where the
+ * two things a person has to act on appear, namely hosting that needs checking
+ * against the real server, and work that could not be matched to a person.
+ */
+export function RestoreBackup() {
+  const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<{ notes?: string[]; counts?: Record<string, number>; reattributed?: number } | null>(null);
+
+  const pick = async (file: File) => {
+    let data: unknown;
+    try {
+      data = JSON.parse(await file.text());
+    } catch {
+      notify('That file is not readable as a Klippy backup.', 'error');
+      return;
+    }
+    const okToRun = await confirmDialog(
+      'Restore this backup into this workspace? It only works while the workspace is still empty, and it cannot be undone. Auto-debit stays switched off and hosting comes back as records you have to check.',
+      { confirmLabel: 'Restore', danger: true },
+    );
+    if (!okToRun) return;
+    setBusy(true); setReport(null);
+    try {
+      const res = await fetch('/api/v1/account/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data }),
+      });
+      const body = await res.json();
+      if (!res.ok) { notify(body.error ?? 'The restore did not run.', 'error'); return; }
+      setReport(body);
+      notify('Restored. Reload to see everything.', 'ok');
+    } catch {
+      notify('The restore did not run.', 'error');
+    } finally { setBusy(false); }
+  };
+
+  const restoredRows = report?.counts
+    ? Object.values(report.counts).reduce((a, b) => a + b, 0) : 0;
+
+  return (
+    <div className="mt-4 border-t border-slate-800 pt-4">
+      <h4 className="mb-1 text-sm font-semibold text-slate-200">Restore a backup</h4>
+      <p className="mb-3 text-xs text-slate-500">
+        Reads one of those files back in. It can only fill a workspace that is still
+        empty, so if this one already has your work in it, make a new workspace and
+        restore into that. Card debits stay switched off and hosting comes back as
+        records to check, never as instructions to your server.
+      </p>
+      <label className={`inline-block cursor-pointer rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:bg-slate-800 ${busy ? 'opacity-50' : ''}`}>
+        {busy ? 'Restoring...' : 'Choose a backup file'}
+        <input type="file" accept="application/json,.json" className="hidden" disabled={busy}
+          onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void pick(f); }} />
+      </label>
+      {report && (
+        <div className="mt-3 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent-quiet)] p-3 text-xs text-slate-200">
+          <p className="font-medium">Restored {restoredRows} records.</p>
+          {(report.notes ?? []).map((n, i) => (
+            <p key={i} className="mt-1.5 text-slate-300">{n}</p>
+          ))}
+          <button onClick={() => window.location.reload()}
+            className="mt-2 rounded-lg border border-[var(--accent)] px-3 py-1.5 text-[11px] font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10">
+            Reload
+          </button>
         </div>
       )}
     </div>

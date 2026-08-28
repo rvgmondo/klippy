@@ -6,10 +6,11 @@ import { accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { buildAccountExport } from '../lib/export.js';
+import { importAccountData, workspaceHoldsRealWork } from '../lib/importAccount.js';
 import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
 import { publicAccount } from '../lib/publicAccount.js';
 import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings, boards, boardColumns, tasks, timeEntries, contacts, documents, documentLines, payments, subscriptions, expenses } from '../db/schema.js';
-import { TEMPLATES } from '../lib/templates.js';
+import { sampleNames } from '../lib/templates.js';
 import { inArray, isNull, or } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
 
@@ -220,7 +221,8 @@ export async function accountRoutes(app: FastifyInstance) {
     const f = await db.delete(folders)
       .where(and(eq(folders.accountId, accountId), isNull(folders.parentId), inArray(folders.name, names.folders)));
     const d = await db.delete(deals)
-      .where(and(eq(deals.accountId, accountId), inArray(deals.company, names.companies)));
+      .where(and(eq(deals.accountId, accountId),
+        or(inArray(deals.company, names.companies), inArray(deals.title, names.dealTitles))));
     const o = await db.delete(offerings)
       .where(and(eq(offerings.accountId, accountId), inArray(offerings.name, names.offerings)));
     return { ok: true, removed: { folders: f[0].affectedRows, deals: d[0].affectedRows, offerings: o[0].affectedRows } };
@@ -271,6 +273,51 @@ export async function accountRoutes(app: FastifyInstance) {
     };
   });
 
+  /**
+   * Read a backup back in.
+   *
+   * Owner only, tighter than the export's admin check, because this writes a whole
+   * workspace rather than reading one. It refuses rather than merges: importing into
+   * a workspace that already holds real work would duplicate a business rather than
+   * restore it, and there is no undo for that. The intended use is a NEW workspace
+   * created for the purpose, which is also the shape of a real disaster: the old one
+   * is gone.
+   *
+   * Everything about what it deliberately will not do lives in lib/importAccount.ts.
+   */
+  app.post('/api/v1/account/import', async (req, reply) => {
+    const { accountId, userId, role } = authOf(req);
+    if (role !== 'owner') {
+      return reply.code(403).send({ error: 'Only the workspace owner can restore a backup.' });
+    }
+    const body = req.body as { data?: unknown } | null;
+    const raw = body && typeof body === 'object' && 'data' in body ? body.data : body;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return reply.code(400).send({ error: 'That does not look like a Klippy backup file.' });
+    }
+    const data = raw as Record<string, unknown>;
+    if (!Array.isArray(data.businesses) && !Array.isArray(data.clients)) {
+      return reply.code(400).send({ error: 'That file has no Klippy workspace in it.' });
+    }
+
+    const blocked = await workspaceHoldsRealWork(accountId);
+    if (blocked) {
+      return reply.code(409).send({
+        error: `Nothing was changed, because ${blocked}. Restoring can only fill a workspace that is still empty, so make a new workspace and restore into that one.`,
+      });
+    }
+
+    try {
+      const report = await importAccountData(accountId, userId, data);
+      return { ok: true, ...report };
+    } catch (err) {
+      req.log.error({ err }, 'account import failed');
+      return reply.code(500).send({
+        error: 'The restore failed and nothing was changed. The file may be from a newer version of Klippy.',
+      });
+    }
+  });
+
   app.get('/api/v1/account/export', async (req, reply) => {
     const { accountId, role } = authOf(req);
     if (role === 'member') return reply.code(403).send({ error: 'Only workspace admins can export the workspace.' });
@@ -282,19 +329,4 @@ export async function accountRoutes(app: FastifyInstance) {
   });
 }
 
-/** The exact names the seed uses, straight from the templates so they cannot drift. */
-function sampleNames() {
-  const foldersList: string[] = [];
-  const companies: string[] = [];
-  const offeringsList: string[] = [];
-  for (const t of Object.values(TEMPLATES)) {
-    for (const area of t.delivery) foldersList.push(area.name);
-    for (const dl of t.deals) if (dl.company) companies.push(dl.company);
-    for (const of2 of t.offerings) offeringsList.push(of2.name);
-  }
-  return {
-    folders: [...new Set(foldersList)],
-    companies: [...new Set(companies)],
-    offerings: [...new Set(offeringsList)],
-  };
-}
+
