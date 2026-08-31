@@ -321,6 +321,36 @@ const { settleIfCovered } = await import('file:///C:/CC/klippy-v2/api/dist/lib/s
   await db.query('DELETE FROM offerings WHERE id = ?', [OFF]);
 }
 
+// ===========================================================================
+// 8. The gateway fee is captured, not thrown away.
+// ===========================================================================
+{
+  const INV = await mkInvoice();
+  await db.query("UPDATE documents SET status = 'sent' WHERE id = ?", [INV]);
+
+  // What PayFast actually posts: the client paid the gross, PayFast kept a fee, the
+  // rest reached the bank. Only the gross was ever read.
+  const { buildAccountExport } = await import('file:///C:/CC/klippy-v2/api/dist/lib/export.js');
+  await db.query(
+    "INSERT INTO payments (account_id, document_id, amount, paid_on, method, pf_payment_id, fee_amount, net_amount) VALUES (1, ?, '11500.00', ?, 'PayFast', ?, '287.50', '11212.50')",
+    [INV, today, 'E2E-FEE-' + Date.now()]);
+
+  const [[row]] = await db.query('SELECT amount, fee_amount, net_amount FROM payments WHERE document_id = ?', [INV]);
+  ok(Number(row.fee_amount) === 287.5, 'the gateway fee is stored against the payment', 'fee ' + row.fee_amount);
+  ok(Number(row.net_amount) === 11212.5, 'so is what actually reached the bank', 'net ' + row.net_amount);
+  ok(Number(row.amount) === 11500, 'and the client is still credited the full amount they paid');
+
+  // The invoice must still settle on the GROSS. Crediting only the net would leave
+  // every online payment looking short by the fee and chase a client who has paid.
+  const { settleIfCovered } = await import('file:///C:/CC/klippy-v2/api/dist/lib/settle.js');
+  const res = await settleIfCovered(1, INV, 11500, 'sent');
+  ok(res.settled === true, 'the invoice settles on what the client paid, not what survived the fee');
+
+  const exp = await buildAccountExport(1);
+  const backedUp = (exp.payments ?? []).find((p) => Number(p.feeAmount) === 287.5);
+  ok(!!backedUp, 'and the fee is in the backup, so the cost is not lost on a restore');
+}
+
 await clean();
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 await db.end();

@@ -268,7 +268,9 @@ export async function runFinanceDigest(): Promise<string> {
       .from(documents)
       .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'),
         ne(documents.status, 'void'), ne(documents.status, 'draft'), gte(documents.issueDate, weekAgo)));
-    const payRows = await db.select({ amount: payments.amount, currency: documents.currency })
+    const payRows = await db.select({
+      amount: payments.amount, fee: payments.feeAmount, currency: documents.currency,
+    })
       .from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
       .where(and(eq(payments.accountId, accountId), gte(payments.paidOn, weekAgo)));
     const owedRows = await db.select({ currency: documents.currency, total: documents.total })
@@ -276,17 +278,25 @@ export async function runFinanceDigest(): Promise<string> {
       .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'),
         eq(documents.status, 'sent')));
 
-    const bucket = new Map<string, { invoiced: number; received: number; owed: number }>();
-    const into = (c: string) => { let b = bucket.get(c); if (!b) { b = { invoiced: 0, received: 0, owed: 0 }; bucket.set(c, b); } return b; };
+    const bucket = new Map<string, { invoiced: number; received: number; owed: number; fees: number }>();
+    const into = (c: string) => { let b = bucket.get(c); if (!b) { b = { invoiced: 0, received: 0, owed: 0, fees: 0 }; bucket.set(c, b); } return b; };
     for (const r of invRows) into(r.currency).invoiced += Number(r.total);
-    for (const r of payRows) into(r.currency).received += Number(r.amount);
+    for (const r of payRows) {
+      into(r.currency).received += Number(r.amount);
+      // What the gateway kept out of that. Received is the gross the client paid, so
+      // without this line the week reads better than the bank does.
+      if (r.fee != null) into(r.currency).fees += Number(r.fee);
+    }
     for (const r of owedRows) into(r.currency).owed += Number(r.total);
     const mrr = await mrrByCurrency(accountId);
     for (const m of mrr) into(m.currency); // ensure the currency shows even if quiet this week
 
     const rows = [...bucket].map(([currency, b]) => {
       const m = mrr.find((x) => x.currency === currency);
-      return { currency, invoiced: round(b.invoiced), received: round(b.received), owed: round(b.owed), mrr: m?.mrr ?? 0 };
+      return {
+        currency, invoiced: round(b.invoiced), received: round(b.received),
+        owed: round(b.owed), fees: round(b.fees), mrr: m?.mrr ?? 0,
+      };
     });
     if (!rows.length) continue; // a workspace with no money activity gets no mail
 
@@ -294,6 +304,9 @@ export async function runFinanceDigest(): Promise<string> {
     for (const r of rows) {
       facts.push([`Invoiced (${r.currency})`, formatMoney(r.invoiced, r.currency)]);
       facts.push([`Received (${r.currency})`, formatMoney(r.received, r.currency)]);
+      if (r.fees > 0) {
+        facts.push([`Card and gateway fees (${r.currency})`, formatMoney(r.fees, r.currency)]);
+      }
       facts.push([`Outstanding (${r.currency})`, formatMoney(r.owed, r.currency)]);
       if (r.mrr > 0) facts.push([`MRR (${r.currency})`, formatMoney(r.mrr, r.currency)]);
     }

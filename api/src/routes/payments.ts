@@ -500,6 +500,14 @@ export async function paymentRoutes(app: FastifyInstance) {
         await db.insert(payments).values(withTenant(doc.accountId, {
           documentId: docId, amount: Number(body.amount_gross).toFixed(2), paidOn: today,
           method: 'PayFast', pfPaymentId: pfId || null,
+          // What PayFast kept, and what actually reached the bank. It has been telling
+          // us both on every notification all along; only the gross was ever read, so
+          // the cost of taking money online was invisible and profit was overstated by
+          // exactly that amount. Only stored when the gateway actually sent it.
+          feeAmount: body.amount_fee != null && body.amount_fee !== ''
+            ? Math.abs(Number(body.amount_fee)).toFixed(2) : null,
+          netAmount: body.amount_net != null && body.amount_net !== ''
+            ? Number(body.amount_net).toFixed(2) : null,
           note: pfId ? `PayFast ${pfId}` : 'PayFast', createdBy: null,
         }));
       } catch (e) {

@@ -449,6 +449,13 @@
       "when": 1787900000000,
       "tag": "0063_focus_matrix",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "5",
+      "when": 1787920000000,
+      "tag": "0064_payment_fees",
+      "breakpoints": true
     }
   ]
 }

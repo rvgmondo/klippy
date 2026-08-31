@@ -434,6 +434,8 @@ export async function importAccountData(accountId, importerUserId, data) {
             await insert('payments', payments, p.id, {
                 documentId, amount: p.amount ?? '0.00', paidOn: p.paidOn ?? today,
                 method: p.method ?? null, note: p.note ?? null,
+                // The fee is history, not a live key, so it restores as it was.
+                feeAmount: p.feeAmount ?? null, netAmount: p.netAmount ?? null,
                 // The gateway id is deliberately dropped: it is a live idempotency key, and
                 // re-importing it would make a genuine future notification for the same
                 // payment look like a duplicate and be thrown away.

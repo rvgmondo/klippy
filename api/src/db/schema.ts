@@ -835,6 +835,16 @@ export const payments = mysqlTable('payments', {
   // Null for manual/EFT payments; MySQL allows many nulls in a unique index, so
   // hand-entered payments are unaffected.
   pfPaymentId: varchar('pf_payment_id', { length: 64 }),
+  /**
+   * What the gateway kept, and what actually landed.
+   *
+   * PayFast has been sending amount_fee and amount_net on every notification since
+   * the day this was built, and Klippy read only the gross and threw the rest away,
+   * so the cost of taking money online was invisible and profit was overstated by it.
+   * Null for a payment entered by hand, where there is no fee to know.
+   */
+  feeAmount: decimal('fee_amount', { precision: 12, scale: 2 }),
+  netAmount: decimal('net_amount', { precision: 12, scale: 2 }),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
 }, (t) => [
