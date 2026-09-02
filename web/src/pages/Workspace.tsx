@@ -17,6 +17,7 @@ import { ExpensesView } from '../components/ExpensesView';
 import { PipelineView } from '../components/PipelineView';
 import { ContactsView } from '../components/ContactsView';
 import { DashboardView } from '../components/DashboardView';
+import { TakingsView } from '../components/TakingsView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { NotificationsBell } from '../components/NotificationsBell';
@@ -27,7 +28,7 @@ import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
 import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
+type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
 
 
 function loadBusiness(): BusinessSelection {
@@ -37,7 +38,7 @@ function loadBusiness(): BusinessSelection {
   return Number.isFinite(n) && n > 0 ? n : 'all';
 }
 
-const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files',
+const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings',
   'offerings', 'expenses', 'reports', 'billing', 'collections', 'cashflow', 'settings'];
 
 /**
@@ -243,6 +244,7 @@ export function Workspace() {
           {view === 'files' && <FilesView />}
           {view === 'offerings' && <OfferingsView businessId={businessId} />}
           {view === 'expenses' && <ExpensesView businessId={businessId} />}
+          {view === 'takings' && <TakingsView businessId={businessId} />}
           {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
           {view === 'collections' && <CollectionsView businessId={businessId} />}

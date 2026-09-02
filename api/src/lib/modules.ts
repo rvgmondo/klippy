@@ -62,7 +62,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'expenses', label: 'Expenses', primitive: 'finance', hint: 'What the business spends, against what it earns.' },
   // A shop takes most of its money over a counter; an agency takes none of it that
   // way, so this is off unless the business actually sells to walk-ins.
-  { key: 'sales', label: 'Takings', primitive: 'finance', defaultFor: ['products'], hint: 'Card machine and counter sales, and what the fees cost you.' },
+  { key: 'takings', label: 'Takings', primitive: 'finance', defaultFor: ['products'], hint: 'Card machine and counter sales, and what the fees cost you.' },
 
   // Admin
   { key: 'files', label: 'Files', primitive: 'admin', hint: 'Contracts and assets, kept next to the work.' },

@@ -5,7 +5,7 @@ import {
   ChevronRight, ChevronDown, FolderPlus,
   Home, Briefcase, Target, Wallet, Settings, Users,
   CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle, TrendingUp,
-  type LucideIcon,
+  type LucideIcon, CreditCard,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
@@ -55,8 +55,8 @@ export const AREAS: {
   },
   {
     key: 'money', label: 'Money', icon: Wallet, blurb: 'Handle the money',
-    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses'],
-    modules: ['billing', 'collections', 'cashflow', 'expenses'],
+    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses', 'takings'],
+    modules: ['billing', 'collections', 'cashflow', 'expenses', 'takings'],
   },
   { key: 'admin', label: 'Admin', icon: Settings, blurb: 'Run the machine', defaultView: 'settings', views: ['settings'], modules: [] },
 ];
@@ -69,6 +69,7 @@ const MODULE_ICON: Record<string, LucideIcon> = {
   pipeline: Target, offerings: Package,
   today: CalendarCheck, calendar: CalendarDays, reports: BarChart3,
   billing: Receipt, collections: AlertTriangle, cashflow: TrendingUp, expenses: Wallet,
+  takings: CreditCard,
   files: HardDrive, contacts: Users,
 };
 
