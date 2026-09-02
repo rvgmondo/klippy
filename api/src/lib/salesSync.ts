@@ -6,7 +6,8 @@ import { decryptSecret } from './secretbox.js';
 import { taxRateFor } from './taxRateFor.js';
 import { currencyFor } from './currencyFor.js';
 import { roundMoney } from './currency.js';
-import { listPayments, windows } from './yoco.js';
+import { windows } from './yoco.js';
+import { providerFor, type ProviderKey } from './salesProviders.js';
 
 /**
  * Pulling takings in from a card machine.
@@ -58,21 +59,27 @@ export function taxOutOf(gross: number, rate: number, currency: string): number 
   return roundMoney(gross * (rate / (100 + rate)), currency);
 }
 
-export async function syncYoco(
-  accountId: number, businessId: number, opts: { fullResync?: boolean } = {},
+export async function syncProvider(
+  accountId: number, businessId: number,
+  providerKey: ProviderKey = 'yoco',
+  opts: { fullResync?: boolean } = {},
 ): Promise<SyncResult> {
+  const provider = providerFor(providerKey);
+  if (!provider?.client) {
+    return { ok: false, added: 0, updated: 0, message: `Klippy cannot read takings from ${provider?.label ?? providerKey} yet.` };
+  }
   const [conn] = await db.select().from(paymentConnections)
     .where(tenantWhere(paymentConnections, accountId,
       eq(paymentConnections.businessId, businessId),
-      eq(paymentConnections.provider, 'yoco')))
+      eq(paymentConnections.provider, providerKey)))
     .limit(1);
-  if (!conn) return { ok: false, added: 0, updated: 0, message: 'Yoco is not connected for this business.' };
-  if (!conn.enabled) return { ok: false, added: 0, updated: 0, message: 'The Yoco connection is switched off.' };
-  if (!conn.secretEnc) return { ok: false, added: 0, updated: 0, message: 'There is no Yoco API key stored.' };
+  if (!conn) return { ok: false, added: 0, updated: 0, message: `${provider.label} is not connected for this business.` };
+  if (!conn.enabled) return { ok: false, added: 0, updated: 0, message: `The ${provider.label} connection is switched off.` };
+  if (!conn.secretEnc) return { ok: false, added: 0, updated: 0, message: `There is no ${provider.label} key stored.` };
 
   let secret: string;
   try { secret = decryptSecret(conn.secretEnc); } catch {
-    return { ok: false, added: 0, updated: 0, message: 'The stored Yoco key could not be read. Enter it again.' };
+    return { ok: false, added: 0, updated: 0, message: `The stored ${provider.label} key could not be read. Enter it again.` };
   }
 
   const today = dayString(new Date());
@@ -91,7 +98,7 @@ export async function syncYoco(
     let cursor: string | undefined;
     // Bounded: 200 pages of 100 is 20,000 sales in one window, far past a real month.
     for (let page = 0; page < 200; page++) {
-      const res = await listPayments(secret, { from: w.from, to: w.to, cursor });
+      const res = await provider.client.listPayments(secret, { from: w.from, to: w.to, cursor });
       if (!res.ok) {
         // Stop at the failure and keep the ground already covered, so the next run
         // resumes from there instead of starting the whole pull again.
@@ -107,7 +114,7 @@ export async function syncYoco(
         const fee = roundMoney(p.fee, p.currency || currency);
         const values = {
           businessId,
-          provider: 'yoco' as const,
+          provider: providerKey,
           externalId: p.id,
           source: p.source,
           terminal: p.cardMachineId,
@@ -136,7 +143,7 @@ export async function syncYoco(
             fee: values.fee, net: values.net, refunded: values.refunded,
             status: values.status, taxAmount: values.taxAmount,
           }).where(tenantWhere(sales, accountId,
-            eq(sales.provider, 'yoco'), eq(sales.externalId, p.id)));
+            eq(sales.provider, providerKey), eq(sales.externalId, p.id)));
           updated++;
         }
       }
@@ -167,14 +174,18 @@ async function finish(
 export async function syncAllConnections(): Promise<string> {
   const rows = await db.select({
     accountId: paymentConnections.accountId, businessId: paymentConnections.businessId,
-  }).from(paymentConnections).where(and(eq(paymentConnections.enabled, true), eq(paymentConnections.provider, 'yoco')));
+    provider: paymentConnections.provider,
+  }).from(paymentConnections).where(eq(paymentConnections.enabled, true));
 
   let ok = 0;
   let failed = 0;
   let added = 0;
   for (const r of rows) {
+    // A connection to a provider with no client written yet is skipped in silence
+    // rather than counted as a failure: nothing is broken, it just is not built.
+    if (!providerFor(r.provider)?.client) continue;
     try {
-      const res = await syncYoco(r.accountId, r.businessId);
+      const res = await syncProvider(r.accountId, r.businessId, r.provider);
       if (res.ok) { ok++; added += res.added; } else failed++;
     } catch {
       // One broken connection must not stop the rest; the reason is already stored

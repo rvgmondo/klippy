@@ -1105,7 +1105,7 @@ export const paymentConnections = mysqlTable('payment_connections', {
     .references(() => accounts.id, { onDelete: 'cascade' }),
   businessId: int('business_id', { unsigned: true }).notNull()
     .references(() => businesses.id, { onDelete: 'cascade' }),
-  provider: mysqlEnum('provider', ['yoco']).notNull(),
+  provider: mysqlEnum('provider', ['yoco', 'zapper', 'snapscan', 'paystack', 'peach']).notNull(),
   /** What the owner calls it, e.g. "Shop till". Cosmetic. */
   label: varchar('label', { length: 80 }),
   /** The API key, encrypted at rest exactly like every other stored credential. */
@@ -1146,7 +1146,7 @@ export const sales = mysqlTable('sales', {
     .references(() => accounts.id, { onDelete: 'cascade' }),
   businessId: int('business_id', { unsigned: true }).notNull()
     .references(() => businesses.id, { onDelete: 'cascade' }),
-  provider: mysqlEnum('provider', ['yoco', 'manual']).default('manual').notNull(),
+  provider: mysqlEnum('provider', ['yoco', 'zapper', 'snapscan', 'paystack', 'peach', 'manual']).default('manual').notNull(),
   /** The provider's own id. The dedupe key: one tap, one row, however often we sync. */
   externalId: varchar('external_id', { length: 80 }),
   /** Where it happened, in the provider's words: card_machine, checkout, payment_link. */

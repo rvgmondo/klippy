@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { paymentConnections, sales } from '../db/schema.js';
 import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
@@ -6,7 +6,8 @@ import { decryptSecret } from './secretbox.js';
 import { taxRateFor } from './taxRateFor.js';
 import { currencyFor } from './currencyFor.js';
 import { roundMoney } from './currency.js';
-import { listPayments, windows } from './yoco.js';
+import { windows } from './yoco.js';
+import { providerFor } from './salesProviders.js';
 /** How far back a first-ever sync reaches. Far enough to be useful, not a decade. */
 const FIRST_SYNC_DAYS = 90;
 /** Re-read a few days each run: a provider can settle or adjust a sale after the fact. */
@@ -30,22 +31,26 @@ export function taxOutOf(gross, rate, currency) {
         return 0;
     return roundMoney(gross * (rate / (100 + rate)), currency);
 }
-export async function syncYoco(accountId, businessId, opts = {}) {
+export async function syncProvider(accountId, businessId, providerKey = 'yoco', opts = {}) {
+    const provider = providerFor(providerKey);
+    if (!provider?.client) {
+        return { ok: false, added: 0, updated: 0, message: `Klippy cannot read takings from ${provider?.label ?? providerKey} yet.` };
+    }
     const [conn] = await db.select().from(paymentConnections)
-        .where(tenantWhere(paymentConnections, accountId, eq(paymentConnections.businessId, businessId), eq(paymentConnections.provider, 'yoco')))
+        .where(tenantWhere(paymentConnections, accountId, eq(paymentConnections.businessId, businessId), eq(paymentConnections.provider, providerKey)))
         .limit(1);
     if (!conn)
-        return { ok: false, added: 0, updated: 0, message: 'Yoco is not connected for this business.' };
+        return { ok: false, added: 0, updated: 0, message: `${provider.label} is not connected for this business.` };
     if (!conn.enabled)
-        return { ok: false, added: 0, updated: 0, message: 'The Yoco connection is switched off.' };
+        return { ok: false, added: 0, updated: 0, message: `The ${provider.label} connection is switched off.` };
     if (!conn.secretEnc)
-        return { ok: false, added: 0, updated: 0, message: 'There is no Yoco API key stored.' };
+        return { ok: false, added: 0, updated: 0, message: `There is no ${provider.label} key stored.` };
     let secret;
     try {
         secret = decryptSecret(conn.secretEnc);
     }
     catch {
-        return { ok: false, added: 0, updated: 0, message: 'The stored Yoco key could not be read. Enter it again.' };
+        return { ok: false, added: 0, updated: 0, message: `The stored ${provider.label} key could not be read. Enter it again.` };
     }
     const today = dayString(new Date());
     const from = opts.fullResync || !conn.lastSyncedThrough
@@ -60,7 +65,7 @@ export async function syncYoco(accountId, businessId, opts = {}) {
         let cursor;
         // Bounded: 200 pages of 100 is 20,000 sales in one window, far past a real month.
         for (let page = 0; page < 200; page++) {
-            const res = await listPayments(secret, { from: w.from, to: w.to, cursor });
+            const res = await provider.client.listPayments(secret, { from: w.from, to: w.to, cursor });
             if (!res.ok) {
                 // Stop at the failure and keep the ground already covered, so the next run
                 // resumes from there instead of starting the whole pull again.
@@ -75,7 +80,7 @@ export async function syncYoco(accountId, businessId, opts = {}) {
                 const fee = roundMoney(p.fee, p.currency || currency);
                 const values = {
                     businessId,
-                    provider: 'yoco',
+                    provider: providerKey,
                     externalId: p.id,
                     source: p.source,
                     terminal: p.cardMachineId,
@@ -104,7 +109,7 @@ export async function syncYoco(accountId, businessId, opts = {}) {
                     await db.update(sales).set({
                         fee: values.fee, net: values.net, refunded: values.refunded,
                         status: values.status, taxAmount: values.taxAmount,
-                    }).where(tenantWhere(sales, accountId, eq(sales.provider, 'yoco'), eq(sales.externalId, p.id)));
+                    }).where(tenantWhere(sales, accountId, eq(sales.provider, providerKey), eq(sales.externalId, p.id)));
                     updated++;
                 }
             }
@@ -130,13 +135,18 @@ async function finish(id, accountId, through, status) {
 export async function syncAllConnections() {
     const rows = await db.select({
         accountId: paymentConnections.accountId, businessId: paymentConnections.businessId,
-    }).from(paymentConnections).where(and(eq(paymentConnections.enabled, true), eq(paymentConnections.provider, 'yoco')));
+        provider: paymentConnections.provider,
+    }).from(paymentConnections).where(eq(paymentConnections.enabled, true));
     let ok = 0;
     let failed = 0;
     let added = 0;
     for (const r of rows) {
+        // A connection to a provider with no client written yet is skipped in silence
+        // rather than counted as a failure: nothing is broken, it just is not built.
+        if (!providerFor(r.provider)?.client)
+            continue;
         try {
-            const res = await syncYoco(r.accountId, r.businessId);
+            const res = await syncProvider(r.accountId, r.businessId, r.provider);
             if (res.ok) {
                 ok++;
                 added += res.added;

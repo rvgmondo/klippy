@@ -115,6 +115,28 @@ const day = (n) => {
   ok(Number(n.n) === 0, 'so nothing sits there looking connected while pulling nothing');
 }
 
+// ---- a provider Klippy cannot read is refused, not stored -------------------------
+{
+  const conns = await getj('/sales/connections');
+  const names = (conns.providers ?? []).map((p) => p.key);
+  ok(names.includes('yoco') && names.includes('zapper'),
+    'the connect screen is told which providers exist', names.join(','));
+  const snap = (conns.providers ?? []).find((p) => p.key === 'snapscan');
+  ok(snap && snap.reportsFees === false,
+    'and that SnapScan would show takings with no cost against them', snap && String(snap.reportsFees));
+
+  const notBuilt = await fetch(API + '/businesses/' + BID + '/sales-connection', {
+    method: 'PUT', headers: H, body: JSON.stringify({ provider: 'zapper', secret: 'whatever-key-here' }),
+  });
+  ok(notBuilt.status === 400, 'a provider with no client written cannot be connected', String(notBuilt.status));
+  const nonsense = await fetch(API + '/businesses/' + BID + '/sales-connection', {
+    method: 'PUT', headers: H, body: JSON.stringify({ provider: 'notabank', secret: 'whatever-key-here' }),
+  });
+  ok(nonsense.status === 400, 'and neither can something that is not a provider at all', String(nonsense.status));
+  const [[n]] = await db.query('SELECT COUNT(*) n FROM payment_connections WHERE account_id = 1');
+  ok(Number(n.n) === 0, 'so no key is stored that nothing would ever read');
+}
+
 // ---- VAT comes OUT of the gross, never on top of it -------------------------------
 {
   const { taxOutOf } = await import('file:///C:/CC/klippy-v2/api/dist/lib/salesSync.js');

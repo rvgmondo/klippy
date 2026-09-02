@@ -8,8 +8,8 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { assertBusinessAccess, businessScope } from '../lib/access.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
-import { testKey } from '../lib/yoco.js';
-import { syncYoco, taxOutOf } from '../lib/salesSync.js';
+import { syncProvider, taxOutOf } from '../lib/salesSync.js';
+import { SALES_PROVIDERS, providerFor, type ProviderKey } from '../lib/salesProviders.js';
 import { taxRateFor } from '../lib/taxRateFor.js';
 import { currencyFor } from '../lib/currencyFor.js';
 import { roundMoney } from '../lib/currency.js';
@@ -51,6 +51,11 @@ export async function salesRoutes(app: FastifyInstance) {
     return {
       connections: rows.map((r) => ({ ...r, hasKey: !!Number(r.hasKey) })),
       serverReady: secretsAvailable(),
+      // What is on offer, and honestly what each one will and will not tell you.
+      providers: SALES_PROVIDERS.map((p) => ({
+        key: p.key, label: p.label, credentialLabel: p.credentialLabel,
+        reportsFees: p.reportsFees, available: p.client !== null, note: p.note,
+      })),
     };
   });
 
@@ -68,7 +73,7 @@ export async function salesRoutes(app: FastifyInstance) {
     if (!(await assertBusinessAccess(req, reply, businessId, 'admin'))) return;
 
     const parsed = z.object({
-      provider: z.literal('yoco'),
+      provider: z.string().trim().min(2).max(30),
       secret: z.string().trim().min(10).max(400).optional(),
       label: z.string().trim().max(80).nullable().optional(),
       enabled: z.boolean().optional(),
@@ -76,19 +81,29 @@ export async function salesRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
 
+    // A provider with no client written cannot be connected, however willing the
+    // person is: storing a key that nothing will ever read is a connection that looks
+    // configured and does nothing, which is the failure this route exists to avoid.
+    const provider = providerFor(d.provider);
+    if (!provider) return reply.code(400).send({ error: 'That is not a payment provider Klippy knows about.' });
+    if (!provider.client) {
+      return reply.code(400).send({ error: `Klippy cannot read takings from ${provider.label} yet, so there is nothing to connect it to.` });
+    }
+
     if (d.secret && !secretsAvailable()) {
       return reply.code(503).send({ error: 'The server cannot store secrets yet. Set PAYMENTS_SECRET in the app environment and restart.' });
     }
 
     const scope = tenantWhere(paymentConnections, accountId,
-      eq(paymentConnections.businessId, businessId), eq(paymentConnections.provider, 'yoco'));
+      eq(paymentConnections.businessId, businessId),
+      eq(paymentConnections.provider, provider.key));
     const [existing] = await db.select().from(paymentConnections).where(scope).limit(1);
 
     if (d.secret) {
-      const trial = await testKey(d.secret);
+      const trial = await provider.client.testKey(d.secret);
       if (!trial.ok) return reply.code(400).send({ error: trial.message });
     } else if (!existing?.secretEnc) {
-      return reply.code(400).send({ error: 'Add your Yoco API key to connect.' });
+      return reply.code(400).send({ error: `Add your ${provider.credentialLabel} to connect.` });
     }
 
     const patch: Record<string, unknown> = {};
@@ -99,7 +114,7 @@ export async function salesRoutes(app: FastifyInstance) {
     if (existing) await db.update(paymentConnections).set(patch).where(scope);
     else {
       await db.insert(paymentConnections).values(withTenant(accountId, {
-        businessId, provider: 'yoco' as const, createdBy: userId, ...patch,
+        businessId, provider: provider.key, createdBy: userId, ...patch,
       } as never));
     }
     return { ok: true };
@@ -110,10 +125,12 @@ export async function salesRoutes(app: FastifyInstance) {
     const businessId = intId(req);
     if (!businessId) return reply.code(400).send({ error: 'Bad id.' });
     if (!(await assertBusinessAccess(req, reply, businessId, 'admin'))) return;
+    const which = z.object({ provider: z.string().trim().max(30).optional() }).safeParse(req.query);
+    const key = (which.success && which.data.provider ? which.data.provider : 'yoco') as ProviderKey;
     // The sales already pulled are kept on purpose: they are this business's takings
-    // and its VAT history, not a cache of Yoco's.
+    // and its VAT history, not a cache of the provider's.
     await db.delete(paymentConnections).where(tenantWhere(paymentConnections, accountId,
-      eq(paymentConnections.businessId, businessId), eq(paymentConnections.provider, 'yoco')));
+      eq(paymentConnections.businessId, businessId), eq(paymentConnections.provider, key)));
     return { ok: true, message: 'Disconnected. The sales already pulled are kept.' };
   });
 
@@ -123,8 +140,13 @@ export async function salesRoutes(app: FastifyInstance) {
     const businessId = intId(req);
     if (!businessId) return reply.code(400).send({ error: 'Bad id.' });
     if (!(await assertBusinessAccess(req, reply, businessId, 'admin'))) return;
-    const body = z.object({ fullResync: z.boolean().optional() }).safeParse(req.body ?? {});
-    const res = await syncYoco(accountId, businessId, { fullResync: body.success && body.data.fullResync });
+    const body = z.object({
+      fullResync: z.boolean().optional(),
+      provider: z.string().trim().max(30).optional(),
+    }).safeParse(req.body ?? {});
+    const key = (body.success && body.data.provider ? body.data.provider : 'yoco') as ProviderKey;
+    const res = await syncProvider(accountId, businessId, key,
+      { fullResync: body.success && body.data.fullResync });
     if (!res.ok) return reply.code(400).send({ error: res.message });
     return res;
   });
