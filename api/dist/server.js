@@ -21,7 +21,7 @@ import { commandRoutes } from './routes/command.js';
 import { calendarEventRoutes } from './routes/calendarEvents.js';
 import { fileRoutes } from './routes/files.js';
 import { accountRoutes } from './routes/account.js';
-import { userRoutes } from './routes/users.js';
+import { userRoutes, invitationRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
 import { workspaceRoutes } from './routes/workspaces.js';
@@ -170,6 +170,7 @@ export function buildServer() {
     app.register(fileRoutes);
     app.register(accountRoutes);
     app.register(userRoutes);
+    app.register(invitationRoutes);
     app.register(searchRoutes);
     app.register(tokenRoutes);
     app.register(workspaceRoutes);

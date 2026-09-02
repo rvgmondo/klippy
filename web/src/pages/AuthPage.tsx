@@ -2,7 +2,7 @@ import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
 
-type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'twofactor';
+type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'twofactor' | 'invite';
 
 export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode; onBack?: () => void }) {
   const { login, verify2fa, signup } = useAuth();
@@ -20,12 +20,19 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inviteToken, setInviteToken] = useState('');
 
   // A password-reset link (?reset=TOKEN) drops the user straight into reset mode.
+  // An invitation link (?invite=TOKEN) does the same for joining a workspace, and it
+  // has to work for someone with NO workspace at all, who therefore cannot sign in
+  // yet. So they prove who they are with their own email and password right here,
+  // and accepting is what gives them somewhere to sign in to.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('reset');
-    if (token) { setResetToken(token); setMode('reset'); }
+    if (token) { setResetToken(token); setMode('reset'); return; }
+    const invite = params.get('invite');
+    if (invite) { setInviteToken(invite); setMode('invite'); }
   }, []);
 
   function clearResetParam() {
@@ -45,6 +52,12 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
       else if (mode === 'forgot') {
         const res = await apiPost<{ message: string }>('/auth/forgot', { email });
         setNotice(res.message ?? 'Check your email for a reset link.');
+      } else if (mode === 'invite') {
+        await apiPost('/invitations/accept', { token: inviteToken, email, password });
+        window.history.replaceState({}, '', window.location.pathname);
+        // Straight in rather than back to a sign-in form: they have just typed these
+        // exact credentials, and asking for them twice reads as a failure.
+        await login(email, password);
       } else if (mode === 'reset') {
         await apiPost('/auth/reset', { token: resetToken, password });
         clearResetParam();
@@ -66,6 +79,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
     forgot: 'Reset your password',
     reset: 'Choose a new password',
     twofactor: 'Enter the code from your authenticator app',
+    invite: 'Sign in with your own password to join this workspace',
   }[mode];
 
   return (
@@ -105,10 +119,10 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
               </select>
             </>
           )}
-          {(mode === 'login' || mode === 'signup' || mode === 'forgot') && (
+          {(mode === 'login' || mode === 'signup' || mode === 'forgot' || mode === 'invite') && (
             <input className={input} type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           )}
-          {(mode === 'login' || mode === 'signup' || mode === 'reset') && (
+          {(mode === 'login' || mode === 'signup' || mode === 'reset' || mode === 'invite') && (
             <input className={input} type="password" placeholder={mode === 'reset' ? 'New password' : 'Password'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} required />
           )}
@@ -127,6 +141,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
               : mode === 'twofactor' ? 'Verify'
               : mode === 'signup' ? 'Create workspace'
               : mode === 'forgot' ? 'Send reset link'
+              : mode === 'invite' ? 'Accept and join'
               : 'Update password'}
           </button>
         </form>

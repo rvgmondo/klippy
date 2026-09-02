@@ -27,16 +27,21 @@ export function PeoplePanel() {
       // Existing Klippy logins just get added; only new people need these.
       if (form.name.trim()) body.name = form.name.trim();
       if (form.password) body.password = form.password;
-      return apiPost<{ existingLogin: boolean }>('/users', body);
+      return apiPost<{ existingLogin?: boolean; invited?: boolean; message?: string }>('/users', body);
     },
     onSuccess: (res) => {
       setAdding(false);
       setForm({ name: '', email: '', password: '', role: 'member' });
       setError(null);
-      setNotice(res?.existingLogin
-        ? 'They already had a Klippy login, so they were added straight to this workspace.'
-        : 'Added. Share the temporary password so they can sign in and change it.');
-      setTimeout(() => setNotice(null), 6000);
+      // Three outcomes now, and the invited one is the common case for anyone who
+      // already uses Klippy. Saying "added" when they have only been invited would
+      // leave an admin waiting for someone who is waiting for them.
+      setNotice(res?.invited
+        ? (res.message ?? 'They already had a Klippy login, so we have invited them. They join by accepting it.')
+        : res?.existingLogin
+          ? 'They already had a Klippy login, so they were added straight to this workspace.'
+          : 'Added. Share the temporary password so they can sign in and change it.');
+      setTimeout(() => setNotice(null), 9000);
       invalidate();
     },
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not add.'),

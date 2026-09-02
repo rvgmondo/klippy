@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Timer, LogOut, Settings, Menu as MenuIcon, X, Search } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
+import { notify } from '../components/ConfirmDialog';
 import { Sidebar } from '../components/Sidebar';
 import { BoardView } from '../components/BoardView';
 import { CalendarView } from '../components/CalendarView';
@@ -81,6 +82,25 @@ export function Workspace() {
   const [showTimer, setShowTimer] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  /**
+   * An invitation link opened while already signed in.
+   *
+   * Someone who already uses Klippy clicks the link from their inbox and lands here,
+   * signed in, with ?invite= still on the URL. Doing nothing would look like a dead
+   * link and they would ask the person who invited them to send another. The session
+   * already proves who they are, so it just accepts, says so, and cleans the URL.
+   */
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get('invite');
+    if (!token) return;
+    const q = new URLSearchParams(window.location.search);
+    q.delete('invite');
+    window.history.replaceState({}, '', window.location.pathname + (q.toString() ? '?' + q : ''));
+    apiPost<{ message?: string }>('/invitations/accept', { token })
+      .then((r) => notify(r.message ?? 'You have joined. Switch to it from the workspace menu.', 'ok'))
+      .catch((e: Error) => notify(e.message, 'error'));
+  }, []);
 
   // Anything in the tree can change the view by writing it to the URL
   // (page-header tabs, the onboarding checklist, an empty state). The workspace

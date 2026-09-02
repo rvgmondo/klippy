@@ -4,9 +4,12 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { users, memberships } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
-import { hashPassword, verifyPassword, COOKIE_NAME, signToken, cookieOptions } from '../lib/auth.js';
+import { hashPassword, verifyPassword, COOKIE_NAME, signToken, cookieOptions, verifyToken } from '../lib/auth.js';
 import { intId } from '../lib/http.js';
 import { membersOf, getMembership, addMember } from '../lib/membership.js';
+import { invitations } from '../db/schema.js';
+import { issueInvitation, sendInvitationEmail, acceptInvitation } from '../lib/invites.js';
+import { isNull, desc } from 'drizzle-orm';
 
 /** Active owners/admins in a workspace, optionally ignoring one person. */
 async function activeAdminCount(accountId: number, excludeUserId?: number): Promise<number> {
@@ -79,7 +82,7 @@ export async function userRoutes(app: FastifyInstance) {
    * simply grant them membership here. Only brand-new emails need a password.
    */
   app.post('/api/v1/users', async (req, reply) => {
-    const { accountId, role } = authOf(req);
+    const { accountId, userId, role } = authOf(req);
     if (role === 'member') return reply.code(403).send({ error: 'Only admins can add people.' });
     const parsed = z.object({
       name: z.string().trim().min(1).max(100).optional(),
@@ -94,17 +97,34 @@ export async function userRoutes(app: FastifyInstance) {
     if (existing) {
       const current = await getMembership(accountId, existing.id);
       if (current?.isActive) return reply.code(409).send({ error: 'That person is already in this workspace.' });
-      // A login that already belongs to ANOTHER workspace cannot be pulled into
-      // this one silently. Doing so was the first half of an account-takeover:
-      // an attacker added a victim by email to gain a foothold, then reset their
-      // password. Someone with their own Klippy identity has to ask for, or accept,
-      // access rather than be conscripted into it. (A login that exists only here,
-      // e.g. one this workspace created and later switched off, can be re-added.)
-      const otherRows = await db.select({ other: sql<number>`count(*)` }).from(memberships)
-        .where(and(eq(memberships.userId, existing.id), ne(memberships.accountId, accountId)));
-      if (Number(otherRows[0]?.other ?? 0) > 0) {
-        return reply.code(409).send({
-          error: 'That email already has a Klippy login used in another workspace. Ask them to sign in and request access, rather than adding them here.',
+      /**
+       * A login that is not already in THIS workspace is invited, never conscripted.
+       *
+       * The old rule was "no membership in another workspace", and a login with NO
+       * memberships at all passed it. That state is reachable in ordinary use, since
+       * leaving your last workspace or having one deleted removes the membership rows
+       * and leaves the login standing. So the sequence was: spin up a throwaway
+       * workspace, add the person by email (membership granted on the spot), then
+       * reset their password through PATCH, which asks only for a membership here.
+       * That is a cross-tenant account takeover built out of two ordinary buttons.
+       *
+       * `current` is any membership row in this account, active or switched off, so
+       * re-adding someone this workspace already knows still works without a round
+       * trip. Everyone else gets an invitation they accept themselves.
+       */
+      if (!current) {
+        const invite = await issueInvitation(accountId, parsed.data.email, parsed.data.role, userId);
+        if (invite) {
+          const [inviter] = await db.select({ name: users.name }).from(users)
+            .where(eq(users.id, userId)).limit(1);
+          await sendInvitationEmail(accountId, parsed.data.email, invite.raw, inviter?.name ?? null);
+        }
+        // The same answer whether or not a mail actually went out just now, so this
+        // is not a way to probe who is already invited.
+        return reply.code(202).send({
+          invited: true,
+          email: parsed.data.email,
+          message: 'That email already has a Klippy login, so we have invited them instead. They join by accepting it, and their password stays theirs.',
         });
       }
       await addMember(accountId, existing.id, parsed.data.role);
@@ -199,5 +219,100 @@ export async function userRoutes(app: FastifyInstance) {
 
     const updated = (await membersOf(accountId)).find((m) => m.id === id) ?? null;
     return { user: updated };
+  });
+
+  /** Invitations this workspace has out, so they can be chased or withdrawn. */
+  app.get('/api/v1/invitations', async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only admins can see invitations.' });
+    const rows = await db.select({
+      id: invitations.id, email: invitations.email, role: invitations.role,
+      expiresAt: invitations.expiresAt, createdAt: invitations.createdAt,
+    }).from(invitations)
+      .where(and(eq(invitations.accountId, accountId),
+        isNull(invitations.acceptedAt), isNull(invitations.revokedAt)))
+      .orderBy(desc(invitations.id));
+    return { invitations: rows };
+  });
+
+  /** Withdraw one. The link stops working immediately. */
+  app.delete('/api/v1/invitations/:id', async (req, reply) => {
+    const { accountId, role } = authOf(req);
+    if (role === 'member') return reply.code(403).send({ error: 'Only admins can withdraw invitations.' });
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    await db.update(invitations).set({ revokedAt: new Date() })
+      .where(and(eq(invitations.id, id), eq(invitations.accountId, accountId),
+        isNull(invitations.acceptedAt)));
+    return { ok: true };
+  });
+}
+
+/**
+ * Accepting an invitation.
+ *
+ * NOT behind requireAuth, and that is the whole point. Signing in needs a workspace
+ * (auth.ts refuses a login that belongs to none), so a person whose only route back
+ * in IS this invitation could never reach a route that required a session. Requiring
+ * one would have made the invitation a dead end and left the fence with no way past
+ * it, which is worse than the hole it closes.
+ *
+ * So identity is proven one of two ways, and never assumed:
+ *   - an existing session, for someone who is already in a workspace, or
+ *   - their own email and password, for someone who is not.
+ * Either way the address must match the one the invitation was sent to, so a leaked
+ * link is worth nothing to whoever finds it.
+ */
+export async function invitationRoutes(app: FastifyInstance) {
+  app.post('/api/v1/invitations/accept', async (req, reply) => {
+    const parsed = z.object({
+      token: z.string().trim().min(10).max(200),
+      email: z.string().trim().toLowerCase().email().max(150).optional(),
+      password: z.string().min(8).max(200).optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'That invitation link is incomplete.' });
+
+    let userId: number | null = null;
+    const cookie = req.cookies?.[COOKIE_NAME];
+    const claims = cookie ? verifyToken(cookie) : null;
+    if (claims?.uid) {
+      // The session epoch is honoured here as it is everywhere else: a token issued
+      // before a password change or a "sign out everywhere" is dead, and accepting an
+      // invitation is not the place to let one back in.
+      const [u] = await db.select({ se: users.sessionEpoch }).from(users)
+        .where(eq(users.id, claims.uid)).limit(1);
+      if (u && (claims.se ?? 0) === (u.se ?? 0)) userId = claims.uid;
+    }
+    if (!userId && parsed.data.email && parsed.data.password) {
+      const [u] = await db.select({ id: users.id, hash: users.passwordHash, lockedUntil: users.lockedUntil })
+        .from(users).where(eq(users.email, parsed.data.email)).limit(1);
+      // Same shape of answer whether the address is unknown or the password is wrong,
+      // so this is not a way to find out which Klippy logins exist.
+      if (!u || (u.lockedUntil && u.lockedUntil > new Date())
+        || !(await verifyPassword(parsed.data.password, u.hash))) {
+        return reply.code(401).send({ error: 'That email and password do not match.' });
+      }
+      userId = u.id;
+    }
+    if (!userId) {
+      return reply.code(401).send({
+        error: 'Sign in, or send your email and password with the invitation, to accept it.',
+      });
+    }
+
+    const res = await acceptInvitation(parsed.data.token, userId);
+    if (!res.ok) return reply.code(400).send({ error: res.message });
+
+    // Already a member somehow (an invitation raced with being added by hand): the
+    // invitation is spent either way, and saying yes twice should not be an error.
+    const existing = await getMembership(res.accountId, userId);
+    if (existing) {
+      if (!existing.isActive) {
+        await db.update(memberships).set({ isActive: true }).where(eq(memberships.id, existing.id));
+      }
+    } else {
+      await addMember(res.accountId, userId, res.role);
+    }
+    return { ok: true, accountId: res.accountId, message: 'You have joined. Switch to it from the workspace menu.' };
   });
 }

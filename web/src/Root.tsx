@@ -13,9 +13,14 @@ const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ defa
 export function Root() {
   const { user, loading } = useAuth();
   // Not-logged-in visitors see the landing page first, unless they arrive on a
-  // password-reset link, in which case go straight to the auth screen.
-  const hasResetToken = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('reset');
-  const [auth, setAuth] = useState<null | 'login' | 'signup'>(hasResetToken ? 'login' : null);
+  // password-reset link or an invitation, in which case go straight to the auth
+  // screen. An invitation especially: someone whose only way back in IS that link
+  // must not be dropped on a marketing page with no sign of what they clicked.
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const hasResetToken = !!params?.has('reset');
+  const hasInvite = !!params?.has('invite');
+  const [auth, setAuth] = useState<null | 'login' | 'signup'>(
+    hasResetToken || hasInvite ? 'login' : null);
 
   if (loading) {
     return (
@@ -27,7 +32,7 @@ export function Root() {
 
   if (user) return <Workspace />;
 
-  if (auth || hasResetToken) {
+  if (auth || hasResetToken || hasInvite) {
     return <AuthPage initialMode={auth ?? 'login'} onBack={() => setAuth(null)} />;
   }
 

@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { createHash, randomBytes } from 'node:crypto';
 import { db } from '../db/client.js';
-import { accounts, users, memberships } from '../db/schema.js';
+import { accounts, users, memberships, invitations } from '../db/schema.js';
 import { getMembership, workspacesFor } from '../lib/membership.js';
 import { seedNewAccount } from '../lib/seed.js';
 import { COOKIE_NAME, cookieOptions, hashPassword, verifyPassword, signToken, slugify, signTwoFactorTicket, verifyTwoFactorTicket, LOGIN_MAX_ATTEMPTS, LOGIN_LOCKOUT_SECONDS, } from '../lib/auth.js';
@@ -111,7 +111,19 @@ export async function authRoutes(app) {
         }
         const spaces = await workspacesFor(user.id);
         if (!spaces.length) {
-            return reply.code(403).send({ error: 'This login is not in any workspace yet.' });
+            // A refusal with no way past it is a dead end, and this one is reachable in
+            // ordinary use: leaving your last workspace, or having one deleted, leaves the
+            // login standing with nothing to sign in to. If someone has invited them back,
+            // say so, because accepting that invitation is the way out.
+            const [pending] = await db.select({ id: invitations.id }).from(invitations)
+                .where(and(eq(invitations.email, user.email), isNull(invitations.acceptedAt), isNull(invitations.revokedAt), gt(invitations.expiresAt, new Date())))
+                .limit(1);
+            return reply.code(403).send({
+                error: pending
+                    ? 'Your password is right, but this login is not in a workspace yet. You have an invitation waiting: open the link in that email to join.'
+                    : 'This login is not in any workspace yet. Ask someone in the workspace to invite you.',
+                ...(pending ? { pendingInvitation: true } : {}),
+            });
         }
         const first = spaces[0];
         const [account] = await db.select().from(accounts).where(eq(accounts.id, first.accountId)).limit(1);

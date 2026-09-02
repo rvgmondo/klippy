@@ -1164,6 +1164,39 @@ export const portalUsers = mysqlTable('portal_users', {
  * working links, which matters more here than for an ordinary password reset
  * because this link is itself the credential.
  */
+/**
+ * An invitation to join a workspace, which the person accepts themselves.
+ *
+ * Adding someone by email used to grant them membership on the spot whenever their
+ * login was not already in another workspace. A login with NO memberships at all
+ * satisfied that test, and that state is reachable in ordinary use: leaving your last
+ * workspace, or having a workspace deleted, drops the membership rows and leaves the
+ * login behind. That turned "add a colleague" into a cross-tenant account takeover,
+ * because the password reset on PATCH /users only asks for a membership in this
+ * workspace, which the add had just created.
+ *
+ * So an existing login is now invited rather than conscripted, and it is the invited
+ * person, signed in as themselves, who turns the invitation into a membership. Their
+ * password is never touched by anyone here.
+ */
+export const invitations = mysqlTable('invitations', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 150 }).notNull(),
+    role: mysqlEnum('role', ['admin', 'member']).default('member').notNull(),
+    // Only the hash is stored, same as every other link this app issues: the raw token
+    // exists in the email and nowhere else, so a database read is not a set of keys.
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: datetime('expires_at').notNull(),
+    acceptedAt: datetime('accepted_at'),
+    revokedAt: datetime('revoked_at'),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+}, (t) => [
+    uniqueIndex('uniq_invitation_token').on(t.tokenHash),
+    index('idx_invitation_account').on(t.accountId, t.email),
+]);
 export const portalLoginTokens = mysqlTable('portal_login_tokens', {
     id: pk(),
     portalUserId: int('portal_user_id', { unsigned: true }).notNull()
