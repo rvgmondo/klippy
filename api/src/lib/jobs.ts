@@ -1,7 +1,7 @@
 import { and, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, notInArray, or } from 'drizzle-orm';
 import { formatMoney } from './currency.js';
 import { db } from '../db/client.js';
-import { tasks, users, boards, folders, memberships, subscriptions, documents, payments, accounts, jobRuns, businesses, deals, events } from '../db/schema.js';
+import { tasks, users, boards, folders, memberships, subscriptions, documents, payments, accounts, jobRuns, businesses, deals, events, sales } from '../db/schema.js';
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
@@ -285,10 +285,25 @@ export async function runFinanceDigest(): Promise<string> {
       .from(documents)
       .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'),
         eq(documents.status, 'sent')));
+    // Counter takings. Without these a shop's week reads as nothing happened: the
+    // digest was built entirely out of invoices, so a business that sells over a
+    // counter got either a wildly understated week or, if it invoices nobody at all,
+    // no email whatsoever.
+    const takeRows = await db.select({ currency: sales.currency, gross: sales.gross, fee: sales.fee })
+      .from(sales)
+      .where(and(eq(sales.accountId, accountId), gte(sales.occurredAt, new Date(`${weekAgo}T00:00:00.000Z`))));
 
-    const bucket = new Map<string, { invoiced: number; received: number; owed: number; fees: number }>();
-    const into = (c: string) => { let b = bucket.get(c); if (!b) { b = { invoiced: 0, received: 0, owed: 0, fees: 0 }; bucket.set(c, b); } return b; };
+    const bucket = new Map<string, { invoiced: number; received: number; owed: number; fees: number; taken: number }>();
+    const into = (c: string) => { let b = bucket.get(c); if (!b) { b = { invoiced: 0, received: 0, owed: 0, fees: 0, taken: 0 }; bucket.set(c, b); } return b; };
     for (const r of invRows) into(r.currency).invoiced += Number(r.total);
+    for (const r of takeRows) {
+      const b = into(r.currency);
+      b.taken += Number(r.gross);
+      // Card machine fees land in the same bucket as gateway fees. Both are money a
+      // provider kept out of what the customer paid, and the owner cares about the
+      // total of that, not which pipe it went through.
+      b.fees += Number(r.fee);
+    }
     for (const r of payRows) {
       into(r.currency).received += Number(r.amount);
       // What the gateway kept out of that. Received is the gross the client paid, so
@@ -303,15 +318,18 @@ export async function runFinanceDigest(): Promise<string> {
       const m = mrr.find((x) => x.currency === currency);
       return {
         currency, invoiced: round(b.invoiced), received: round(b.received),
-        owed: round(b.owed), fees: round(b.fees), mrr: m?.mrr ?? 0,
+        owed: round(b.owed), fees: round(b.fees), taken: round(b.taken), mrr: m?.mrr ?? 0,
       };
     });
     if (!rows.length) continue; // a workspace with no money activity gets no mail
 
     const facts: [string, string][] = [];
     for (const r of rows) {
-      facts.push([`Invoiced (${r.currency})`, formatMoney(r.invoiced, r.currency)]);
-      facts.push([`Received (${r.currency})`, formatMoney(r.received, r.currency)]);
+      if (r.invoiced > 0 || r.taken <= 0) {
+        facts.push([`Invoiced (${r.currency})`, formatMoney(r.invoiced, r.currency)]);
+        facts.push([`Received (${r.currency})`, formatMoney(r.received, r.currency)]);
+      }
+      if (r.taken > 0) facts.push([`Taken over the counter (${r.currency})`, formatMoney(r.taken, r.currency)]);
       if (r.fees > 0) {
         facts.push([`Card and gateway fees (${r.currency})`, formatMoney(r.fees, r.currency)]);
       }

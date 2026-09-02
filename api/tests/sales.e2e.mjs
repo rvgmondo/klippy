@@ -160,6 +160,60 @@ const day = (n) => {
   ok(Number(still.n) === 1, 'so real takings cannot be removed from the VAT figures');
 }
 
+// ---- a VAT return is filed by a company, not by a workspace ----------------------
+{
+  // Start from nothing: earlier blocks left takings against the first business, and
+  // a figure this test asserts on must come only from what this test put there.
+  await db.query('DELETE FROM sales WHERE account_id = 1');
+  // A second company, made here rather than skipping: the whole point of this block
+  // is what happens when a workspace holds two legal entities, and a skipped test
+  // proves nothing about the case it was written for.
+  const [tmp] = await db.query("INSERT INTO businesses (account_id, name) VALUES (1, 'VAT entity test co')");
+  const TMP_BID = tmp.insertId;
+  try {
+    const [bizList] = await db.query('SELECT id FROM businesses WHERE account_id = 1 ORDER BY position');
+    const a = bizList.find((r) => r.id !== TMP_BID);
+    const b = { id: TMP_BID };
+    // Both registered, so both would file their own return against their own number.
+    await db.query("UPDATE businesses SET default_tax_rate = '15.00' WHERE id IN (?, ?)", [a.id, b.id]);
+    const mk = (bid, gross, ref) => db.query(
+      "INSERT INTO sales (account_id,business_id,provider,external_id,occurred_at,currency,gross,fee,net,tax_rate,tax_amount,reference) VALUES (1,?,'manual',NULL,NOW(),'ZAR',?,'0.00',?,'15.00',?,?)",
+      [bid, gross.toFixed(2), gross.toFixed(2), (gross * 15 / 115).toFixed(2), ref]);
+    await mk(a.id, 1150, 'ENT-A');
+    await mk(b.id, 2300, 'ENT-B');
+
+    const merged = await getj('/reports/vat?from=' + day(-1) + '&to=' + day(1));
+    ok(merged.mergesEntities === true,
+      'two registered companies are told the merged totals are not a return', String(merged.mergesEntities));
+    ok(typeof merged.warning === 'string' && merged.warning.length > 0, 'and told what to do about it');
+
+    const rowA = (merged.perBusiness ?? []).find((r) => r.businessId === a.id);
+    const rowB = (merged.perBusiness ?? []).find((r) => r.businessId === b.id);
+    ok(rowA && Math.abs(rowA.outputVat - 150) < 0.02, 'each company gets its own output VAT', rowA && String(rowA.outputVat));
+    ok(rowB && Math.abs(rowB.outputVat - 300) < 0.02, 'and they are not added together', rowB && String(rowB.outputVat));
+
+    // Filing for one company must see only that company.
+    const one = await getj('/reports/vat?from=' + day(-1) + '&to=' + day(1) + '&businessId=' + a.id);
+    ok(one.mergesEntities === false, 'asking for one company gives a fileable return', String(one.mergesEntities));
+    const zar = one.output.find((o) => o.currency === 'ZAR');
+    ok(zar && Math.abs(zar.outputVat - 150) < 0.02,
+      'carrying that company alone, not the one next to it', zar && String(zar.outputVat));
+
+    // One registered company beside an unregistered one is not a merge problem.
+    await db.query("UPDATE businesses SET default_tax_rate = NULL WHERE id = ?", [b.id]);
+    const solo = await getj('/reports/vat?from=' + day(-1) + '&to=' + day(1));
+    ok(solo.mergesEntities === false,
+      'one registered company beside an unregistered one raises no warning', String(solo.mergesEntities));
+
+    await db.query("UPDATE businesses SET default_tax_rate = NULL WHERE account_id = 1");
+  } finally {
+    // Its sales go first: the FK would otherwise refuse, and a test that leaves a
+    // company behind changes what the next run measures.
+    await db.query('DELETE FROM sales WHERE business_id = ?', [TMP_BID]);
+    await db.query('DELETE FROM businesses WHERE id = ?', [TMP_BID]);
+  }
+}
+
 await clean();
 console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURES');
 await db.end();

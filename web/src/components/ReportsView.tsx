@@ -45,12 +45,20 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
     retry: false,
   });
   const vat = useQuery({
-    queryKey: ['vat', from, to],
+    // Scoped by the business switcher like every other report, because a VAT return
+    // is filed by one company and the switcher is how you say which.
+    queryKey: ['vat', from, to, businessId],
     queryFn: () => apiGet<{
       currency: string;
       output: { currency: string; sales: number; outputVat: number }[];
       inputVat: number; netPayable: number;
-    }>(`/reports/vat?from=${from}&to=${to}`),
+      mergesEntities?: boolean; warning?: string;
+      perBusiness?: {
+        businessId: number | null; name: string; currency: string;
+        registered: boolean; taxRate: number | null;
+        sales: number; outputVat: number; inputVat: number; netPayable: number;
+      }[];
+    }>(`/reports/vat?from=${from}&to=${to}${bizQ}`),
     retry: false,
   });
 
@@ -106,6 +114,27 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
               <div>
                 <span className="text-slate-500">Net VAT payable ({vat.data.currency}): </span>
                 <span className="num font-semibold text-slate-100">{money(vat.data.netPayable, vat.data.currency)}</span>
+              </div>
+            </div>
+          )}
+          {/*
+            A return is filed by a company, not by a workspace. When the totals above
+            span more than one company that charges VAT, they are not a return anyone
+            should file, and the fix is one click away in the business switcher.
+          */}
+          {vat.data?.mergesEntities && (
+            <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3">
+              <p className="text-xs text-amber-200">{vat.data.warning}</p>
+              <div className="mt-2 space-y-1">
+                {vat.data.perBusiness?.filter((b) => b.registered).map((b) => (
+                  <div key={String(b.businessId)} className="flex justify-between gap-4 text-xs">
+                    <span className="text-slate-300">{b.name}</span>
+                    <span className="num text-slate-200">
+                      {money(b.netPayable, b.currency)}
+                      <span className="ml-1 text-slate-500">net</span>
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
           )}

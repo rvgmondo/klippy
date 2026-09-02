@@ -329,14 +329,36 @@ export async function reportRoutes(app) {
      * business needs both sides to file; the app held valid tax invoices but could
      * compute neither, forcing a parallel spreadsheet every two months.
      */
+    /**
+     * A VAT return is filed by a LEGAL ENTITY, not by a workspace.
+     *
+     * This used to merge every business into one set of figures, which is wrong in
+     * both directions and quietly so. Two registered companies each file their own
+     * return against their own VAT number, and one merged total is wrong for both. A
+     * registered company sharing a workspace with an unregistered one gets the
+     * unregistered turnover folded into its return, which overstates what it owes.
+     *
+     * So the figures are broken out per business, and `businessId` narrows the whole
+     * report to the one entity being filed for. The merged totals stay in the reply
+     * because a sole trader with one company is the common case and should not have to
+     * think about any of this, but `mergesEntities` says out loud when that merged
+     * number spans more than one registered business and should not be filed as it
+     * stands.
+     */
     app.get('/api/v1/reports/vat', async (req, reply) => {
         const { accountId } = authOf(req);
-        const q = z.object({ from: dateStr, to: dateStr }).safeParse(req.query);
+        const q = z.object({
+            from: dateStr, to: dateStr,
+            businessId: z.coerce.number().int().positive().optional(),
+        }).safeParse(req.query);
         if (!q.success)
             return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
         const { from, to } = q.data;
+        const onlyBusiness = q.data.businessId;
+        const pick = (rows) => onlyBusiness === undefined ? rows : rows.filter((r) => r.businessId === onlyBusiness);
         const invoices = await db.select({
             currency: documents.currency, type: documents.type, tax: documents.taxAmount, total: documents.total,
+            businessId: documents.businessId,
         }).from(documents)
             .where(tenantWhere(documents, accountId, await businessScope(req, documents.businessId), inArray(documents.type, ['invoice', 'credit_note']), 
         // Only ISSUED, non-void documents belong in a VAT return. Without these two
@@ -350,7 +372,7 @@ export async function reportRoutes(app) {
         // are always inserted as 'sent' (documents.ts), so excluding drafts cannot
         // silently drop the credit side of the return.
         ne(documents.status, 'void'), ne(documents.status, 'draft'), gte(documents.issueDate, from), lte(documents.issueDate, to)));
-        const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount })
+        const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount, businessId: expenses.businessId })
             .from(expenses)
             .where(and(eq(expenses.accountId, accountId), await businessScope(req, expenses.businessId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
         /**
@@ -362,40 +384,105 @@ export async function reportRoutes(app) {
          * (backed out of the gross, since money received is VAT-inclusive), so it is read
          * rather than recomputed here.
          */
-        const salesRows = await db.select({ currency: sales.currency, tax: sales.taxAmount, gross: sales.gross })
+        const salesRows = await db.select({ currency: sales.currency, tax: sales.taxAmount, gross: sales.gross, businessId: sales.businessId })
             .from(sales)
             .where(tenantWhere(sales, accountId, await businessScope(req, sales.businessId), gte(sales.occurredAt, new Date(`${from}T00:00:00.000Z`)), lte(sales.occurredAt, new Date(`${to}T23:59:59.999Z`))));
         const round = (n) => Math.round(n * 100) / 100;
+        const invRows = pick(invoices);
+        const saleRows = pick(salesRows);
+        const expRows = pick(exps);
+        const [acc] = await db.select({ currency: accounts.currency }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
+        const wsCur = acc?.currency || DEFAULT_CURRENCY;
+        // Which businesses actually charge VAT. A business with no rate set is not
+        // registered as far as Klippy knows, so it is never described as filing a return.
+        const bizRows = await db.select({
+            id: businesses.id, name: businesses.name, currency: businesses.currency,
+            rate: businesses.defaultTaxRate,
+        }).from(businesses).where(tenantWhere(businesses, accountId));
+        const bizById = new Map(bizRows.map((b) => [b.id, b]));
         const byCur = new Map();
-        for (const r of salesRows) {
-            const b = byCur.get(r.currency) ?? { outputVat: 0, sales: 0 };
-            b.outputVat += Number(r.tax);
-            b.sales += Number(r.gross);
-            byCur.set(r.currency, b);
+        const intoCur = (c) => {
+            let b = byCur.get(c);
+            if (!b) {
+                b = { outputVat: 0, sales: 0 };
+                byCur.set(c, b);
+            }
+            return b;
+        };
+        const byBiz = new Map();
+        const intoBiz = (bid) => {
+            let b = byBiz.get(bid);
+            if (!b) {
+                b = { outputVat: 0, sales: 0, inputVat: 0, currency: (bid != null ? bizById.get(bid)?.currency : null) || wsCur };
+                byBiz.set(bid, b);
+            }
+            return b;
+        };
+        for (const r of saleRows) {
+            const c = intoCur(r.currency);
+            c.outputVat += Number(r.tax);
+            c.sales += Number(r.gross);
+            const e = intoBiz(r.businessId);
+            e.outputVat += Number(r.tax);
+            e.sales += Number(r.gross);
         }
-        for (const r of invoices) {
+        for (const r of invRows) {
             const sign = r.type === 'credit_note' ? -1 : 1;
-            const b = byCur.get(r.currency) ?? { outputVat: 0, sales: 0 };
-            b.outputVat += sign * Number(r.tax);
-            b.sales += sign * Number(r.total);
-            byCur.set(r.currency, b);
+            const c = intoCur(r.currency);
+            c.outputVat += sign * Number(r.tax);
+            c.sales += sign * Number(r.total);
+            const e = intoBiz(r.businessId);
+            e.outputVat += sign * Number(r.tax);
+            e.sales += sign * Number(r.total);
         }
         // Input VAT is not split by currency (expenses have no currency column yet); it
         // is reported against the workspace currency, which is where expenses are kept.
-        const [acc] = await db.select({ currency: accounts.currency }).from(accounts).where(eq(accounts.id, accountId)).limit(1);
-        const wsCur = acc?.currency || DEFAULT_CURRENCY;
-        const inputVat = round(exps.reduce((s, e) => s + Number(e.vat ?? 0), 0));
+        // It IS split by business, because that is the entity claiming it back.
+        const inputVat = round(expRows.reduce((s, e) => s + Number(e.vat ?? 0), 0));
+        for (const e of expRows)
+            intoBiz(e.businessId).inputVat += Number(e.vat ?? 0);
         const output = [...byCur].map(([currency, b]) => ({
             currency, sales: round(b.sales), outputVat: round(b.outputVat),
         })).sort((a, b) => b.outputVat - a.outputVat);
         const wsOutput = output.find((o) => o.currency === wsCur)?.outputVat ?? 0;
+        const perBusiness = [...byBiz].map(([businessId, e]) => {
+            const biz = businessId != null ? bizById.get(businessId) : undefined;
+            return {
+                businessId,
+                name: biz?.name ?? 'Not assigned to a business',
+                currency: e.currency,
+                // A rate on the business is Klippy's only evidence that it is registered.
+                registered: biz?.rate != null,
+                taxRate: biz?.rate != null ? Number(biz.rate) : null,
+                sales: round(e.sales),
+                outputVat: round(e.outputVat),
+                inputVat: round(e.inputVat),
+                netPayable: round(e.outputVat - e.inputVat),
+            };
+        }).sort((a, b) => b.outputVat - a.outputVat);
+        /**
+         * The warning that stops a wrong return being filed.
+         *
+         * Only true when the merged figure spans more than one REGISTERED business and
+         * no single entity was asked for. One registered company sitting beside three
+         * unregistered ones is not a merge problem, and a workspace where nobody has set
+         * a rate has no return to file at all.
+         */
+        const registeredCount = perBusiness.filter((b) => b.registered).length;
+        const mergesEntities = onlyBusiness === undefined && registeredCount > 1;
         return {
             from, to, currency: wsCur,
+            businessId: onlyBusiness ?? null,
             output,
             inputVat,
             // Net is only meaningful within one currency; computed for the workspace
             // currency (output there minus input VAT, which is in the workspace currency).
             netPayable: round(wsOutput - inputVat),
+            perBusiness,
+            mergesEntities,
+            ...(mergesEntities ? {
+                warning: `These totals cover ${registeredCount} businesses that each charge VAT. A return is filed per company, so pick one business before filing.`,
+            } : {}),
         };
     });
     /**
