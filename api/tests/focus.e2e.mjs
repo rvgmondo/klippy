@@ -209,6 +209,38 @@ await db.query(
     "SELECT COUNT(*) n FROM focus_items WHERE kind = 'invoice' AND ref_id = ?", [other.insertId]);
   ok(Number(stored.n) === 0, 'and no opinion about it was stored');
 
+  /**
+   * The cap must count only what this member is allowed to see.
+   *
+   * Each source takes its ten most pressing rows. When that cap was applied before
+   * the access filter, a member whose ten oldest overdue invoices all sat in a
+   * business they cannot see got an empty Home while their own overdue work waited
+   * behind the cap. Twelve invoices in the other business, older than anything of
+   * theirs, would previously have used the whole cap up.
+   */
+  const flood = [];
+  for (let i = 0; i < 12; i++) {
+    const [row] = await db.query(
+      "INSERT INTO documents (account_id, business_id, type, seq, number, status, issue_date, due_date, currency, subtotal, tax_amount, total, client_name) VALUES (1,?,'invoice',?,?,'sent',DATE_SUB(CURDATE(), INTERVAL 400 DAY),DATE_SUB(CURDATE(), INTERVAL 300 DAY),'ZAR','50.00','0.00','50.00','Hidden Co')",
+      [b2.insertId, 990100 + i, 'HID-' + i]);
+    flood.push(row.insertId);
+  }
+  // One of the member's own, newer than every hidden invoice, so it only survives if
+  // the cap was applied after the access rule rather than before it.
+  const [mine] = await db.query(
+    "INSERT INTO documents (account_id, business_id, type, seq, number, status, issue_date, due_date, currency, subtotal, tax_amount, total, client_name) VALUES (1,?,'invoice',990200,'MINE-1','sent',CURDATE(),DATE_SUB(CURDATE(), INTERVAL 1 DAY),'ZAR','75.00','0.00','75.00','Visible Co')",
+    [mainBiz.id]);
+
+  const mFocus = await fetch(API + '/focus', { headers: { cookie: mCookie } }).then((r) => r.json());
+  const all = [...mFocus.quadrants.now, ...mFocus.quadrants.real,
+    ...mFocus.quadrants.quick, ...mFocus.quadrants.later];
+  ok(all.some((i) => i.kind === 'invoice' && i.refId === mine.insertId),
+    'a member sees their own overdue invoice even when older ones they cannot see would fill the cap',
+    all.filter((i) => i.kind === 'invoice').length + ' invoices shown');
+  ok(!all.some((i) => flood.includes(i.refId) && i.kind === 'invoice'),
+    'and none of the hidden business invoices leak through');
+
+  await db.query('DELETE FROM documents WHERE id IN (?)', [[...flood, mine.insertId]]);
   await db.query('DELETE FROM documents WHERE id = ?', [other.insertId]);
   await db.query('DELETE FROM business_members WHERE user_id = ?', [MID]);
   await db.query('DELETE FROM memberships WHERE user_id = ?', [MID]);

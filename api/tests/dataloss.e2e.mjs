@@ -295,6 +295,45 @@ const mkClient = async (name, { hosting = 'active', trashed = false } = {}) => {
 }
 
 await clean();
+// ---- a cancelled plan does not get a server, or get one switched back on --------
+{
+  const [[biz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 LIMIT 1');
+  const [[fold]] = await db.query('SELECT id FROM folders WHERE account_id = 1 AND parent_id IS NULL LIMIT 1');
+  const [[off]] = await db.query("SELECT id FROM offerings WHERE account_id = 1 LIMIT 1");
+  if (!biz || !fold || !off) {
+    console.log('SKIP  cancelled-plan guard needs a business, client and offering');
+  } else {
+    await db.query("UPDATE offerings SET provisioning = 'cpanel' WHERE id = ?", [off.id]);
+    const [sub] = await db.query(
+      "INSERT INTO subscriptions (account_id, business_id, folder_id, offering_id, status, interval_months, started_on, next_bill_date) VALUES (1,?,?,?,'canceled',1,CURDATE(),CURDATE())",
+      [biz.id, fold.id, off.id]);
+    const SUB = sub.insertId;
+    const [ha] = await db.query(
+      "INSERT INTO hosting_accounts (account_id, business_id, subscription_id, domain, username, status) VALUES (1,?,?,'cancelled-client.test','cx','suspended')",
+      [biz.id, SUB]);
+
+    const { provisionSubscription } = await import('file:///C:/CC/klippy-v2/api/dist/lib/hosting.js');
+    const res = await provisionSubscription(1, SUB, 'INV-TEST');
+    ok(res.outcome === 'skipped' && /cancel/i.test(res.detail),
+      'a cancelled plan is never provisioned, however its invoice gets paid', res.detail);
+
+    // onInvoicePaid is the real entry point, and it must not switch the site back on.
+    const [doc] = await db.query(
+      "INSERT INTO documents (account_id, business_id, folder_id, subscription_id, type, seq, number, status, issue_date, currency, subtotal, tax_amount, total, client_name) VALUES (1,?,?,?,'invoice',999001,'INV-CANC-TEST','paid',CURDATE(),'ZAR','100.00','0.00','100.00','Gone Away Ltd')",
+      [biz.id, fold.id, SUB]);
+    const { onInvoicePaid } = await import('file:///C:/CC/klippy-v2/api/dist/lib/hosting.js');
+    await onInvoicePaid(1, doc.insertId);
+    const [[after]] = await db.query('SELECT status FROM hosting_accounts WHERE id = ?', [ha.insertId]);
+    ok(after.status === 'suspended',
+      'and paying its old invoice leaves the site off, not served free forever', after.status);
+
+    await db.query('DELETE FROM documents WHERE id = ?', [doc.insertId]);
+    await db.query('DELETE FROM hosting_accounts WHERE id = ?', [ha.insertId]);
+    await db.query('DELETE FROM subscriptions WHERE id = ?', [SUB]);
+    await db.query("UPDATE offerings SET provisioning = 'none' WHERE id = ?", [off.id]);
+  }
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 await db.end();
 process.exit(failures ? 1 : 0);

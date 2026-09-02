@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNull, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { focusItems, tasks, boards, folders, businesses, documents, deals } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -57,7 +57,26 @@ export async function focusRoutes(app) {
             .where(tenantWhere(focusItems, accountId, isNull(focusItems.doneAt)));
         const judged = new Map(stored.filter((r) => r.kind !== 'manual' && r.refId != null)
             .map((r) => [r.kind + ':' + r.refId, r.important]));
+        /**
+         * The access rule, expressed in SQL so the cap counts only visible rows.
+         *
+         * Each source below takes its ten most pressing rows in the database. Filtering
+         * for access afterwards in JavaScript meant a member whose ten oldest overdue
+         * cards all sat in businesses they cannot see ended up with an empty Home while
+         * their own work was waiting behind the cap. This matches canSee exactly,
+         * including that an item belonging to NO business stays visible to everyone,
+         * which is why businessScope (which drops nulls) is not used here.
+         */
+        const visible = (col) => {
+            if (allowed === null)
+                return undefined;
+            if (allowed.size === 0)
+                return isNull(col);
+            return or(isNull(col), inArray(col, [...allowed]));
+        };
         const items = [];
+        // Kept as well as the SQL above: manual items are pushed without a query, and a
+        // second cheap check costs nothing next to letting one through.
         const push = (i) => { if (canSee(i.businessId))
             items.push(i); };
         // Auto items start important and are demoted by hand. That is why a workspace
@@ -70,7 +89,7 @@ export async function focusRoutes(app) {
         }).from(tasks)
             .innerJoin(boards, eq(boards.id, tasks.boardId))
             .leftJoin(folders, eq(folders.id, boards.folderId))
-            .where(tenantWhere(tasks, accountId, and(eq(tasks.isCompleted, false), eq(tasks.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), isNotNull(tasks.dueDate), lte(tasks.dueDate, today))))
+            .where(tenantWhere(tasks, accountId, and(eq(tasks.isCompleted, false), eq(tasks.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), isNotNull(tasks.dueDate), lte(tasks.dueDate, today), visible(folders.businessId))))
             .orderBy(asc(tasks.dueDate))
             .limit(PER_SOURCE_CAP);
         for (const t of cardRows) {
@@ -88,7 +107,7 @@ export async function focusRoutes(app) {
             dueDate: documents.dueDate, total: documents.total, currency: documents.currency,
             businessId: documents.businessId,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lte(documents.dueDate, today))))
+            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lte(documents.dueDate, today), visible(documents.businessId))))
             .orderBy(asc(documents.dueDate))
             .limit(PER_SOURCE_CAP);
         /**
@@ -122,7 +141,7 @@ export async function focusRoutes(app) {
             dueDate: documents.dueDate, total: documents.total, currency: documents.currency,
             businessId: documents.businessId,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'quote'), eq(documents.status, 'sent'), isNull(documents.decision), isNotNull(documents.dueDate), lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)))))
+            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'quote'), eq(documents.status, 'sent'), isNull(documents.decision), isNotNull(documents.dueDate), lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)), visible(documents.businessId))))
             .orderBy(asc(documents.dueDate))
             .limit(PER_SOURCE_CAP);
         for (const q of quoteRows) {
@@ -143,7 +162,7 @@ export async function focusRoutes(app) {
             nextFollowUpAt: deals.nextFollowUpAt, followUpNote: deals.followUpNote,
             businessId: deals.businessId,
         }).from(deals)
-            .where(tenantWhere(deals, accountId, and(inArray(deals.stage, [...OPEN_DEAL_STAGES]), isNotNull(deals.nextFollowUpAt), lte(deals.nextFollowUpAt, today))))
+            .where(tenantWhere(deals, accountId, and(inArray(deals.stage, [...OPEN_DEAL_STAGES]), isNotNull(deals.nextFollowUpAt), lte(deals.nextFollowUpAt, today), visible(deals.businessId))))
             .orderBy(asc(deals.nextFollowUpAt))
             .limit(PER_SOURCE_CAP);
         for (const d of dealRows) {

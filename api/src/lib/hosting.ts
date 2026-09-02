@@ -225,6 +225,21 @@ export async function provisionSubscription(
   const [sub] = await db.select().from(subscriptions)
     .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, subscriptionId))).limit(1);
   if (!sub) return { outcome: 'skipped', detail: 'Subscription no longer exists.' };
+  /**
+   * A cancelled plan does not get a server.
+   *
+   * Payment can land on an invoice long after the plan behind it ended: an old pay
+   * link, a bank transfer entered late, a gateway retry. Without this, settling that
+   * invoice would create a real cPanel account, on a real server, for a client who
+   * has already left, and nothing would ever take it down again because a cancelled
+   * subscription raises no further invoices for the overdue sweep to find.
+   *
+   * Paused is different and is allowed through: a pause is temporary and the client
+   * is expected back.
+   */
+  if (sub.status === 'canceled') {
+    return { outcome: 'skipped', detail: 'Subscription is cancelled, so nothing was set up.' };
+  }
 
   const [offering] = await db.select().from(offerings)
     .where(tenantWhere(offerings, accountId, eq(offerings.id, sub.offeringId))).limit(1);
@@ -654,6 +669,14 @@ async function sendSuspensionWarning(
  * has just paid should not have to wait until tomorrow morning for their website.
  */
 async function restoreIfSuspended(accountId: number, subscriptionId: number): Promise<void> {
+  // Money arriving against a cancelled plan does not switch the site back on. The
+  // sweep would never suspend it a second time, since a cancelled subscription
+  // raises no more invoices to fall overdue, so this would be hosting served free
+  // and indefinitely off the back of one late payment.
+  const [sub] = await db.select({ status: subscriptions.status }).from(subscriptions)
+    .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, subscriptionId))).limit(1);
+  if (!sub || sub.status === 'canceled') return;
+
   const [acct] = await db.select().from(hostingAccounts)
     .where(tenantWhere(hostingAccounts, accountId, eq(hostingAccounts.subscriptionId, subscriptionId)))
     .limit(1);

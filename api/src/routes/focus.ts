@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNull, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import type { AnyMySqlColumn } from 'drizzle-orm/mysql-core';
 import { db } from '../db/client.js';
 import { focusItems, tasks, boards, folders, businesses, documents, deals } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -84,7 +86,25 @@ export async function focusRoutes(app: FastifyInstance) {
     const judged = new Map(stored.filter((r) => r.kind !== 'manual' && r.refId != null)
       .map((r) => [r.kind + ':' + r.refId, r.important]));
 
+    /**
+     * The access rule, expressed in SQL so the cap counts only visible rows.
+     *
+     * Each source below takes its ten most pressing rows in the database. Filtering
+     * for access afterwards in JavaScript meant a member whose ten oldest overdue
+     * cards all sat in businesses they cannot see ended up with an empty Home while
+     * their own work was waiting behind the cap. This matches canSee exactly,
+     * including that an item belonging to NO business stays visible to everyone,
+     * which is why businessScope (which drops nulls) is not used here.
+     */
+    const visible = (col: AnyMySqlColumn): SQL | undefined => {
+      if (allowed === null) return undefined;
+      if (allowed.size === 0) return isNull(col);
+      return or(isNull(col), inArray(col, [...allowed]));
+    };
+
     const items: Item[] = [];
+    // Kept as well as the SQL above: manual items are pushed without a query, and a
+    // second cheap check costs nothing next to letting one through.
     const push = (i: Item) => { if (canSee(i.businessId)) items.push(i); };
     // Auto items start important and are demoted by hand. That is why a workspace
     // with nothing configured still shows a matrix worth looking at.
@@ -101,6 +121,7 @@ export async function focusRoutes(app: FastifyInstance) {
         eq(tasks.isCompleted, false), eq(tasks.isArchived, false),
         isNull(boards.deletedAt), isNull(folders.deletedAt),
         isNotNull(tasks.dueDate), lte(tasks.dueDate, today),
+        visible(folders.businessId),
       )))
       .orderBy(asc(tasks.dueDate))
       .limit(PER_SOURCE_CAP);
@@ -123,6 +144,7 @@ export async function focusRoutes(app: FastifyInstance) {
       .where(tenantWhere(documents, accountId, and(
         eq(documents.type, 'invoice'), eq(documents.status, 'sent'),
         isNotNull(documents.dueDate), lte(documents.dueDate, today),
+        visible(documents.businessId),
       )))
       .orderBy(asc(documents.dueDate))
       .limit(PER_SOURCE_CAP);
@@ -162,6 +184,7 @@ export async function focusRoutes(app: FastifyInstance) {
         isNull(documents.decision),
         isNotNull(documents.dueDate),
         lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)),
+        visible(documents.businessId),
       )))
       .orderBy(asc(documents.dueDate))
       .limit(PER_SOURCE_CAP);
@@ -187,6 +210,7 @@ export async function focusRoutes(app: FastifyInstance) {
       .where(tenantWhere(deals, accountId, and(
         inArray(deals.stage, [...OPEN_DEAL_STAGES]),
         isNotNull(deals.nextFollowUpAt), lte(deals.nextFollowUpAt, today),
+        visible(deals.businessId),
       )))
       .orderBy(asc(deals.nextFollowUpAt))
       .limit(PER_SOURCE_CAP);
