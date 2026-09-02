@@ -1046,6 +1046,90 @@ export const focusItems = mysqlTable('focus_items', {
     uniqueIndex('uniq_focus_ref').on(t.accountId, t.kind, t.refId),
     index('idx_focus_account').on(t.accountId, t.doneAt),
 ]);
+/**
+ * A connection to a payment provider, for READING what it has taken.
+ *
+ * Deliberately separate from `payment_settings`, which is about how to CHARGE
+ * somebody. This is the other direction: the card machine has already taken money
+ * all month and Klippy needs to know what it took and what it cost. Different
+ * credentials, different scopes, different failure modes, so a business can read
+ * its Yoco takings without Klippy being able to charge anything through it.
+ *
+ * One connection per provider per business, so a workspace running several
+ * companies keeps their takings apart.
+ */
+export const paymentConnections = mysqlTable('payment_connections', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }).notNull()
+        .references(() => businesses.id, { onDelete: 'cascade' }),
+    provider: mysqlEnum('provider', ['yoco']).notNull(),
+    /** What the owner calls it, e.g. "Shop till". Cosmetic. */
+    label: varchar('label', { length: 80 }),
+    /** The API key, encrypted at rest exactly like every other stored credential. */
+    secretEnc: text('secret_enc'),
+    enabled: boolean('enabled').default(true).notNull(),
+    lastSyncedAt: datetime('last_synced_at'),
+    /** The last day fully pulled, so the next run knows where to resume. */
+    lastSyncedThrough: date('last_synced_through', { mode: 'string' }),
+    lastStatus: varchar('last_status', { length: 255 }),
+    createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_payment_connection').on(t.accountId, t.businessId, t.provider),
+]);
+/**
+ * Money taken without an invoice: a card machine sale, a tap at the till.
+ *
+ * A retail sale is NOT an invoice and must not be modelled as one. A shop doing a
+ * hundred taps a day would otherwise generate a hundred invoices with no client, no
+ * due date and nobody to chase, and the invoice numbering that a tax invoice depends
+ * on would be swamped by them.
+ *
+ * So this is its own thing, and it carries what the gateway actually tells us:
+ * the gross the customer paid, the FEE the provider kept, and the net that reached
+ * the bank. `external_id` is unique per provider so a sync can run as often as it
+ * likes without ever recording the same tap twice.
+ *
+ * VAT is INFERRED, not given. A card machine reports the amount taken, and under the
+ * VAT Act money received is treated as VAT-inclusive, so the tax is backed out of the
+ * gross at the business rate rather than added to it. A business with no rate set
+ * gets zero, and nothing about its figures changes.
+ */
+export const sales = mysqlTable('sales', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }).notNull()
+        .references(() => businesses.id, { onDelete: 'cascade' }),
+    provider: mysqlEnum('provider', ['yoco', 'manual']).default('manual').notNull(),
+    /** The provider's own id. The dedupe key: one tap, one row, however often we sync. */
+    externalId: varchar('external_id', { length: 80 }),
+    /** Where it happened, in the provider's words: card_machine, checkout, payment_link. */
+    source: varchar('source', { length: 40 }),
+    /** Which machine, so a shop with several tills can tell them apart. */
+    terminal: varchar('terminal', { length: 80 }),
+    occurredAt: datetime('occurred_at').notNull(),
+    currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
+    gross: decimal('gross', { precision: 12, scale: 2 }).notNull(),
+    fee: decimal('fee', { precision: 12, scale: 2 }).default('0').notNull(),
+    net: decimal('net', { precision: 12, scale: 2 }).notNull(),
+    tip: decimal('tip', { precision: 12, scale: 2 }).default('0').notNull(),
+    refunded: decimal('refunded', { precision: 12, scale: 2 }).default('0').notNull(),
+    taxRate: decimal('tax_rate', { precision: 5, scale: 2 }).default('0').notNull(),
+    taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).default('0').notNull(),
+    status: varchar('status', { length: 20 }).default('approved').notNull(),
+    /** The provider's receipt number, so a customer query can be traced back. */
+    reference: varchar('reference', { length: 120 }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    uniqueIndex('uniq_sale_external').on(t.accountId, t.provider, t.externalId),
+    index('idx_sales_account_date').on(t.accountId, t.occurredAt),
+    index('idx_sales_business_date').on(t.businessId, t.occurredAt),
+]);
 export const portalUsers = mysqlTable('portal_users', {
     id: pk(),
     accountId: int('account_id', { unsigned: true }).notNull()

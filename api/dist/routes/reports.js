@@ -5,7 +5,7 @@ import { mrrByCurrency, chargeFor } from '../lib/mrr.js';
 import { addMonths, anchorDayOf, addDays } from '../lib/billing.js';
 import { balancesFor } from '../lib/balances.js';
 import { db } from '../db/client.js';
-import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings, subscriptions, documents, payments } from '../db/schema.js';
+import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings, subscriptions, documents, payments, sales } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, businessScope } from '../lib/access.js';
@@ -353,8 +353,26 @@ export async function reportRoutes(app) {
         const exps = await db.select({ amount: expenses.amount, vat: expenses.vatAmount })
             .from(expenses)
             .where(and(eq(expenses.accountId, accountId), await businessScope(req, expenses.businessId), gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+        /**
+         * Counter takings belong in the return too.
+         *
+         * A shop's card machine money never becomes an invoice, so a VAT return built
+         * only from documents would declare the agency half of the business and silently
+         * omit the retail half. The tax on a sale was worked out when it was recorded
+         * (backed out of the gross, since money received is VAT-inclusive), so it is read
+         * rather than recomputed here.
+         */
+        const salesRows = await db.select({ currency: sales.currency, tax: sales.taxAmount, gross: sales.gross })
+            .from(sales)
+            .where(tenantWhere(sales, accountId, await businessScope(req, sales.businessId), gte(sales.occurredAt, new Date(`${from}T00:00:00.000Z`)), lte(sales.occurredAt, new Date(`${to}T23:59:59.999Z`))));
         const round = (n) => Math.round(n * 100) / 100;
         const byCur = new Map();
+        for (const r of salesRows) {
+            const b = byCur.get(r.currency) ?? { outputVat: 0, sales: 0 };
+            b.outputVat += Number(r.tax);
+            b.sales += Number(r.gross);
+            byCur.set(r.currency, b);
+        }
         for (const r of invoices) {
             const sign = r.type === 'credit_note' ? -1 : 1;
             const b = byCur.get(r.currency) ?? { outputVat: 0, sales: 0 };

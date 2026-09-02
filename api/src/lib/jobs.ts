@@ -15,6 +15,7 @@ import { pruneLoginTokens } from './portalAuth.js';
 import { buildAccountExport } from './export.js';
 import { phoneForClient, sendReminderMessage } from './messaging.js';
 import { notifyAdmins } from './notify.js';
+import { syncAllConnections } from './salesSync.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -30,7 +31,7 @@ import { notifyAdmins } from './notify.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions' | 'deal-follow-ups' | 'finance-digest' | 'backup-email';
+export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions' | 'deal-follow-ups' | 'finance-digest' | 'backup-email' | 'sync-sales';
 
 export const JOBS: { name: JobName; label: string; description: string; hour: number }[] = [
   {
@@ -70,6 +71,13 @@ export const JOBS: { name: JobName; label: string; description: string; hour: nu
     label: 'Weekly money digest',
     description: 'On Monday mornings, emails owners the week\'s money: invoiced, received, MRR, and what is still owed.',
     hour: 7,
+  },
+  {
+    name: 'sync-sales',
+    label: 'Card machine takings',
+    // Early, so the day's figures are already right by the time anyone looks at them.
+    description: 'Pulls card machine sales and their fees from any connected provider, so counter takings show up beside invoiced work.',
+    hour: 4,
   },
   {
     name: 'invoice-reminders',
@@ -774,6 +782,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   'deal-follow-ups': runDealFollowUps,
   'finance-digest': runFinanceDigest,
   'invoice-reminders': runInvoiceReminders,
+  'sync-sales': syncAllConnections,
 };
 
 /** Run one job now and record the outcome, whatever it is. */

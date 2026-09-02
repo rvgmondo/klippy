@@ -5,7 +5,7 @@ import {
   deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses,
   taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams,
   calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems,
-  memberships, users,
+  memberships, users, sales,
 } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
@@ -540,6 +540,23 @@ export async function importAccountData(
         title: n.title ?? '', body: n.body ?? null, kind: n.kind ?? undefined,
         status: n.status ?? undefined, priority: n.priority ?? undefined,
         createdBy: importerUserId,
+      });
+    }
+
+    // Counter takings. The provider id comes back with them, so a later sync
+    // recognises what is already here rather than recording every tap twice.
+    for (const sale of arr(data, 'sales')) {
+      const businessId = ref('businesses', sale.businessId);
+      if (!businessId) continue;
+      await insert('sales', sales as never, sale.id, {
+        businessId, provider: sale.provider ?? 'manual', externalId: sale.externalId ?? null,
+        source: sale.source ?? null, terminal: sale.terminal ?? null,
+        occurredAt: sale.occurredAt ? new Date(String(sale.occurredAt)) : new Date(),
+        currency: sale.currency ?? 'ZAR',
+        gross: sale.gross ?? '0.00', fee: sale.fee ?? '0.00', net: sale.net ?? '0.00',
+        tip: sale.tip ?? '0.00', refunded: sale.refunded ?? '0.00',
+        taxRate: sale.taxRate ?? '0.00', taxAmount: sale.taxAmount ?? '0.00',
+        status: sale.status ?? 'approved', reference: sale.reference ?? null,
       });
     }
 

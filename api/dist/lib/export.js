@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
 /**
  * Everything in one workspace as one plain JSON object.
@@ -35,10 +35,10 @@ import { tenantWhere } from './tenant.js';
  * say "download" and not "restore".
  */
 /** Bumped when the SHAPE changes, so a future importer can tell what it is holding. */
-export const EXPORT_SCHEMA_VERSION = 3;
+export const EXPORT_SCHEMA_VERSION = 4;
 export async function buildAccountExport(accountId) {
     const own = (t) => tenantWhere(t, accountId);
-    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows,] = await Promise.all([
+    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows, salesRows,] = await Promise.all([
         db.select({ id: businesses.id, name: businesses.name, type: businesses.type, currency: businesses.currency, brandName: businesses.brandName, bizAddress: businesses.bizAddress, bizTaxNumber: businesses.bizTaxNumber, bizRegNumber: businesses.bizRegNumber, bankDetails: businesses.bankDetails, defaultTaxRate: businesses.defaultTaxRate, defaultDueDays: businesses.defaultDueDays, prefixInvoice: businesses.prefixInvoice, prefixQuote: businesses.prefixQuote, prefixCreditNote: businesses.prefixCreditNote, seqStartInvoice: businesses.seqStartInvoice, seqStartQuote: businesses.seqStartQuote, seqStartCreditNote: businesses.seqStartCreditNote, position: businesses.position }).from(businesses).where(own(businesses)),
         db.select({ id: folders.id, name: folders.name, parentId: folders.parentId, businessId: folders.businessId, pillar: folders.pillar, billingEmail: folders.billingEmail, billingPhone: folders.billingPhone, billingVatNumber: folders.billingVatNumber, billingAddress: folders.billingAddress, hourlyRate: folders.hourlyRate, monthlyHoursBudget: folders.monthlyHoursBudget, notes: folders.notes, isArchived: folders.isArchived, deletedAt: folders.deletedAt, position: folders.position }).from(folders).where(own(folders)),
         db.select({ id: boards.id, folderId: boards.folderId, name: boards.name, description: boards.description, isArchived: boards.isArchived, deletedAt: boards.deletedAt, position: boards.position }).from(boards).where(own(boards)),
@@ -85,6 +85,10 @@ export async function buildAccountExport(accountId) {
         db.select({ id: users.id, name: users.name, email: users.email, role: memberships.role, isActive: memberships.isActive })
             .from(memberships).innerJoin(users, eq(users.id, memberships.userId))
             .where(eq(memberships.accountId, accountId)),
+        // Counter takings are revenue and VAT history, so they belong in the backup as
+        // much as invoices do. The provider's own id rides along, so a restore cannot
+        // re-import a tap that is already there.
+        db.select({ id: sales.id, businessId: sales.businessId, provider: sales.provider, externalId: sales.externalId, source: sales.source, terminal: sales.terminal, occurredAt: sales.occurredAt, currency: sales.currency, gross: sales.gross, fee: sales.fee, net: sales.net, tip: sales.tip, refunded: sales.refunded, taxRate: sales.taxRate, taxAmount: sales.taxAmount, status: sales.status, reference: sales.reference }).from(sales).where(own(sales)),
     ]);
     return {
         exportedOn: new Date().toISOString().slice(0, 10),
@@ -119,6 +123,7 @@ export async function buildAccountExport(accountId) {
         notes: noteRows,
         focus: focusRows,
         people: peopleRows,
+        sales: salesRows,
     };
 }
 //# sourceMappingURL=export.js.map

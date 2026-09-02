@@ -16,6 +16,7 @@ import { commentRoutes } from './routes/comments.js';
 import { timerRoutes } from './routes/timer.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { focusRoutes } from './routes/focus.js';
+import { salesRoutes } from './routes/sales.js';
 import { commandRoutes } from './routes/command.js';
 import { calendarEventRoutes } from './routes/calendarEvents.js';
 import { fileRoutes } from './routes/files.js';
@@ -163,6 +164,7 @@ export function buildServer() {
     app.register(timerRoutes);
     app.register(dashboardRoutes);
     app.register(focusRoutes);
+    app.register(salesRoutes);
     app.register(commandRoutes);
     app.register(calendarEventRoutes);
     app.register(fileRoutes);
