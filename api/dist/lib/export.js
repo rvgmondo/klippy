@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, recurringExpenses, } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
 /**
  * Everything in one workspace as one plain JSON object.
@@ -35,10 +35,10 @@ import { tenantWhere } from './tenant.js';
  * say "download" and not "restore".
  */
 /** Bumped when the SHAPE changes, so a future importer can tell what it is holding. */
-export const EXPORT_SCHEMA_VERSION = 4;
+export const EXPORT_SCHEMA_VERSION = 5;
 export async function buildAccountExport(accountId) {
     const own = (t) => tenantWhere(t, accountId);
-    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows, salesRows,] = await Promise.all([
+    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows, salesRows, recurringRows,] = await Promise.all([
         db.select({ id: businesses.id, name: businesses.name, type: businesses.type, currency: businesses.currency, brandName: businesses.brandName, bizAddress: businesses.bizAddress, bizTaxNumber: businesses.bizTaxNumber, bizRegNumber: businesses.bizRegNumber, bankDetails: businesses.bankDetails, defaultTaxRate: businesses.defaultTaxRate, defaultDueDays: businesses.defaultDueDays, prefixInvoice: businesses.prefixInvoice, prefixQuote: businesses.prefixQuote, prefixCreditNote: businesses.prefixCreditNote, seqStartInvoice: businesses.seqStartInvoice, seqStartQuote: businesses.seqStartQuote, seqStartCreditNote: businesses.seqStartCreditNote, position: businesses.position }).from(businesses).where(own(businesses)),
         db.select({ id: folders.id, name: folders.name, parentId: folders.parentId, businessId: folders.businessId, pillar: folders.pillar, billingEmail: folders.billingEmail, billingPhone: folders.billingPhone, billingVatNumber: folders.billingVatNumber, billingAddress: folders.billingAddress, hourlyRate: folders.hourlyRate, monthlyHoursBudget: folders.monthlyHoursBudget, notes: folders.notes, isArchived: folders.isArchived, deletedAt: folders.deletedAt, position: folders.position }).from(folders).where(own(folders)),
         db.select({ id: boards.id, folderId: boards.folderId, name: boards.name, description: boards.description, isArchived: boards.isArchived, deletedAt: boards.deletedAt, position: boards.position }).from(boards).where(own(boards)),
@@ -89,6 +89,10 @@ export async function buildAccountExport(accountId) {
         // much as invoices do. The provider's own id rides along, so a restore cannot
         // re-import a tap that is already there.
         db.select({ id: sales.id, businessId: sales.businessId, provider: sales.provider, externalId: sales.externalId, source: sales.source, terminal: sales.terminal, occurredAt: sales.occurredAt, currency: sales.currency, gross: sales.gross, fee: sales.fee, net: sales.net, tip: sales.tip, refunded: sales.refunded, taxRate: sales.taxRate, taxAmount: sales.taxAmount, status: sales.status, reference: sales.reference }).from(sales).where(own(sales)),
+        // The standing costs themselves, not just the expenses they wrote. Without these a
+        // restored workspace stops recording rent next month and nobody notices until the
+        // figures are already wrong.
+        db.select({ id: recurringExpenses.id, businessId: recurringExpenses.businessId, description: recurringExpenses.description, category: recurringExpenses.category, amount: recurringExpenses.amount, vatAmount: recurringExpenses.vatAmount, intervalMonths: recurringExpenses.intervalMonths, nextDueOn: recurringExpenses.nextDueOn, startedOn: recurringExpenses.startedOn, endsOn: recurringExpenses.endsOn, isActive: recurringExpenses.isActive }).from(recurringExpenses).where(own(recurringExpenses)),
     ]);
     return {
         exportedOn: new Date().toISOString().slice(0, 10),
@@ -124,6 +128,7 @@ export async function buildAccountExport(accountId) {
         focus: focusRows,
         people: peopleRows,
         sales: salesRows,
+        recurringExpenses: recurringRows,
     };
 }
 //# sourceMappingURL=export.js.map

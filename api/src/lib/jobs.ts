@@ -16,6 +16,7 @@ import { buildAccountExport } from './export.js';
 import { phoneForClient, sendReminderMessage } from './messaging.js';
 import { notifyAdmins } from './notify.js';
 import { syncAllConnections } from './salesSync.js';
+import { runRecurringExpenses } from './recurringExpenses.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -31,7 +32,7 @@ import { syncAllConnections } from './salesSync.js';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions' | 'deal-follow-ups' | 'finance-digest' | 'backup-email' | 'sync-sales';
+export type JobName = 'daily-digest' | 'bill-subscriptions' | 'invoice-reminders' | 'hosting-suspensions' | 'deal-follow-ups' | 'finance-digest' | 'backup-email' | 'sync-sales' | 'recurring-expenses';
 
 export const JOBS: { name: JobName; label: string; description: string; hour: number }[] = [
   {
@@ -71,6 +72,14 @@ export const JOBS: { name: JobName; label: string; description: string; hour: nu
     label: 'Weekly money digest',
     description: 'On Monday mornings, emails owners the week\'s money: invoiced, received, MRR, and what is still owed.',
     hour: 7,
+  },
+  {
+    name: 'recurring-expenses',
+    label: 'Standing costs',
+    // Before billing, so a month's costs are already recorded when the money
+    // reports for that month are read.
+    description: 'Records the costs that repeat, like rent, salaries and software, so the spending side of every report is complete without anyone retyping it.',
+    hour: 5,
   },
   {
     name: 'sync-sales',
@@ -801,6 +810,7 @@ const RUNNERS: Record<JobName, () => Promise<string>> = {
   'finance-digest': runFinanceDigest,
   'invoice-reminders': runInvoiceReminders,
   'sync-sales': syncAllConnections,
+  'recurring-expenses': runRecurringExpenses,
 };
 
 /** Run one job now and record the outcome, whatever it is. */

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { StandingCosts } from './StandingCosts';
 import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, Receipt } from 'lucide-react';
@@ -50,6 +51,8 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
           </button>
         )} />
       <PageBody>
+
+        <StandingCosts businessId={businessId} currency={cur} />
 
         {isLoading && <Skeleton className="h-48" />}
         {data && (

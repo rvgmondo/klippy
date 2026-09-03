@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { UserPlus } from 'lucide-react';
-import { apiGet, apiPost, apiPatch } from '../lib/api';
+import { UserPlus, Clock, X } from 'lucide-react';
+import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import type { TeamUser } from '../lib/types';
 import { Menu } from './Menu';
@@ -14,12 +14,27 @@ export function PeoplePanel() {
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
   const { data } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<{ users: TeamUser[] }>('/users') });
   const users = data?.users ?? [];
+  // Someone invited is neither in the workspace nor nowhere: they are waiting on the
+  // person they invited. Without this an admin sends an invitation and then has no way
+  // to see it, chase it, or take it back.
+  const pending = useQuery({
+    queryKey: ['invitations'],
+    queryFn: () => apiGet<{ invitations: { id: number; email: string; role: string; expiresAt: string }[] }>('/invitations'),
+    enabled: isAdmin,
+  });
 
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'member' });
   const [error, setError] = useState<string | null>(null);
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['users'] });
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['users'] });
+    qc.invalidateQueries({ queryKey: ['invitations'] });
+  };
+  const withdraw = useMutation({
+    mutationFn: (id: number) => apiDelete(`/invitations/${id}`),
+    onSuccess: invalidate,
+  });
   const [notice, setNotice] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: () => {
@@ -82,6 +97,28 @@ export function PeoplePanel() {
       {notice && <div className="mb-3 rounded-lg border border-green-500/30 bg-green-500/10 px-3 py-2 text-xs text-green-300">{notice}</div>}
 
       <div className="space-y-1">
+        {isAdmin && (pending.data?.invitations.length ?? 0) > 0 && (
+          <div className="mb-3 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+              <Clock size={12} /> Waiting to be accepted
+            </div>
+            {pending.data!.invitations.map((i) => (
+              <div key={i.id} className="flex items-center justify-between gap-3 py-1 text-sm">
+                <span className="min-w-0 truncate text-slate-300">{i.email}</span>
+                <span className="shrink-0 text-[11px] text-slate-500">
+                  {i.role} until {i.expiresAt.slice(0, 10)}
+                </span>
+                <button onClick={() => withdraw.mutate(i.id)} title="Withdraw this invitation"
+                  className="shrink-0 rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300">
+                  <X size={13} />
+                </button>
+              </div>
+            ))}
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              They already had a Klippy login, so only they can accept. Their password is not affected.
+            </p>
+          </div>
+        )}
         {users.map((u) => (
           <div key={u.id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-slate-900">
             <span className="grid h-8 w-8 place-items-center rounded-full bg-violet-600/30 text-xs font-semibold text-violet-200">

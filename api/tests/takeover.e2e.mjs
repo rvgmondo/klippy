@@ -15,10 +15,13 @@
  * a dead end.
  *
  * It signs in more than most suites do, and sign-in is rate limited per IP (10 in five
- * minutes), so cookies are reused wherever the assertion does not depend on a fresh
- * one. Run it LAST if you are running everything back to back.
+ * minutes), so cookies are reused wherever the assertion does not depend on a fresh one.
+ * Running every suite back to back still exceeds ten, which is why the test server is
+ * started with AUTH_RATE_LIMIT_MAX raised. Production never sets that and keeps ten.
  *
- * Run with a test server on 8095:  node tests/takeover.e2e.mjs
+ * Run with a test server on 8095, started as:
+ *   PORT=8095 AUTH_RATE_LIMIT_MAX=200 PAYMENTS_SECRET=<64 hex> node dist/server.js
+ * then:  node tests/takeover.e2e.mjs
  */
 import 'dotenv/config';
 import mysql from 'mysql2/promise';

@@ -58,6 +58,23 @@ export function rateLimit(opts: RateLimitOptions) {
   };
 }
 
-/** The standard limiter for auth front doors: 10 attempts per 5 minutes per IP. */
+/**
+ * The standard limiter for auth front doors: 10 attempts per 5 minutes per IP.
+ *
+ * The cap is configurable ONLY so an end-to-end run can raise it. Seven suites signing
+ * in one after another legitimately exceed ten attempts in five minutes, which made a
+ * batch run fail on the rate limiter rather than on anything under test, and a test
+ * that fails for the wrong reason trains people to ignore it.
+ *
+ * Production never sets AUTH_RATE_LIMIT_MAX, so production keeps ten. It is read once
+ * at startup and clamped, so a typo cannot switch the limiter off: the floor is 5,
+ * which is still a real limit, and a non-numeric value falls back to the default.
+ */
+const AUTH_MAX = (() => {
+  const raw = Number(process.env.AUTH_RATE_LIMIT_MAX);
+  if (!Number.isFinite(raw) || raw <= 0) return 10;
+  return Math.min(1000, Math.max(5, Math.round(raw)));
+})();
+
 export const authLimiter = (prefix: string) =>
-  rateLimit({ windowMs: 5 * 60_000, max: 10, key: (req) => `${prefix}:${req.ip}` });
+  rateLimit({ windowMs: 5 * 60_000, max: AUTH_MAX, key: (req) => `${prefix}:${req.ip}` });

@@ -886,6 +886,44 @@ export const offerings = mysqlTable('offerings', {
 
 // ---- Expenses ("Financial Viability"'s missing half: cost structure, not just
 // revenue. Deliberately simple - a dated ledger line, not full accounting.)
+/**
+ * A cost that repeats, recorded once.
+ *
+ * Expenses used to be one-off only, so rent, salaries, software and insurance had to
+ * be typed in again every month or they never appeared at all. Nobody does that twelve
+ * times a year, so the cost side of every report was quietly understated and profit
+ * read better than the bank did.
+ *
+ * Deliberately NOT the subscriptions table in another hat. That one bills a CLIENT and
+ * raises an invoice they owe. This one owes nobody anything: it just writes an ordinary
+ * expense row on schedule, so every report already reading expenses picks it up with no
+ * further change anywhere.
+ */
+export const recurringExpenses = mysqlTable('recurring_expenses', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  description: varchar('description', { length: 200 }).notNull(),
+  category: varchar('category', { length: 60 }),
+  amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+  vatAmount: decimal('vat_amount', { precision: 12, scale: 2 }),
+  /** 1 monthly, 3 quarterly, 12 annually. Same shape the billing cron already uses. */
+  intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),
+  nextDueOn: date('next_due_on', { mode: 'string' }).notNull(),
+  startedOn: date('started_on', { mode: 'string' }).notNull(),
+  /** A cost that stops: a lease that ends, a contract not renewed. */
+  endsOn: date('ends_on', { mode: 'string' }),
+  isActive: boolean('is_active').default(true).notNull(),
+  lastGeneratedOn: date('last_generated_on', { mode: 'string' }),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_recurring_expense_due').on(t.isActive, t.nextDueOn),
+]);
+
 export const expenses = mysqlTable('expenses', {
   id: pk(),
   accountId: int('account_id', { unsigned: true }).notNull()
@@ -902,11 +940,24 @@ export const expenses = mysqlTable('expenses', {
   // no VAT (or the amount was never split out); the VAT report treats null as zero.
   vatAmount: decimal('vat_amount', { precision: 12, scale: 2 }),
   incurredOn: date('incurred_on', { mode: 'string' }).notNull(),
+  /**
+   * Which standing cost wrote this, when one did.
+   *
+   * Null for anything typed in by hand, which is most of them. Its real job is the
+   * unique index it sits under: (recurringExpenseId, incurredOn) means a job that runs
+   * twice, or catches up several missed months at once, cannot write the same month
+   * twice however it is retried.
+   */
+  recurringExpenseId: int('recurring_expense_id', { unsigned: true })
+    .references(() => recurringExpenses.id, { onDelete: 'set null' }),
   createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 }, (t) => [
   index('idx_expenses_account_business').on(t.accountId, t.businessId, t.incurredOn),
+  // The guard that makes the catch-up job safe to run twice: one expense per standing
+  // cost per date, enforced by the database rather than by remembering to check.
+  uniqueIndex('uniq_expense_recurrence_period').on(t.recurringExpenseId, t.incurredOn),
 ]);
 
 // ---- Subscriptions (recurring billing: ties a recurring Offering to a specific

@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, recurringExpenses, } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
 import { addMonths, anchorDayOf } from './billing.js';
@@ -487,6 +487,31 @@ export async function importAccountData(accountId, importerUserId, data) {
                 title: n.title ?? '', body: n.body ?? null, kind: n.kind ?? undefined,
                 status: n.status ?? undefined, priority: n.priority ?? undefined,
                 createdBy: importerUserId,
+            });
+        }
+        /**
+         * Standing costs.
+         *
+         * Restored SWITCHED OFF, deliberately, and the same rule the money side follows
+         * everywhere else in this file: a restore must not start writing rows on its own.
+         * Someone reviews what came back and turns them on. The alternative is a restored
+         * workspace quietly recording a rent that has not been paid for a year.
+         */
+        for (const rec of arr(data, 'recurringExpenses')) {
+            const businessId = ref('businesses', rec.businessId);
+            if (!businessId)
+                continue;
+            await insert('recurringExpenses', recurringExpenses, rec.id, {
+                businessId,
+                description: rec.description ?? 'Restored cost',
+                category: rec.category ?? null,
+                amount: rec.amount ?? '0.00',
+                vatAmount: rec.vatAmount ?? null,
+                intervalMonths: rec.intervalMonths ?? 1,
+                startedOn: rec.startedOn ?? todayStr(),
+                nextDueOn: rec.nextDueOn ?? todayStr(),
+                endsOn: rec.endsOn ?? null,
+                isActive: false,
             });
         }
         // Counter takings. The provider id comes back with them, so a later sync
