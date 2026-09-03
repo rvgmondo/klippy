@@ -901,6 +901,30 @@ export async function liveHostingForFolders(
   return liveHostingForSubscriptions(accountId, subs.map((s) => s.id));
 }
 
+/**
+ * Any standing money arrangement under these folders, hosting or not.
+ *
+ * The trash purge held back a client with LIVE HOSTING and nothing else, which left a
+ * real hole: a client on a monthly retainer with no server had no guard at all. Trash
+ * them, wait past the thirty days, and the folder delete cascaded through
+ * subscriptions.folderId and took the arrangement with it, including the negotiated
+ * price, the saved card token and the debit consent behind it. Nothing was said and
+ * there was nothing to restore from.
+ *
+ * A hold is not a leak, because a CANCELLED or PAUSED arrangement is not counted. The
+ * trash still empties; it just cannot empty a client who is still being billed.
+ */
+export async function liveArrangementsForFolders(
+  accountId: number, folderIds: number[],
+): Promise<{ id: number; folderId: number }[]> {
+  if (!folderIds.length) return [];
+  return db.select({ id: subscriptions.id, folderId: subscriptions.folderId })
+    .from(subscriptions)
+    .where(tenantWhere(subscriptions, accountId,
+      inArray(subscriptions.folderId, folderIds),
+      eq(subscriptions.status, 'active')));
+}
+
 export async function suspendForSubscription(
   accountId: number, subscriptionId: number, suspend: boolean, reason = 'Subscription cancelled',
 ): Promise<void> {

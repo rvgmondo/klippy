@@ -8,7 +8,7 @@ import { payLinkFor } from './paylink.js';
 import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { mrrByCurrency } from './mrr.js';
-import { runHostingSuspensions, liveHostingForFolders } from './hosting.js';
+import { runHostingSuspensions, liveHostingForFolders, liveArrangementsForFolders } from './hosting.js';
 import { folderNodes, subtreeIdsFrom } from './folderTree.js';
 import { tenantWhere } from './tenant.js';
 import { pruneLoginTokens } from './portalAuth.js';
@@ -175,6 +175,35 @@ export async function runDailyDigest(): Promise<string> {
           heldFolderIds.push(...ids);
           continue;
         }
+
+        /**
+         * Held for a standing arrangement, even with no hosting.
+         *
+         * The check above only ever covered LIVE HOSTING, which left a client on a
+         * monthly retainer and no server completely unguarded: the delete below
+         * cascades through subscriptions.folderId and takes the arrangement with it,
+         * along with the negotiated price, the saved card token and the debit consent.
+         * Silently, and with nothing to restore from.
+         *
+         * Only ACTIVE arrangements hold. A cancelled one is finished business and must
+         * not keep a client in the Trash for ever.
+         */
+        const arrangements = await liveArrangementsForFolders(accountId, ids);
+        if (arrangements.length) {
+          held++;
+          await db.insert(events).values({
+            accountId, businessId: null, name: 'billing.orphan-risk',
+            payload: { folderId: rootId, subscriptionIds: arrangements.map((a) => a.id) },
+            results: [{
+              handler: 'trash.purge',
+              outcome: `Held in the Trash: this client still has ${arrangements.length} active recurring ${arrangements.length === 1 ? 'charge' : 'charges'}. Cancel it on their billing screen and they will be removed on a later run.`,
+              ok: false,
+            }],
+          }).catch(() => { /* never let a log write stop housekeeping */ });
+          heldFolderIds.push(...ids);
+          continue;
+        }
+
         await db.delete(folders).where(tenantWhere(folders, accountId, eq(folders.id, rootId))).catch(() => {});
       }
     }

@@ -334,6 +334,54 @@ await clean();
   }
 }
 
+// ---- a recurring arrangement survives the trash purge -----------------------------
+{
+  // The purge holds back a trashed client that has LIVE HOSTING. A client with an
+  // active subscription and no hosting had no guard at all: trash them, wait past the
+  // 30 days, and the folder delete cascades through subscriptions.folderId and takes
+  // the arrangement with it, including the saved card token and the debit consent.
+  // Nothing is said, and there is nothing to restore from.
+  const [[biz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 LIMIT 1');
+  const [[off]] = await db.query('SELECT id FROM offerings WHERE account_id = 1 LIMIT 1');
+  if (!biz || !off) {
+    console.log('SKIP  purge guard needs a business and an offering');
+  } else {
+    const [f] = await db.query(
+      "INSERT INTO folders (account_id, business_id, name, pillar, deleted_at) VALUES (1,?,'E2E Purge Client','delivery', DATE_SUB(NOW(), INTERVAL 40 DAY))",
+      [biz.id]);
+    const FID = f.insertId;
+    const [sub] = await db.query(
+      "INSERT INTO subscriptions (account_id,business_id,folder_id,offering_id,status,interval_months,started_on,next_bill_date,price,payfast_token,auto_debit) VALUES (1,?,?,?,'active',1,CURDATE(),CURDATE(),'2500.00','tok-live-consent',1)",
+      [biz.id, FID, off.id]);
+    const SUB = sub.insertId;
+
+    const { runDailyDigest } = await import('file:///C:/CC/klippy-v2/api/dist/lib/jobs.js');
+    await db.query("UPDATE job_runs SET last_run_on = NULL WHERE name = 'daily-digest'");
+    await runDailyDigest();
+
+    const [[stillSub]] = await db.query('SELECT COUNT(*) n FROM subscriptions WHERE id = ?', [SUB]);
+    ok(Number(stillSub.n) === 1,
+      'a trashed client with a live subscription is HELD, not purged, so the arrangement survives',
+      Number(stillSub.n) === 1 ? 'kept' : 'DESTROYED');
+
+    const [[stillFolder]] = await db.query('SELECT COUNT(*) n FROM folders WHERE id = ?', [FID]);
+    ok(Number(stillFolder.n) === 1, 'and the client it belongs to is held with it');
+
+    // A CANCELLED arrangement is not a reason to hold anything forever: the whole
+    // point of the trash emptying is that it eventually empties.
+    await db.query("UPDATE subscriptions SET status = 'canceled' WHERE id = ?", [SUB]);
+    await db.query("UPDATE job_runs SET last_run_on = NULL WHERE name = 'daily-digest'");
+    await runDailyDigest();
+    const [[gone]] = await db.query('SELECT COUNT(*) n FROM folders WHERE id = ?', [FID]);
+    ok(Number(gone.n) === 0,
+      'but once it is cancelled the client does purge, so the hold is not a permanent leak',
+      Number(gone.n) === 0 ? 'purged' : 'still held');
+
+    await db.query('DELETE FROM subscriptions WHERE id = ?', [SUB]).catch(() => {});
+    await db.query('DELETE FROM folders WHERE id = ?', [FID]).catch(() => {});
+  }
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURES`);
 await db.end();
 process.exit(failures ? 1 : 0);
