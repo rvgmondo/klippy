@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ProfitSection } from './ProfitSection';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../lib/api';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -68,7 +69,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   return (
     <Page>
       <PageHeader view="reports" title="Reports"
-        subtitle="Time turned into money, what is still unbilled, and what the taxman needs."
+        subtitle="What you kept, what is still unbilled, and what the taxman needs."
         actions={(
           <div className="flex items-end gap-2">
             <label className="block">
@@ -82,6 +83,9 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           </div>
         )} />
       <PageBody>
+
+        {/* First, because it is the question the page is really being opened for. */}
+        <ProfitSection businessId={businessId} from={from} to={to} />
 
         <UnbilledSection businessId={businessId} />
 

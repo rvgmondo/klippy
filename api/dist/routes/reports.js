@@ -330,6 +330,126 @@ export async function reportRoutes(app) {
      * compute neither, forcing a parallel spreadsheet every two months.
      */
     /**
+     * Did this business make money.
+     *
+     * Klippy could not answer that until now, and the reason is worth stating: it only
+     * knew half of each side. Revenue meant invoices, so a shop selling over a counter
+     * appeared to earn nothing. Costs meant one-off expenses, so every standing cost was
+     * missing. Counter takings and recurring expenses fixed both halves, and this is what
+     * they were for.
+     *
+     * Three deliberate choices:
+     *
+     *  1. EARNED, NOT RECEIVED, is the headline. An invoice raised is work done and money
+     *     owed, and judging a month by what happened to clear the bank in it makes a good
+     *     month look bad because a client paid late. What is still owed is reported
+     *     beside it rather than hidden, so the cash position is never a surprise.
+     *  2. THE FEES ARE A COST, not a rounding error. Card and gateway fees are money a
+     *     provider kept out of what the customer paid. Leaving them out is how a business
+     *     believes it is doing better than its bank balance says.
+     *  3. PER BUSINESS AND PER CURRENCY, never summed across either. Profit belongs to a
+     *     legal entity, and a rand added to a dollar is money in neither.
+     */
+    app.get('/api/v1/reports/profit', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({
+            from: dateStr, to: dateStr,
+            businessId: z.coerce.number().int().positive().optional(),
+        }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'from and to (YYYY-MM-DD) required.' });
+        const { from, to } = q.data;
+        const only = q.data.businessId;
+        const fromDate = new Date(`${from}T00:00:00.000Z`);
+        const toDate = new Date(`${to}T23:59:59.999Z`);
+        const [acc] = await db.select({ currency: accounts.currency }).from(accounts)
+            .where(eq(accounts.id, accountId)).limit(1);
+        const wsCur = acc?.currency || DEFAULT_CURRENCY;
+        const bizRows = await db.select({ id: businesses.id, name: businesses.name, currency: businesses.currency })
+            .from(businesses).where(tenantWhere(businesses, accountId));
+        const bizById = new Map(bizRows.map((b) => [b.id, b]));
+        const curOf = (bid) => (bid != null ? bizById.get(bid)?.currency : null) || wsCur;
+        const scope = await businessScope(req, documents.businessId);
+        const onlyDoc = only !== undefined ? eq(documents.businessId, only) : undefined;
+        // Invoiced in the period. Credit notes carry a negative sign, so a refunded month
+        // reads as the refund rather than as the sale that was undone.
+        const invRows = await db.select({
+            businessId: documents.businessId, currency: documents.currency,
+            type: documents.type, total: documents.total,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, scope, onlyDoc, inArray(documents.type, ['invoice', 'credit_note']), ne(documents.status, 'void'), ne(documents.status, 'draft'), gte(documents.issueDate, from), lte(documents.issueDate, to)));
+        const saleRows = await db.select({
+            businessId: sales.businessId, currency: sales.currency,
+            gross: sales.gross, fee: sales.fee, refunded: sales.refunded,
+        }).from(sales)
+            .where(tenantWhere(sales, accountId, await businessScope(req, sales.businessId), only !== undefined ? eq(sales.businessId, only) : undefined, gte(sales.occurredAt, fromDate), lte(sales.occurredAt, toDate)));
+        const expRows = await db.select({ businessId: expenses.businessId, amount: expenses.amount })
+            .from(expenses)
+            .where(tenantWhere(expenses, accountId, await businessScope(req, expenses.businessId), only !== undefined ? eq(expenses.businessId, only) : undefined, gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+        // What a gateway kept out of money that came in against an invoice.
+        const payRows = await db.select({
+            businessId: documents.businessId, fee: payments.feeAmount, amount: payments.amount,
+            currency: documents.currency,
+        }).from(payments)
+            .innerJoin(documents, eq(documents.id, payments.documentId))
+            .where(tenantWhere(payments, accountId, scope, onlyDoc, gte(payments.paidOn, from), lte(payments.paidOn, to)));
+        const rows = new Map();
+        const into = (businessId, currency) => {
+            const key = `${businessId ?? 0}:${currency}`;
+            let r = rows.get(key);
+            if (!r) {
+                r = {
+                    businessId,
+                    name: (businessId != null ? bizById.get(businessId)?.name : null) ?? 'Not assigned to a business',
+                    currency, invoiced: 0, taken: 0, received: 0, expenses: 0, fees: 0,
+                };
+                rows.set(key, r);
+            }
+            return r;
+        };
+        for (const d of invRows) {
+            into(d.businessId, d.currency).invoiced += (d.type === 'credit_note' ? -1 : 1) * Number(d.total);
+        }
+        for (const s of saleRows) {
+            const r = into(s.businessId, s.currency);
+            // A refunded taking is not revenue, so it comes off rather than being ignored.
+            r.taken += Number(s.gross) - Number(s.refunded);
+            r.fees += Number(s.fee);
+            // Counter money is received the moment it is taken; there is nothing to chase.
+            r.received += Number(s.gross) - Number(s.refunded);
+        }
+        for (const p of payRows) {
+            const r = into(p.businessId, p.currency);
+            r.received += Number(p.amount);
+            if (p.fee != null)
+                r.fees += Number(p.fee);
+        }
+        for (const e of expRows) {
+            into(e.businessId, curOf(e.businessId)).expenses += Number(e.amount);
+        }
+        const out = [...rows.values()].map((r) => {
+            const earned = roundMoney(r.invoiced + r.taken, r.currency);
+            const spent = roundMoney(r.expenses + r.fees, r.currency);
+            return {
+                businessId: r.businessId, name: r.name, currency: r.currency,
+                invoiced: roundMoney(r.invoiced, r.currency),
+                taken: roundMoney(r.taken, r.currency),
+                earned,
+                expenses: roundMoney(r.expenses, r.currency),
+                fees: roundMoney(r.fees, r.currency),
+                spent,
+                profit: roundMoney(earned - spent, r.currency),
+                received: roundMoney(r.received, r.currency),
+                // Earned but not yet in the bank. Not the full debtors book, just the gap
+                // this period opened, which is the number that explains a good month with an
+                // empty account.
+                awaited: roundMoney(earned - r.received, r.currency),
+                margin: earned > 0 ? Math.round(((earned - spent) / earned) * 1000) / 10 : null,
+            };
+        }).sort((a, b) => b.earned - a.earned);
+        return { from, to, businessId: only ?? null, rows: out };
+    });
+    /**
      * A VAT return is filed by a LEGAL ENTITY, not by a workspace.
      *
      * This used to merge every business into one set of figures, which is wrong in
