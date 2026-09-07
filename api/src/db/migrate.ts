@@ -8,6 +8,14 @@ import { db } from './client.js';
  * the schema means adding it here too.
  */
 const EXPECTED_TABLES = [
+  // Added 2026-09: this guard is what notices a skipped migration, so every new table
+  // belongs here in the same commit that creates it.
+  'focus_items',
+  'payment_connections',
+  'sales',
+  'invitations',
+  'recurring_expenses',
+
   'accounts', 'api_tokens', 'auto_debit_attempts', 'board_columns', 'board_teams',
   'boards', 'business_email', 'business_members', 'businesses', 'calendar_events',
   'contacts', 'deal_activities', 'deals', 'document_lines', 'documents', 'events',
