@@ -13,6 +13,7 @@ import { socialTokensAvailable } from '../lib/social/tokens.js';
 import { validatePost } from '../lib/social/validate.js';
 import { NETWORKS } from '../lib/social/types.js';
 import { canAutoPublish, whyNotAutomatic } from '../lib/social/registry.js';
+import { canConnect } from '../lib/social/credentials.js';
 import { publicMediaUrl } from '../lib/social/mediaUrl.js';
 /**
  * Planning, approving and scheduling social posts.
@@ -133,20 +134,21 @@ export async function socialRoutes(app) {
         return {
             accounts: rows,
             serverReady: socialTokensAvailable(),
-            networks: NETWORKS.map((n) => {
+            networks: await Promise.all(NETWORKS.map(async (n) => {
                 const connected = rows.some((r) => r.network === n && r.status === 'connected');
-                // Automatic means all three: an adapter exists, the server has the app
-                // credentials, and an account is actually connected. Any one missing and the
-                // post takes the manual path, so the screen says so rather than implying it
-                // will publish itself.
+                // Three separate facts, kept separate because they send a person to three
+                // different places: is there an adapter, can this workspace start a
+                // connection at all, and has anything actually been connected.
+                const connectable = await canConnect(accountId, n);
                 const auto = canAutoPublish(n) && connected;
                 return {
                     network: n,
                     connected,
+                    connectable,
                     canAutoPublish: auto,
-                    note: auto ? 'Klippy posts to this automatically.' : whyNotAutomatic(n),
+                    note: auto ? 'Klippy posts to this automatically.' : whyNotAutomatic(n, { canConnect: connectable }),
                 };
-            }),
+            })),
         };
     });
     // ---- Posts ---------------------------------------------------------------------

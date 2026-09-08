@@ -28,9 +28,6 @@ const REST = 'https://api.linkedin.com/rest';
  * why it reads from the environment rather than being buried in a string.
  */
 const VERSION = process.env.LINKEDIN_VERSION || '202608';
-const clientId = () => process.env.LINKEDIN_CLIENT_ID ?? '';
-const clientSecret = () => process.env.LINKEDIN_CLIENT_SECRET ?? '';
-export const linkedinConfigured = () => !!(clientId() && clientSecret());
 /** LI-POST-03. Everything an organisation post needs, plus comments and the profile. */
 const SCOPES = [
     'openid', 'profile',
@@ -91,9 +88,9 @@ async function call(url, init) {
 }
 // ---- OAuth ---------------------------------------------------------------------
 /** LI-AUTH-01. */
-export function linkedinAuthUrl(state, redirectUri) {
+export function linkedinAuthUrl(state, redirectUri, app) {
     return `https://www.linkedin.com/oauth/v2/authorization?${new URLSearchParams({
-        response_type: 'code', client_id: clientId(), redirect_uri: redirectUri, state, scope: SCOPES,
+        response_type: 'code', client_id: app.appId, redirect_uri: redirectUri, state, scope: SCOPES,
     })}`;
 }
 /**
@@ -105,13 +102,13 @@ export function linkedinAuthUrl(state, redirectUri) {
  * is recorded rather than treated as a failure: the daily health check is what turns
  * that into a warning before it turns into a missed post.
  */
-export async function linkedinExchangeCode(code, redirectUri) {
+export async function linkedinExchangeCode(code, redirectUri, app) {
     const res = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
             grant_type: 'authorization_code', code,
-            client_id: clientId(), client_secret: clientSecret(), redirect_uri: redirectUri,
+            client_id: app.appId, client_secret: app.appSecret, redirect_uri: redirectUri,
         }),
     });
     const body = await res.json().catch(() => null);
@@ -237,19 +234,9 @@ async function publishLinkedIn(creds, post, media) {
 }
 export const linkedinAdapter = {
     network: 'linkedin',
-    canPublish: linkedinConfigured(),
-    authUrl(state) {
-        return linkedinAuthUrl(state, `${process.env.APP_URL ?? ''}/api/v1/social/connect/linkedin/callback`);
-    },
-    async exchangeCode(code) {
-        const r = await linkedinExchangeCode(code, `${process.env.APP_URL ?? ''}/api/v1/social/connect/linkedin/callback`);
-        return {
-            accessToken: r.accessToken,
-            refreshToken: r.refreshToken ?? undefined,
-            expiresAt: r.expiresAt ?? undefined,
-            scopes: r.scopes,
-        };
-    },
+    // See meta.ts: publishing uses the stored token, so this is about the adapter
+    // existing, not about whether an app has been configured.
+    canPublish: true,
     listPublishableAccounts(userToken) {
         return linkedinListOrganisations(userToken);
     },
@@ -264,9 +251,6 @@ export const linkedinAdapter = {
                 images: media.filter((m) => (m.mimeType ?? '').startsWith('image/')).length,
             })}`);
             return { externalPostId: `dryrun-linkedin-${Date.now()}`, permalink: null };
-        }
-        if (!linkedinConfigured()) {
-            throw new SocialApiError('linkedin', 'LINKEDIN_CLIENT_ID and LINKEDIN_CLIENT_SECRET are not set on the server.', { retryable: false, code: 'not-configured' });
         }
         return publishLinkedIn(creds, post, media);
     },

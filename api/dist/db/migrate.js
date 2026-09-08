@@ -7,6 +7,7 @@ import { db } from './client.js';
  * the schema means adding it here too.
  */
 const EXPECTED_TABLES = [
+    'social_app_settings',
     'social_accounts',
     'social_posts',
     'social_post_targets',

@@ -98,5 +98,21 @@ export interface SocialAccountsResponse {
     lastError: string | null; tokenExpiresAt: string | null;
   }[];
   serverReady: boolean;
-  networks: { network: SocialNetwork; connected: boolean; canAutoPublish: boolean; note: string }[];
+  networks: {
+    network: SocialNetwork;
+    connected: boolean;
+    /** Whether this workspace has app details, so a Connect button can work at all. */
+    connectable: boolean;
+    canAutoPublish: boolean;
+    note: string;
+  }[];
+}
+
+export interface SocialAppSetting {
+  provider: 'meta' | 'linkedin';
+  appId: string | null;
+  configId: string | null;
+  /** Never the secret itself, only whether one is stored. */
+  hasSecret: boolean;
+  source: 'workspace' | 'server' | 'none';
 }

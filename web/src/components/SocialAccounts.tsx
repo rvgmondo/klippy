@@ -6,6 +6,7 @@ import { btnPrimary, btnSecondary, Skeleton } from './ui';
 import { notify, confirmDialog } from './ConfirmDialog';
 import { NetworkBadge } from './NetworkBadge';
 import { NETWORK_META, ALL_NETWORKS, type SocialNetwork, type SocialAccountsResponse } from '../lib/socialTypes';
+import { SocialAppSettings } from './SocialAppSettings';
 
 /**
  * Connecting the accounts Klippy posts to.
@@ -160,9 +161,9 @@ export function SocialAccounts({ businessId }: { businessId: number | null }) {
         {ALL_NETWORKS.map((n) => {
           const mine = accounts.filter((a) => a.network === n);
           const cap = capability.get(n);
-          // Connectable when the server has the app credentials. The API answers this
-          // per network, so the screen never offers a button that can only 503.
-          const connectable = !!cap && !/not set up on this server/i.test(cap.note);
+          // The API answers this per workspace, so the screen never offers a Connect
+          // button that could only come back with "set it up first".
+          const connectable = !!cap?.connectable;
           return (
             <div key={n} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
               <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -223,13 +224,21 @@ export function SocialAccounts({ businessId }: { businessId: number | null }) {
         <p className="text-[11px] text-slate-500">Pick one business above to connect its accounts.</p>
       )}
 
+      {/* The app details sit here, under the accounts they make possible, because this
+          is the thing you have to do FIRST and burying it in a settings page is how
+          somebody concludes the Connect button is broken. */}
+      <div>
+        <h3 className="mb-2 text-xs uppercase tracking-wide text-slate-500">App details</h3>
+        <SocialAppSettings />
+      </div>
+
       <details className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
         <summary className="cursor-pointer text-sm font-medium text-slate-300">
           What you need before connecting
         </summary>
         <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-xs text-slate-400">
           <li>A Meta app of the Business type, with Facebook Login for Business added.</li>
-          <li>Its app id and secret set on this server, so Klippy can talk to Meta at all.</li>
+          <li>Its app id and secret pasted into the App details section above.</li>
           <li>
             An Instagram Business or Creator account linked to the Facebook Page. Instagram
             publishing runs through the Page, so an unlinked account cannot be posted to.

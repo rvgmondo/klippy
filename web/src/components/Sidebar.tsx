@@ -50,8 +50,8 @@ export const AREAS: {
   },
   {
     key: 'sales', label: 'Sales', icon: Target, blurb: 'Bring work in',
-    defaultView: 'pipeline', views: ['pipeline', 'offerings', 'contacts'],
-    modules: ['pipeline', 'offerings'],
+    defaultView: 'pipeline', views: ['pipeline', 'offerings', 'contacts', 'social'],
+    modules: ['pipeline', 'offerings', 'social'],
   },
   {
     key: 'money', label: 'Money', icon: Wallet, blurb: 'Handle the money',

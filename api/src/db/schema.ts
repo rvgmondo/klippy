@@ -1936,6 +1936,42 @@ export const socialPublishLog = mysqlTable('social_publish_log', {
   index('idx_social_log_post').on(t.postId, t.createdAt),
 ]);
 
+/**
+ * The platform app credentials a workspace connects through.
+ *
+ * These used to be environment variables, which meant editing server config to set up
+ * a social account. That is wrong for a product other companies run: nobody buying
+ * Klippy has an SSH session, and asking them to get one to use a feature is asking
+ * them not to use it.
+ *
+ * WHAT THESE ARE, AND WHAT THEY ARE NOT. This is the APP identity, the thing Meta and
+ * LinkedIn issue to a developer so a login dialog can exist at all. It is used only
+ * during the connect round trip. Publishing uses the per-account access token stored
+ * on social_accounts and never touches these, which is why removing them breaks new
+ * connections and not existing ones.
+ *
+ * Scoped per workspace, with the environment as a fallback, so both futures work: a
+ * workspace can bring its own app today, and one day Klippy can ship its own reviewed
+ * app in the environment that every workspace inherits without changing a row.
+ */
+export const socialAppSettings = mysqlTable('social_app_settings', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  /** 'meta' covers Facebook and Instagram: one app, one login, both networks. */
+  provider: mysqlEnum('provider', ['meta', 'linkedin']).notNull(),
+  appId: varchar('app_id', { length: 120 }),
+  /** Encrypted at rest, same as every other credential, and never returned to a browser. */
+  appSecretEnc: text('app_secret_enc'),
+  /** Meta's Login for Business configuration id, when one is used. */
+  configId: varchar('config_id', { length: 120 }),
+  updatedBy: int('updated_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  uniqueIndex('uniq_social_app_settings').on(t.accountId, t.provider),
+]);
+
 export const socialPostsRelations = relations(socialPosts, ({ many }) => ({
   targets: many(socialPostTargets),
   media: many(socialPostMedia),

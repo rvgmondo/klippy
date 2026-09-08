@@ -5,7 +5,6 @@ import { tenantWhere } from '../tenant.js';
 import { httpJson } from './http.js';
 import { decryptToken } from './tokens.js';
 import { SocialApiError, NETWORK_LABEL } from './types.js';
-import { metaConfigured } from './adapters/meta.js';
 /**
  * Is this connection still going to work on Monday?
  *
@@ -25,11 +24,6 @@ export async function checkAccount(row) {
     const label = NETWORK_LABEL[network];
     if (!row.accessTokenEnc) {
         return await record(row, 'error', 'There is no stored token for this connection.');
-    }
-    if ((network === 'instagram' || network === 'facebook') && !metaConfigured()) {
-        // Not the connection's fault, so it is not marked broken. The server is missing
-        // its app credentials, and saying that is more useful than a red badge.
-        return { ok: false, status: row.status, message: 'The Meta app is not set up on this server.' };
     }
     let token;
     try {

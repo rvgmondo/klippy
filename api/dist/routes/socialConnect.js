@@ -12,6 +12,7 @@ import { signState, verifyState } from '../lib/social/state.js';
 import { metaAuthUrl, metaExchangeCode, metaListAccounts } from '../lib/social/adapters/meta.js';
 import { linkedinAuthUrl, linkedinExchangeCode, linkedinListOrganisations } from '../lib/social/adapters/linkedin.js';
 import { adapterFor, whyNotAutomatic } from '../lib/social/registry.js';
+import { appCredentials, providerOf, listAppSettings, saveAppSettings, clearAppSettings } from '../lib/social/credentials.js';
 import { NETWORK_LABEL } from '../lib/social/types.js';
 /**
  * Connecting a Facebook Page and the Instagram account behind it.
@@ -75,16 +76,18 @@ export async function socialConnectRoutes(app) {
                 error: 'The server cannot store social tokens yet. Set SOCIAL_TOKEN_KEY in the app environment and restart.',
             });
         }
-        if (!adapter.canPublish) {
-            // The app credentials are missing, and saying WHICH ones beats a generic
-            // "not configured" that leaves somebody guessing at a cPanel settings page.
-            return reply.code(503).send({ error: whyNotAutomatic(network) });
+        // The workspace's own app, or the server's as a fallback. Missing means the
+        // settings below the Connect button have not been filled in, and saying that
+        // beats a generic "not configured" that sends somebody hunting a config file.
+        const app = await appCredentials(accountId, providerOf(network));
+        if (!app) {
+            return reply.code(503).send({ error: whyNotAutomatic(network, { canConnect: false }) });
         }
         const state = signState({ accountId, businessId: q.data.businessId, userId, network });
         return {
             url: network === 'linkedin'
-                ? linkedinAuthUrl(state, redirectFor(network))
-                : metaAuthUrl(state, redirectFor(network)),
+                ? linkedinAuthUrl(state, redirectFor(network), app)
+                : metaAuthUrl(state, redirectFor(network), app),
         };
     });
     // ---- 2. Callback, with no session ----------------------------------------------
@@ -113,9 +116,15 @@ export async function socialConnectRoutes(app) {
         }
         try {
             const isLinkedIn = network === 'linkedin';
+            // Resolved from the STATE's workspace, not from a session, because there is no
+            // session here. The state was signature-checked a moment ago, so its accountId
+            // is the only trustworthy thing in this request.
+            const app = await appCredentials(state.accountId, providerOf(network));
+            if (!app)
+                return bounce(reply, 'The app details for this network are no longer set up.');
             const exchanged = isLinkedIn
-                ? await linkedinExchangeCode(q.data.code, redirectFor(network))
-                : await metaExchangeCode(q.data.code, redirectFor(network));
+                ? await linkedinExchangeCode(q.data.code, redirectFor(network), app)
+                : await metaExchangeCode(q.data.code, redirectFor(network), app);
             const accessToken = exchanged.accessToken;
             const expiresAt = exchanged.expiresAt;
             const accounts = isLinkedIn
@@ -249,6 +258,66 @@ export async function socialConnectRoutes(app) {
         return {
             ok: true,
             message: `${NETWORK_LABEL[row.network]} disconnected. Posts that already went out keep their links.`,
+        };
+    });
+    // ---- App settings, so nobody needs a server to set this up ---------------------
+    /**
+     * The app identity this workspace connects through.
+     *
+     * The secret is NEVER returned, only whether one is stored. `source` says where the
+     * working credentials come from, because "your app" and "the one Klippy ships" are
+     * different situations and a person setting this up needs to know which they are in.
+     */
+    app.get('/api/v1/social/app-settings', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { accountId, role } = authOf(req);
+        if (role === 'member')
+            return reply.code(403).send({ error: 'Only admins can see app settings.' });
+        return { settings: await listAppSettings(accountId) };
+    });
+    app.put('/api/v1/social/app-settings/:provider', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { accountId, userId, role } = authOf(req);
+        if (role === 'member')
+            return reply.code(403).send({ error: 'Only admins can change app settings.' });
+        const provider = req.params.provider;
+        if (provider !== 'meta' && provider !== 'linkedin') {
+            return reply.code(400).send({ error: 'Unknown provider.' });
+        }
+        if (!socialTokensAvailable()) {
+            return reply.code(503).send({
+                error: 'This server cannot store secrets yet. Set SOCIAL_TOKEN_KEY in the app environment and restart.',
+            });
+        }
+        const parsed = z.object({
+            appId: z.string().trim().min(3).max(120),
+            // Optional so the config id can be edited without retyping a secret, and absent
+            // means "keep the stored one" rather than "clear it".
+            appSecret: z.string().trim().min(8).max(400).optional(),
+            configId: z.string().trim().max(120).nullable().optional(),
+        }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+        await saveAppSettings(accountId, userId, provider, parsed.data);
+        return { ok: true, settings: await listAppSettings(accountId) };
+    });
+    /**
+     * Forget this workspace's app details.
+     *
+     * Accounts already connected keep working, because they publish with their own
+     * access tokens. Only new connections stop being possible.
+     */
+    app.delete('/api/v1/social/app-settings/:provider', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { accountId, role } = authOf(req);
+        if (role === 'member')
+            return reply.code(403).send({ error: 'Only admins can change app settings.' });
+        const provider = req.params.provider;
+        if (provider !== 'meta' && provider !== 'linkedin') {
+            return reply.code(400).send({ error: 'Unknown provider.' });
+        }
+        await clearAppSettings(accountId, provider);
+        return {
+            ok: true,
+            message: 'Removed. Accounts already connected keep posting; only new connections need details again.',
+            settings: await listAppSettings(accountId),
         };
     });
     /**

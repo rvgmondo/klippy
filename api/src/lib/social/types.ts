@@ -130,13 +130,25 @@ export interface AdapterCredentials {
 
 export interface SocialAdapter {
   network: Network;
-  /** False until the adapter is written, so the UI can list a network without offering it. */
+  /**
+   * Whether Klippy can publish to this network without a person.
+   *
+   * About the ADAPTER existing, not about configuration: publishing runs on the
+   * per-account token stored at connect time, so it keeps working even if the app
+   * credentials are later cleared. Whether a workspace can start a NEW connection is
+   * a separate question, answered by lib/social/credentials.ts.
+   */
   canPublish: boolean;
 
-  authUrl(state: string): string;
-  exchangeCode(code: string): Promise<{
-    accessToken: string; refreshToken?: string; expiresAt?: Date; scopes: string[];
-  }>;
+  /**
+   * The OAuth entry points are deliberately NOT on this interface.
+   *
+   * They need the workspace's app id and secret, which differ per workspace and are
+   * resolved from the database. Putting them here would mean either threading
+   * credentials through every adapter method or letting adapters read global state,
+   * and the second is what this refactor removed. routes/socialConnect.ts calls the
+   * per-network functions directly instead.
+   */
   listPublishableAccounts(userToken: string): Promise<ConnectedAccount[]>;
 
   /** Sync checks, run before anything is scheduled. Never calls the network. */

@@ -36,9 +36,14 @@ const GRAPH = `https://graph.facebook.com/${VERSION}`;
 const POLL_INTERVAL_MS = Number(process.env.META_POLL_INTERVAL_MS || 5000);
 const POLL_MAX_MS = 5 * 60_000;
 
-const appId = () => process.env.META_APP_ID ?? '';
-const appSecret = () => process.env.META_APP_SECRET ?? '';
-export const metaConfigured = (): boolean => !!(appId() && appSecret());
+/**
+ * The app identity, passed in rather than read from the environment.
+ *
+ * A workspace stores its own in Klippy, so the caller resolves which one applies and
+ * hands it over. Nothing in this file reaches for a global, which is also what makes
+ * it testable without setting process.env.
+ */
+export interface MetaApp { appId: string; appSecret: string; configId?: string | null }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -57,10 +62,9 @@ function logDryRun(what: string, detail: Record<string, unknown>): void {
  * dashboard configuration, and passing scope to a Business-type app is the documented
  * way to get a dialog that grants nothing.
  */
-export function metaAuthUrl(state: string, redirectUri: string): string {
-  const configId = process.env.META_LOGIN_CONFIG_ID;
-  const q = new URLSearchParams({ client_id: appId(), redirect_uri: redirectUri, state, response_type: 'code' });
-  if (configId) q.set('config_id', configId);
+export function metaAuthUrl(state: string, redirectUri: string, app: MetaApp): string {
+  const q = new URLSearchParams({ client_id: app.appId, redirect_uri: redirectUri, state, response_type: 'code' });
+  if (app.configId) q.set('config_id', app.configId);
   return `https://www.facebook.com/${VERSION}/dialog/oauth?${q}`;
 }
 
@@ -71,17 +75,17 @@ export function metaAuthUrl(state: string, redirectUri: string): string {
  * lasts one to two hours (M-AUTH-22) and a connection made on a Friday would otherwise
  * be dead before anyone published with it.
  */
-export async function metaExchangeCode(code: string, redirectUri: string): Promise<{
+export async function metaExchangeCode(code: string, redirectUri: string, app: MetaApp): Promise<{
   accessToken: string; expiresAt: Date | null;
 }> {
   const short = await httpJson<{ access_token: string }>(
     `${GRAPH}/oauth/access_token?${new URLSearchParams({
-      client_id: appId(), client_secret: appSecret(), redirect_uri: redirectUri, code,
+      client_id: app.appId, client_secret: app.appSecret, redirect_uri: redirectUri, code,
     })}`, { network: 'facebook' });
 
   const long = await httpJson<{ access_token: string; expires_in?: number }>(
     `${GRAPH}/oauth/access_token?${new URLSearchParams({
-      grant_type: 'fb_exchange_token', client_id: appId(), client_secret: appSecret(),
+      grant_type: 'fb_exchange_token', client_id: app.appId, client_secret: app.appSecret,
       fb_exchange_token: short.access_token,
     })}`, { network: 'facebook' });
 
@@ -332,16 +336,10 @@ async function publishFacebook(
 function buildAdapter(network: Network): SocialAdapter {
   return {
     network,
-    canPublish: metaConfigured(),
-
-    authUrl(state: string) {
-      return metaAuthUrl(state, `${process.env.APP_URL ?? ''}/api/v1/social/connect/${network}/callback`);
-    },
-
-    async exchangeCode(code: string) {
-      const r = await metaExchangeCode(code, `${process.env.APP_URL ?? ''}/api/v1/social/connect/${network}/callback`);
-      return { accessToken: r.accessToken, expiresAt: r.expiresAt ?? undefined, scopes: [] };
-    },
+    // Publishing runs on the stored PAGE token and needs no app identity at all, so
+    // an adapter that exists can always publish. Whether a workspace can CONNECT is a
+    // different question, answered by lib/social/credentials.ts.
+    canPublish: true,
 
     listPublishableAccounts(userToken: string) {
       return metaListAccounts(userToken);
@@ -362,10 +360,6 @@ function buildAdapter(network: Network): SocialAdapter {
           media: media.map((m) => ({ mime: m.mimeType, url: m.publicUrl, w: m.width, h: m.height })),
         });
         return { externalPostId: `dryrun-${network}-${Date.now()}`, permalink: null };
-      }
-      if (!metaConfigured()) {
-        throw new SocialApiError(network, 'META_APP_ID and META_APP_SECRET are not set on the server.',
-          { retryable: false, code: 'not-configured' });
       }
       return network === 'instagram' ? publishInstagram(creds, post, media) : publishFacebook(creds, post, media);
     },
