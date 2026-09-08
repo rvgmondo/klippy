@@ -55,7 +55,7 @@ async function mediaOf(accountId: number, postId: number): Promise<MediaItem[]> 
     mimeType: socialPostMedia.mimeType, width: socialPostMedia.width,
     height: socialPostMedia.height, durationMs: socialPostMedia.durationMs,
     altText: socialPostMedia.altText, publicToken: socialPostMedia.publicToken,
-    bytes: storageNodes.size, nodeMime: storageNodes.mimeType,
+    bytes: storageNodes.size, nodeMime: storageNodes.mimeType, storageKey: storageNodes.storageKey,
   }).from(socialPostMedia)
     .innerJoin(storageNodes, eq(storageNodes.id, socialPostMedia.storageNodeId))
     .where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.postId, postId)))
@@ -67,6 +67,7 @@ async function mediaOf(accountId: number, postId: number): Promise<MediaItem[]> 
     width: r.width, height: r.height, durationMs: r.durationMs,
     bytes: r.bytes, altText: r.altText,
     publicUrl: publicMediaUrl(r.publicToken, r.mimeType ?? r.nodeMime),
+    storageKey: r.storageKey,
   }));
 }
 

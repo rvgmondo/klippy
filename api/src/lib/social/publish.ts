@@ -254,7 +254,7 @@ async function mediaFor(post: typeof socialPosts.$inferSelect): Promise<MediaIte
     mimeType: socialPostMedia.mimeType, width: socialPostMedia.width,
     height: socialPostMedia.height, durationMs: socialPostMedia.durationMs,
     altText: socialPostMedia.altText, publicToken: socialPostMedia.publicToken,
-    bytes: storageNodes.size, nodeMime: storageNodes.mimeType,
+    bytes: storageNodes.size, nodeMime: storageNodes.mimeType, storageKey: storageNodes.storageKey,
   }).from(socialPostMedia)
     .innerJoin(storageNodes, eq(storageNodes.id, socialPostMedia.storageNodeId))
     .where(tenantWhere(socialPostMedia, post.accountId, eq(socialPostMedia.postId, post.id)))
@@ -265,6 +265,7 @@ async function mediaFor(post: typeof socialPosts.$inferSelect): Promise<MediaIte
     width: r.width, height: r.height, durationMs: r.durationMs,
     bytes: r.bytes, altText: r.altText,
     publicUrl: publicMediaUrl(r.publicToken, r.mimeType ?? r.nodeMime),
+    storageKey: r.storageKey,
   }));
 }
 

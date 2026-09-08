@@ -50,6 +50,25 @@ export async function checkAccount(row: typeof socialAccounts.$inferSelect): Pro
   }
 
   try {
+    if (network === 'linkedin') {
+      // The org's own node, for the same reason as below: it proves the token works
+      // AND that this member still administers this specific Page.
+      const id = row.externalId.split(':').pop() ?? '';
+      const res = await fetch(`https://api.linkedin.com/rest/organizations/${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'X-Restli-Protocol-Version': '2.0.0',
+          'LinkedIn-Version': process.env.LINKEDIN_VERSION || '202608',
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.ok) return await record(row, 'connected', `${label} is connected and working.`);
+      if (res.status === 401 || res.status === 403) {
+        return await record(row, 'revoked', `${label}: the connection was revoked or the Page role was removed.`);
+      }
+      return { ok: false, status: row.status as HealthResult['status'], message: `Could not reach ${label} just now.` };
+    }
+
     // The cheapest call that proves the token still works AND still reaches this
     // specific account: reading the node's own id. A /me call would pass even after
     // the Page role was removed, which is the case worth catching.

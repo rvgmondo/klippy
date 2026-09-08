@@ -34,6 +34,15 @@ export interface MediaItem {
   altText: string | null;
   /** The public URL Meta will fetch from. Null when no public base is configured. */
   publicUrl: string | null;
+  /**
+   * Where the bytes actually live.
+   *
+   * Carried alongside the URL because the two networks want opposite things: Meta
+   * fetches from a URL and never sees the file, while LinkedIn refuses URLs entirely
+   * and needs the bytes streamed to an upload endpoint. Handing both to every adapter
+   * is simpler than a second publish path for the one network that differs.
+   */
+  storageKey: string | null;
 }
 
 /** What a post looks like to an adapter, with nothing tenant-shaped attached. */

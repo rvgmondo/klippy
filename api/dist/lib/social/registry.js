@@ -1,4 +1,5 @@
 import { instagramAdapter, facebookAdapter, metaConfigured } from './adapters/meta.js';
+import { linkedinAdapter, linkedinConfigured } from './adapters/linkedin.js';
 /**
  * Which networks Klippy can actually publish to right now.
  *
@@ -11,9 +12,7 @@ import { instagramAdapter, facebookAdapter, metaConfigured } from './adapters/me
 const ADAPTERS = {
     instagram: instagramAdapter,
     facebook: facebookAdapter,
-    // LinkedIn arrives in phase 4. Until then its posts take the manual path, which is
-    // the same path they would take anyway while the Community Management API approval
-    // is pending, so nothing about the plan changes when it lands.
+    linkedin: linkedinAdapter,
 };
 export function adapterFor(network) {
     return ADAPTERS[network] ?? null;
@@ -28,8 +27,11 @@ export function whyNotAutomatic(network) {
     if (!ADAPTERS[network]) {
         return 'Klippy cannot post to this automatically yet. Posts to it are sent to you at the scheduled time.';
     }
-    if (!metaConfigured()) {
+    if ((network === 'instagram' || network === 'facebook') && !metaConfigured()) {
         return 'The Meta app is not set up on this server yet, so posts are sent to you to put up.';
+    }
+    if (network === 'linkedin' && !linkedinConfigured()) {
+        return 'The LinkedIn app is not set up on this server yet, so posts are sent to you to put up.';
     }
     return 'Connect an account to let Klippy post to this automatically.';
 }

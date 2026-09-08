@@ -160,7 +160,9 @@ export function SocialAccounts({ businessId }: { businessId: number | null }) {
         {ALL_NETWORKS.map((n) => {
           const mine = accounts.filter((a) => a.network === n);
           const cap = capability.get(n);
-          const connectable = n !== 'linkedin';
+          // Connectable when the server has the app credentials. The API answers this
+          // per network, so the screen never offers a button that can only 503.
+          const connectable = !!cap && !/not set up on this server/i.test(cap.note);
           return (
             <div key={n} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
               <div className="mb-2 flex flex-wrap items-center gap-2">

@@ -10,7 +10,9 @@ import { assertBusinessAccess } from '../lib/access.js';
 import { appUrl } from '../lib/mailer.js';
 import { encryptToken, socialTokensAvailable } from '../lib/social/tokens.js';
 import { signState, verifyState } from '../lib/social/state.js';
-import { metaAuthUrl, metaExchangeCode, metaListAccounts, metaConfigured } from '../lib/social/adapters/meta.js';
+import { metaAuthUrl, metaExchangeCode, metaListAccounts } from '../lib/social/adapters/meta.js';
+import { linkedinAuthUrl, linkedinExchangeCode, linkedinListOrganisations } from '../lib/social/adapters/linkedin.js';
+import { adapterFor, whyNotAutomatic } from '../lib/social/registry.js';
 import { NETWORK_LABEL, type ConnectedAccount, type Network } from '../lib/social/types.js';
 
 /**
@@ -45,7 +47,7 @@ import { NETWORK_LABEL, type ConnectedAccount, type Network } from '../lib/socia
  */
 const pending = new Map<string, {
   accountId: number; businessId: number; userId: number; network: Network;
-  userToken: string; expiresAt: Date | null;
+  userToken: string; refreshToken: string | null; expiresAt: Date | null;
   accounts: ConnectedAccount[];
   at: number;
 }>();
@@ -72,9 +74,8 @@ export async function socialConnectRoutes(app: FastifyInstance) {
   app.get('/api/v1/social/connect/:network/start', { preHandler: app.requireAuth }, async (req, reply) => {
     const { accountId, userId } = authOf(req);
     const network = (req.params as { network?: string }).network as Network;
-    if (network !== 'instagram' && network !== 'facebook') {
-      return reply.code(400).send({ error: `Klippy cannot connect ${network} yet.` });
-    }
+    const adapter = adapterFor(network);
+    if (!adapter) return reply.code(400).send({ error: `Klippy cannot connect ${network} yet.` });
     const q = z.object({ businessId: z.coerce.number().int().positive() }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'Which business is this for?' });
     if (!(await assertBusinessAccess(req, reply, q.data.businessId, 'admin'))) return;
@@ -84,14 +85,18 @@ export async function socialConnectRoutes(app: FastifyInstance) {
         error: 'The server cannot store social tokens yet. Set SOCIAL_TOKEN_KEY in the app environment and restart.',
       });
     }
-    if (!metaConfigured()) {
-      return reply.code(503).send({
-        error: 'The Meta app is not set up on this server. Set META_APP_ID and META_APP_SECRET, then try again.',
-      });
+    if (!adapter.canPublish) {
+      // The app credentials are missing, and saying WHICH ones beats a generic
+      // "not configured" that leaves somebody guessing at a cPanel settings page.
+      return reply.code(503).send({ error: whyNotAutomatic(network) });
     }
 
     const state = signState({ accountId, businessId: q.data.businessId, userId, network });
-    return { url: metaAuthUrl(state, redirectFor(network)) };
+    return {
+      url: network === 'linkedin'
+        ? linkedinAuthUrl(state, redirectFor(network))
+        : metaAuthUrl(state, redirectFor(network)),
+    };
   });
 
   // ---- 2. Callback, with no session ----------------------------------------------
@@ -120,15 +125,28 @@ export async function socialConnectRoutes(app: FastifyInstance) {
     }
 
     try {
-      const { accessToken, expiresAt } = await metaExchangeCode(q.data.code, redirectFor(network));
-      const accounts = await metaListAccounts(accessToken);
+      const isLinkedIn = network === 'linkedin';
+      const exchanged = isLinkedIn
+        ? await linkedinExchangeCode(q.data.code, redirectFor(network))
+        : await metaExchangeCode(q.data.code, redirectFor(network));
+      const accessToken = exchanged.accessToken;
+      const expiresAt = exchanged.expiresAt;
+      const accounts = isLinkedIn
+        ? await linkedinListOrganisations(accessToken)
+        : await metaListAccounts(accessToken);
       if (!accounts.length) {
-        return bounce(reply, 'No Pages came back that you can post to. Check you have the Create Content role on the Page.');
+        return bounce(reply, isLinkedIn
+          ? 'No LinkedIn Pages came back. Check you are an Administrator on the Page, which only its super admin can grant.'
+          : 'No Pages came back that you can post to. Check you have the Create Content role on the Page.');
       }
       const handoff = signState({ ...state, network });
       pending.set(handoff, {
         accountId: state.accountId, businessId: state.businessId, userId: state.userId,
-        network, userToken: accessToken, expiresAt, accounts, at: Date.now(),
+        network, userToken: accessToken,
+        // LinkedIn only issues one to partner-enabled apps. Null is the normal case
+        // and means a person reconnects in a browser before day sixty.
+        refreshToken: isLinkedIn ? ((exchanged as { refreshToken?: string | null }).refreshToken ?? null) : null,
+        expiresAt, accounts, at: Date.now(),
       });
       const base = (appUrl() ?? '').replace(/\/+$/, '');
       return reply.redirect(`${base}/?${new URLSearchParams({ v: 'social', connect: handoff })}`);
@@ -202,8 +220,10 @@ export async function socialConnectRoutes(app: FastifyInstance) {
         displayName: found.displayName,
         avatarUrl: found.avatarUrl,
         accessTokenEnc: encryptToken(token),
-        // A Page token has no expiry (M-AUTH-21), so recording the user token's
-        // sixty days against it would make a healthy connection look doomed.
+        refreshTokenEnc: row.refreshToken ? encryptToken(row.refreshToken) : null,
+        // A Meta PAGE token has no expiry (M-AUTH-21), so recording the user token's
+        // sixty days against it would make a healthy connection look doomed. LinkedIn
+        // has no page token at all and its sixty days are real, so they are kept.
         tokenExpiresAt: found.accountToken ? null : row.expiresAt,
         status: 'connected' as const,
         lastError: null,
