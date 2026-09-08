@@ -12,6 +12,7 @@ import { storage, MAX_STORAGE_BYTES } from '../lib/storage.js';
 import { socialTokensAvailable } from '../lib/social/tokens.js';
 import { validatePost } from '../lib/social/validate.js';
 import { NETWORKS } from '../lib/social/types.js';
+import { canAutoPublish, whyNotAutomatic } from '../lib/social/registry.js';
 import { publicMediaUrl } from '../lib/social/mediaUrl.js';
 /**
  * Planning, approving and scheduling social posts.
@@ -131,13 +132,20 @@ export async function socialRoutes(app) {
         return {
             accounts: rows,
             serverReady: socialTokensAvailable(),
-            networks: NETWORKS.map((n) => ({
-                network: n,
-                connected: rows.some((r) => r.network === n && r.status === 'connected'),
-                // Set true per network as each adapter lands in phases 3 and 4.
-                canAutoPublish: false,
-                note: 'Klippy cannot post to this automatically yet. Posts to it are sent to you at the scheduled time so you can put them up.',
-            })),
+            networks: NETWORKS.map((n) => {
+                const connected = rows.some((r) => r.network === n && r.status === 'connected');
+                // Automatic means all three: an adapter exists, the server has the app
+                // credentials, and an account is actually connected. Any one missing and the
+                // post takes the manual path, so the screen says so rather than implying it
+                // will publish itself.
+                const auto = canAutoPublish(n) && connected;
+                return {
+                    network: n,
+                    connected,
+                    canAutoPublish: auto,
+                    note: auto ? 'Klippy posts to this automatically.' : whyNotAutomatic(n),
+                };
+            }),
         };
     });
     // ---- Posts ---------------------------------------------------------------------

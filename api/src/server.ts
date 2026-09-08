@@ -52,6 +52,7 @@ import { crmRoutes } from './routes/crm.js';
 import { leadRoutes } from './routes/leads.js';
 import { socialRoutes } from './routes/social.js';
 import { socialMediaRoutes } from './routes/socialMedia.js';
+import { socialConnectRoutes } from './routes/socialConnect.js';
 import { VERSION } from './version.js';
 import { DEPLOYED } from './lib/deployed.js';
 
@@ -209,6 +210,7 @@ export function buildServer() {
   app.register(crmRoutes);
   app.register(leadRoutes);
   app.register(socialRoutes);
+  app.register(socialConnectRoutes);
   // Public and unauthenticated on purpose: Meta fetches media as an anonymous
   // crawler. See routes/socialMedia.ts for why that is safe.
   app.register(socialMediaRoutes);

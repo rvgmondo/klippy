@@ -97,6 +97,15 @@ export class SocialApiError extends Error {
 }
 
 export interface ConnectedAccount {
+  /**
+   * Which network this one is.
+   *
+   * Carried explicitly because ONE Meta connection returns both a Page and the
+   * Instagram account linked to it. Inferring it at the call site, from a display
+   * name or from whether a token came back, is the kind of guess that files an
+   * Instagram account as a Facebook Page and then fails at publish time.
+   */
+  network: Network;
   externalId: string;
   displayName: string;
   avatarUrl: string | null;

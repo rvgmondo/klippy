@@ -60,6 +60,28 @@ export async function cronRoutes(app) {
             return reply.code(500).send({ ok: false, error: 'The publish run failed. See the server log.' });
         }
     });
+    /**
+     * Are the connections still alive? Once a day.
+     *
+     * Registered here rather than in the daily JOBS registry for the same reason as the
+     * publisher: it is about social accounts, and keeping the two social endpoints
+     * together is how the cron setup stays one section rather than two.
+     */
+    app.post('/api/v1/cron/social-token-check', async (req, reply) => {
+        const auth = bySecret(req);
+        if (auth === 'unset')
+            return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
+        if (auth === 'bad')
+            return reply.code(401).send({ error: 'Bad cron key.' });
+        try {
+            const { runSocialTokenCheck } = await import('../lib/social/health.js');
+            return reply.code(200).send({ ok: true, message: await runSocialTokenCheck() });
+        }
+        catch (err) {
+            req.log.error({ err }, 'social token check failed');
+            return reply.code(500).send({ ok: false, error: 'The token check failed. See the server log.' });
+        }
+    });
     // ---- Signed-in automation view, for Settings ------------------------------
     // The jobs are global (each run sweeps every account, job_runs has no accountId),
     // so this whole panel is a platform-operator concern, not a per-tenant setting.

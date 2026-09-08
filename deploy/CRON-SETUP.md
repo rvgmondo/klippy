@@ -106,3 +106,14 @@ per-run token, so two runs cannot take the same post.
 ```
 * * * * * curl -s -X POST -H "X-Cron-Key: YOUR_SECRET" https://klippy.mondobase.com/api/v1/cron/social-publish > /dev/null 2>&1
 ```
+
+## Social connection health (daily)
+
+Asks each connected account whether its token still works. A revoked token, a removed
+Page role and a deleted account all look identical to a healthy connection in the
+database until something tries to publish, and finding that out at 09:00 on a Monday
+means a client's post did not go out and nobody knew why.
+
+```
+15 4 * * * curl -s -X POST -H "X-Cron-Key: YOUR_SECRET" https://klippy.mondobase.com/api/v1/cron/social-token-check > /dev/null 2>&1
+```
