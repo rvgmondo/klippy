@@ -498,6 +498,20 @@
       "when": 1788848894936,
       "tag": "0070_social",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "5",
+      "when": 1788849326265,
+      "tag": "0071_social_manual_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "5",
+      "when": 1788849945382,
+      "tag": "0072_social_lock_token",
+      "breakpoints": true
     }
   ]
 }

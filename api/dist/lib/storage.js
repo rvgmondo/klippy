@@ -25,8 +25,16 @@ class LocalDiskDriver {
         const { size } = await stat(dest);
         return size;
     }
-    createReadStream(key) {
-        return createReadStream(this.full(key));
+    createReadStream(key, range) {
+        return createReadStream(this.full(key), range ? { start: range.start, end: range.end } : undefined);
+    }
+    async size(key) {
+        try {
+            return (await stat(this.full(key))).size;
+        }
+        catch {
+            return null;
+        }
     }
     async delete(key) {
         await unlink(this.full(key)).catch(() => { });

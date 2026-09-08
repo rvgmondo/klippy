@@ -14,10 +14,37 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash, createHmac, 
  */
 
 function key(): Buffer | null {
-  const raw = process.env.PAYMENTS_SECRET;
+  return keyFrom(process.env.PAYMENTS_SECRET);
+}
+
+/**
+ * Derive an AES-256 key from any secret string.
+ *
+ * Exported so other subsystems can encrypt under their OWN environment variable
+ * rather than sharing this one. Social OAuth tokens use SOCIAL_TOKEN_KEY, so a
+ * leaked payments key does not also hand over every client's Facebook Page, and the
+ * reverse. Same recipe, separate keys, one implementation to review.
+ */
+export function keyFrom(raw: string | undefined): Buffer | null {
   if (!raw || raw.length < 16) return null;
   // Accept any length secret; hash it to exactly 32 bytes for AES-256.
   return createHash('sha256').update(raw).digest();
+}
+
+/** AES-256-GCM under an explicit key. Format `iv:tag:ciphertext`, all hex. */
+export function encryptWith(k: Buffer, plain: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', k, iv);
+  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${enc.toString('hex')}`;
+}
+
+export function decryptWith(k: Buffer, stored: string): string {
+  const [ivHex, tagHex, dataHex] = stored.split(':');
+  if (!ivHex || !tagHex || !dataHex) throw new Error('Malformed secret.');
+  const decipher = createDecipheriv('aes-256-gcm', k, Buffer.from(ivHex, 'hex'));
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
 }
 
 /** True if a usable PAYMENTS_SECRET is configured. */
@@ -28,21 +55,13 @@ export function secretsAvailable(): boolean {
 export function encryptSecret(plain: string): string {
   const k = key();
   if (!k) throw new Error('PAYMENTS_SECRET is not configured on the server.');
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', k, iv);
-  const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return `${iv.toString('hex')}:${tag.toString('hex')}:${enc.toString('hex')}`;
+  return encryptWith(k, plain);
 }
 
 export function decryptSecret(stored: string): string {
   const k = key();
   if (!k) throw new Error('PAYMENTS_SECRET is not configured on the server.');
-  const [ivHex, tagHex, dataHex] = stored.split(':');
-  if (!ivHex || !tagHex || !dataHex) throw new Error('Malformed secret.');
-  const decipher = createDecipheriv('aes-256-gcm', k, Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+  return decryptWith(k, stored);
 }
 
 /**

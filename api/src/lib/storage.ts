@@ -15,9 +15,18 @@ import path from 'node:path';
 export interface StorageDriver {
   /** Persist a stream under `key`. Returns the number of bytes written. */
   save(key: string, stream: Readable): Promise<number>;
-  createReadStream(key: string): Readable;
+  /**
+   * Read the file back, optionally a byte range.
+   *
+   * The range exists for video. A player asks for a slice rather than the whole file,
+   * and a server that ignores that either sends the entire video for every seek or
+   * fails to play at all in Safari, which will not start a video without a 206.
+   */
+  createReadStream(key: string, range?: { start: number; end: number }): Readable;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
+  /** Size in bytes, or null when the file is gone. Needed to answer a Range request. */
+  size(key: string): Promise<number | null>;
 }
 
 class LocalDiskDriver implements StorageDriver {
@@ -42,8 +51,12 @@ class LocalDiskDriver implements StorageDriver {
     return size;
   }
 
-  createReadStream(key: string): Readable {
-    return createReadStream(this.full(key));
+  createReadStream(key: string, range?: { start: number; end: number }): Readable {
+    return createReadStream(this.full(key), range ? { start: range.start, end: range.end } : undefined);
+  }
+
+  async size(key: string): Promise<number | null> {
+    try { return (await stat(this.full(key))).size; } catch { return null; }
   }
 
   async delete(key: string): Promise<void> {

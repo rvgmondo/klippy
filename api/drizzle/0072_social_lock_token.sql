@@ -1,0 +1,1 @@
+ALTER TABLE `social_posts` ADD `lock_token` varchar(32);

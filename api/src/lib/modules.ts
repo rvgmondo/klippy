@@ -48,6 +48,10 @@ export const MODULES: ModuleDef[] = [
   // Acquisition
   { key: 'pipeline', label: 'Pipeline', primitive: 'acquisition', hint: 'Leads and deals on their way to becoming work.' },
   { key: 'offerings', label: 'Offerings', primitive: 'acquisition', hint: 'What this business sells, and its recurring plans.' },
+  // Filed under acquisition because that is what posting is FOR, even when an agency
+  // does it on a client's behalf. Off by default everywhere: a business that does not
+  // run social accounts should not carry an empty calendar around.
+  { key: 'social', label: 'Social', primitive: 'acquisition', hint: 'Plan, approve and schedule posts, then see what they did.' },
 
   // Fulfillment
   { key: 'today', label: 'Today', primitive: 'fulfillment', core: true, hint: 'The day planned against the time you actually have.' },

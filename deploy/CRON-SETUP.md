@@ -95,3 +95,14 @@ All three of these send email through the same mailer. If `SMTP_HOST`, `SMTP_POR
 `SMTP_USER`, `SMTP_PASS` and `SMTP_FROM` are not set on the Node app, nothing is
 delivered: the digest sends nothing, and invoices are generated but stay drafts
 instead of going out. Set them in the same place as `CRON_SECRET` and restart.
+
+## Social publishing (every minute)
+
+The only job that is not on the daily schedule. It hands a due post to whoever must
+put it up, and later publishes automatically once the network adapters are in. Safe to
+run every minute and safe to overlap: it claims work with a conditional update and a
+per-run token, so two runs cannot take the same post.
+
+```
+* * * * * curl -s -X POST -H "X-Cron-Key: YOUR_SECRET" https://klippy.mondobase.com/api/v1/cron/social-publish > /dev/null 2>&1
+```

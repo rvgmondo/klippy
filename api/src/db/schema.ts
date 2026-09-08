@@ -1772,6 +1772,17 @@ export const socialPosts = mysqlTable('social_posts', {
    * treated as a crashed run and reclaimed.
    */
   lockedAt: datetime('locked_at'),
+  /**
+   * Which run holds the claim. Random per run, and the only thing the publisher
+   * reads its batch back by.
+   *
+   * The timestamp alone cannot do this job. A DATETIME column has no fractional
+   * seconds, so two runs starting in the same second stamp an identical lockedAt,
+   * and each would then read back the OTHER run's claimed rows as well as its own
+   * and post them a second time. That is the exact failure this whole mechanism
+   * exists to prevent, so the claim carries an identifier that cannot collide.
+   */
+  lockToken: varchar('lock_token', { length: 32 }),
   attempts: int('attempts', { unsigned: true }).default(0).notNull(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -1793,8 +1804,21 @@ export const socialPostTargets = mysqlTable('social_post_targets', {
     .references(() => accounts.id, { onDelete: 'cascade' }),
   postId: int('post_id', { unsigned: true }).notNull()
     .references(() => socialPosts.id, { onDelete: 'cascade' }),
-  socialAccountId: int('social_account_id', { unsigned: true }).notNull()
-    .references(() => socialAccounts.id, { onDelete: 'cascade' }),
+  /**
+   * The connected account this goes out through, when there is one.
+   *
+   * NULLABLE, and that is the point of manual delivery. Connecting an account needs
+   * an OAuth app and, for LinkedIn, an approval that takes weeks. A person planning
+   * next month's calendar today must still be able to say "this one goes to
+   * Instagram" and be reminded at the right minute to post it by hand. The NETWORK
+   * below is the intent and is always present; the account is only how Klippy
+   * publishes it without a human, once one exists.
+   *
+   * Set null rather than cascade on disconnect: unhooking an account must not delete
+   * the record that a post went out on it last month, permalink and all.
+   */
+  socialAccountId: int('social_account_id', { unsigned: true })
+    .references(() => socialAccounts.id, { onDelete: 'set null' }),
   network: mysqlEnum('network', ['instagram', 'facebook', 'linkedin']).notNull(),
   captionOverride: text('caption_override'),
   status: mysqlEnum('status', ['pending', 'publishing', 'published', 'failed', 'skipped', 'manual_done'])
@@ -1811,7 +1835,10 @@ export const socialPostTargets = mysqlTable('social_post_targets', {
 }, (t) => [
   index('idx_social_targets_post').on(t.postId),
   index('idx_social_targets_retry').on(t.accountId, t.status, t.nextAttemptAt),
-  uniqueIndex('uniq_social_post_target').on(t.postId, t.socialAccountId),
+  // Keyed on NETWORK, not on the account. MySQL permits many NULLs in a unique
+  // index, so keying on a nullable account would let one post target Instagram
+  // twice the moment no account is connected, which is exactly the manual case.
+  uniqueIndex('uniq_social_post_target').on(t.postId, t.network),
 ]);
 
 /**

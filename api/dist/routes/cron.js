@@ -5,6 +5,7 @@ import { jobRuns } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { isPlatformAdmin } from '../lib/platform.js';
 import { JOBS, runJob, runDueJobs } from '../lib/jobs.js';
+import { runSocialPublish } from '../lib/social/publish.js';
 /**
  * The daily jobs are run by the app itself (see lib/jobs.ts), so none of this needs
  * an external cron any more. What is left here is:
@@ -34,6 +35,31 @@ export async function cronRoutes(app) {
             return reply.code(res.ok ? 200 : 500).send({ ok: res.ok, message: res.message });
         });
     }
+    /**
+     * The social publisher, once a minute.
+     *
+     * Registered by hand rather than through the JOBS registry above, and that is the
+     * point: those jobs record a run per DATE in job_runs and refuse to run twice on the
+     * same day, which is exactly right for a digest and exactly wrong for something due
+     * every minute. Safety here comes from the claim instead. runSocialPublish moves a
+     * row to `publishing` with a conditional UPDATE, so two overlapping runs cannot both
+     * take the same post, and nothing is deduped by date at all.
+     */
+    app.post('/api/v1/cron/social-publish', async (req, reply) => {
+        const auth = bySecret(req);
+        if (auth === 'unset')
+            return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
+        if (auth === 'bad')
+            return reply.code(401).send({ error: 'Bad cron key.' });
+        try {
+            const res = await runSocialPublish();
+            return reply.code(200).send(res);
+        }
+        catch (err) {
+            req.log.error({ err }, 'social publish run failed');
+            return reply.code(500).send({ ok: false, error: 'The publish run failed. See the server log.' });
+        }
+    });
     // ---- Signed-in automation view, for Settings ------------------------------
     // The jobs are global (each run sweeps every account, job_runs has no accountId),
     // so this whole panel is a platform-operator concern, not a per-tenant setting.

@@ -50,6 +50,8 @@ import { hostingRoutes } from './routes/hosting.js';
 import { portalRoutes, portalAdminRoutes } from './routes/portal.js';
 import { crmRoutes } from './routes/crm.js';
 import { leadRoutes } from './routes/leads.js';
+import { socialRoutes } from './routes/social.js';
+import { socialMediaRoutes } from './routes/socialMedia.js';
 import { VERSION } from './version.js';
 import { DEPLOYED } from './lib/deployed.js';
 const isProd = process.env.NODE_ENV === 'production';
@@ -200,6 +202,10 @@ export function buildServer() {
     app.register(portalAdminRoutes);
     app.register(crmRoutes);
     app.register(leadRoutes);
+    app.register(socialRoutes);
+    // Public and unauthenticated on purpose: Meta fetches media as an anonymous
+    // crawler. See routes/socialMedia.ts for why that is safe.
+    app.register(socialMediaRoutes);
     return app;
 }
 // Passenger sets PORT; default for local dev.

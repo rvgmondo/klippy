@@ -347,7 +347,7 @@ await clean();
     console.log('SKIP  purge guard needs a business and an offering');
   } else {
     const [f] = await db.query(
-      "INSERT INTO folders (account_id, business_id, name, pillar, deleted_at) VALUES (1,?,'E2E Purge Client','delivery', DATE_SUB(NOW(), INTERVAL 40 DAY))",
+      "INSERT INTO folders (account_id, business_id, name, pillar, deleted_at) VALUES (1,?,'E2E Purge Client','delivery', DATE_SUB(UTC_TIMESTAMP(), INTERVAL 40 DAY))",
       [biz.id]);
     const FID = f.insertId;
     const [sub] = await db.query(
