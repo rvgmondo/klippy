@@ -10,7 +10,7 @@
  * Ported from the v1 PHP schema (../../klippy/sql/schema.sql) + migration_002.
  */
 import {
-  mysqlTable, int, varchar, text, boolean, datetime, date,
+  mysqlTable, int, bigint, varchar, text, boolean, datetime, date,
   mysqlEnum, timestamp, decimal, index, uniqueIndex, json, type AnyMySqlColumn,
 } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
@@ -32,6 +32,15 @@ export const accounts = mysqlTable('accounts', {
   folderLabelPlural: varchar('folder_label_plural', { length: 40 }).default('Clients').notNull(),
   // White-labelling: replace the Klippy name/logo shown inside the app.
   currency: varchar('currency', { length: 3 }).default('ZAR').notNull(),
+  /**
+   * The workspace's wall-clock timezone, IANA name.
+   *
+   * Every social post is STORED in UTC and displayed in this zone. It exists because
+   * "post at 09:00" means nine in the morning where the business is, and a scheduler
+   * that keeps local time gets an hour wrong twice a year. A default has to be
+   * something; a workspace changes it in settings.
+   */
+  timezone: varchar('timezone', { length: 64 }).default('Africa/Johannesburg').notNull(),
   brandName: varchar('brand_name', { length: 80 }),
   logoPath: varchar('logo_path', { length: 255 }),
   // ---- Invoicing settings ----------------------------------------------------
@@ -1664,3 +1673,251 @@ export const messagingSettings = mysqlTable('messaging_settings', {
 }, (t) => [
   uniqueIndex('uniq_messaging_settings_scope').on(t.accountId, t.businessId),
 ]);
+
+// ---- Social ----------------------------------------------------------------
+//
+// Plan, approve, schedule, publish and measure posts on Instagram, Facebook Pages
+// and LinkedIn organisation pages. The shape follows two facts that no amount of
+// code can argue with, both verified in docs/social/API-NOTES.md:
+//
+//  1. ONE POST GOES TO SEVERAL NETWORKS AND EACH CAN FAIL ON ITS OWN. So the caption
+//     the person wrote lives on `social_posts`, and every network gets a row in
+//     `social_post_targets` carrying its own status, id, permalink and error. A post
+//     that reaches Instagram and fails on LinkedIn is `partially_published`, not a
+//     single boolean that has to lie one way or the other.
+//  2. NOT EVERY NETWORK CAN BE PUBLISHED TO. LinkedIn needs an approval that takes
+//     time, and a client Page may not be reachable yet. `deliveryMode = manual` is a
+//     first-class citizen, not a fallback: at the scheduled minute Klippy sends the
+//     caption and the media to whoever owns the post and waits to be told it went out.
+//     That alone replaces the tool this is meant to replace.
+//
+// Every datetime here is UTC. Display uses `accounts.timezone` or the post's own.
+
+/**
+ * A connected publishing destination: one Page, one Instagram professional account,
+ * or one LinkedIn organisation.
+ *
+ * Tokens are AES-256-GCM encrypted at rest and never leave the server. `status` is
+ * what the connect screen reads, and a daily job moves it to `expired` before a
+ * client finds out the hard way that nothing has posted for a week.
+ */
+export const socialAccounts = mysqlTable('social_accounts', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  network: mysqlEnum('network', ['instagram', 'facebook', 'linkedin']).notNull(),
+  /** Page id, Instagram user id, or organisation URN. Whatever the network calls it. */
+  externalId: varchar('external_id', { length: 120 }).notNull(),
+  displayName: varchar('display_name', { length: 150 }).notNull(),
+  avatarUrl: varchar('avatar_url', { length: 500 }),
+  accessTokenEnc: text('access_token_enc'),
+  refreshTokenEnc: text('refresh_token_enc'),
+  tokenExpiresAt: datetime('token_expires_at'),
+  scopes: json('scopes').$type<string[]>(),
+  status: mysqlEnum('status', ['connected', 'expired', 'revoked', 'error']).default('connected').notNull(),
+  lastError: varchar('last_error', { length: 500 }),
+  lastCheckedAt: datetime('last_checked_at'),
+  connectedBy: int('connected_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_social_accounts_account').on(t.accountId, t.businessId),
+  uniqueIndex('uniq_social_account').on(t.businessId, t.network, t.externalId),
+]);
+
+/**
+ * One planned piece of content, whatever it goes out on.
+ *
+ * `status` is the whole lifecycle in one column, and the values that matter most are
+ * the awkward ones: `needs_media` (written, waiting on the client for a photo),
+ * `partially_published` (some networks took it, some did not) and `needs_manual`
+ * (the scheduled minute arrived, somebody was told, nobody has confirmed yet).
+ */
+export const socialPosts = mysqlTable('social_posts', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  /** The client this is for, when there is one. Set null so losing a client keeps the post. */
+  folderId: int('folder_id', { unsigned: true }).references(() => folders.id, { onDelete: 'set null' }),
+  /** Internal label, never published. What the calendar card shows. */
+  title: varchar('title', { length: 200 }).notNull(),
+  caption: text('caption'),
+  firstComment: text('first_comment'),
+  postType: mysqlEnum('post_type', ['post', 'carousel', 'reel', 'story']).default('post').notNull(),
+  scheduledAt: datetime('scheduled_at'),
+  /** IANA zone this was scheduled in, so the time survives a workspace changing zone. */
+  timezone: varchar('timezone', { length: 64 }),
+  status: mysqlEnum('status', [
+    'draft', 'needs_media', 'awaiting_approval', 'approved', 'scheduled',
+    'publishing', 'published', 'partially_published', 'failed', 'needs_manual', 'cancelled',
+  ]).default('draft').notNull(),
+  /** auto = Klippy publishes it. manual = Klippy tells you and you post it. */
+  deliveryMode: mysqlEnum('delivery_mode', ['auto', 'manual']).default('auto').notNull(),
+  /** What to ask the client for, in words they can act on. Drives the media asks list. */
+  mediaAsk: text('media_ask'),
+  mediaAskDue: date('media_ask_due', { mode: 'string' }),
+  /** Single-post, revocable. Null once withdrawn. */
+  approvalToken: varchar('approval_token', { length: 64 }),
+  approvedAt: datetime('approved_at'),
+  approvedByName: varchar('approved_by_name', { length: 120 }),
+  createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * Held by the publisher while it works. The cron claims rows with a conditional
+   * UPDATE and this stamp is what makes a second run skip them, so two overlapping
+   * runs cannot publish the same post twice. A stamp older than ten minutes is
+   * treated as a crashed run and reclaimed.
+   */
+  lockedAt: datetime('locked_at'),
+  attempts: int('attempts', { unsigned: true }).default(0).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_social_posts_calendar').on(t.accountId, t.businessId, t.scheduledAt),
+  index('idx_social_posts_due').on(t.accountId, t.status, t.scheduledAt),
+  uniqueIndex('uniq_social_post_approval_token').on(t.approvalToken),
+]);
+
+/**
+ * One post, one network. Where publishing actually succeeds or fails.
+ *
+ * `captionOverride` exists because the same words rarely suit Instagram and LinkedIn,
+ * and rewriting the post to change one of them would lose the other.
+ */
+export const socialPostTargets = mysqlTable('social_post_targets', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  postId: int('post_id', { unsigned: true }).notNull()
+    .references(() => socialPosts.id, { onDelete: 'cascade' }),
+  socialAccountId: int('social_account_id', { unsigned: true }).notNull()
+    .references(() => socialAccounts.id, { onDelete: 'cascade' }),
+  network: mysqlEnum('network', ['instagram', 'facebook', 'linkedin']).notNull(),
+  captionOverride: text('caption_override'),
+  status: mysqlEnum('status', ['pending', 'publishing', 'published', 'failed', 'skipped', 'manual_done'])
+    .default('pending').notNull(),
+  externalPostId: varchar('external_post_id', { length: 200 }),
+  permalink: varchar('permalink', { length: 500 }),
+  error: varchar('error', { length: 500 }),
+  attempts: int('attempts', { unsigned: true }).default(0).notNull(),
+  publishedAt: datetime('published_at'),
+  /** Backoff. Null means try on the next run; a future time means wait. */
+  nextAttemptAt: datetime('next_attempt_at'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_social_targets_post').on(t.postId),
+  index('idx_social_targets_retry').on(t.accountId, t.status, t.nextAttemptAt),
+  uniqueIndex('uniq_social_post_target').on(t.postId, t.socialAccountId),
+]);
+
+/**
+ * A file attached to a post.
+ *
+ * The bytes stay in `storage_nodes`, which owns them; this row only points at them
+ * and adds what publishing needs. Deleting a post deletes these rows and NEVER the
+ * storage node, because the same photo may be in the client's Files tree.
+ *
+ * `publicToken` is the entire security model of the public media route. Instagram and
+ * Facebook download media from a URL we hand them and will not send an Authorization
+ * header, so the URL itself has to be the credential: unguessable, per file, and
+ * revocable by deleting the row.
+ */
+export const socialPostMedia = mysqlTable('social_post_media', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  postId: int('post_id', { unsigned: true }).notNull()
+    .references(() => socialPosts.id, { onDelete: 'cascade' }),
+  storageNodeId: int('storage_node_id', { unsigned: true }).notNull()
+    .references(() => storageNodes.id, { onDelete: 'cascade' }),
+  position: int('position', { unsigned: true }).default(0).notNull(),
+  altText: varchar('alt_text', { length: 500 }),
+  publicToken: varchar('public_token', { length: 64 }).notNull(),
+  width: int('width', { unsigned: true }),
+  height: int('height', { unsigned: true }),
+  durationMs: int('duration_ms', { unsigned: true }),
+  mimeType: varchar('mime_type', { length: 100 }),
+  createdAt: createdAt(),
+}, (t) => [
+  index('idx_social_media_post').on(t.postId, t.position),
+  uniqueIndex('uniq_social_media_token').on(t.publicToken),
+]);
+
+/** Saved hashtag blocks, so nobody retypes thirty tags for every post. */
+export const socialHashtagSets = mysqlTable('social_hashtag_sets', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  businessId: int('business_id', { unsigned: true }).notNull()
+    .references(() => businesses.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 120 }).notNull(),
+  tags: json('tags').$type<string[]>(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_social_hashtag_business').on(t.accountId, t.businessId),
+]);
+
+/**
+ * One number, for one thing, on one day.
+ *
+ * Long and thin on purpose. Every network reports a different set and keeps changing
+ * it (impressions is gone from both Meta surfaces as of 2025), so a wide table would
+ * need a migration every time a platform renames a metric. `targetId` null means the
+ * row is about the account rather than a single post.
+ */
+export const socialMetrics = mysqlTable('social_metrics', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  socialAccountId: int('social_account_id', { unsigned: true }).notNull()
+    .references(() => socialAccounts.id, { onDelete: 'cascade' }),
+  targetId: int('target_id', { unsigned: true }).references(() => socialPostTargets.id, { onDelete: 'cascade' }),
+  metricDate: date('metric_date', { mode: 'string' }).notNull(),
+  metric: varchar('metric', { length: 60 }).notNull(),
+  value: bigint('value', { mode: 'number' }).default(0).notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (t) => [
+  index('idx_social_metrics_account').on(t.accountId, t.socialAccountId, t.metricDate),
+  uniqueIndex('uniq_social_metric').on(t.socialAccountId, t.targetId, t.metricDate, t.metric),
+]);
+
+/**
+ * What happened when we tried to publish.
+ *
+ * This is the screen a person opens when a post did not go out, so it holds the
+ * provider's own words rather than a tidied summary. `payload` is redacted before it
+ * is written: no tokens, ever, in a table the UI reads.
+ */
+export const socialPublishLog = mysqlTable('social_publish_log', {
+  id: pk(),
+  accountId: int('account_id', { unsigned: true }).notNull()
+    .references(() => accounts.id, { onDelete: 'cascade' }),
+  postId: int('post_id', { unsigned: true }).notNull()
+    .references(() => socialPosts.id, { onDelete: 'cascade' }),
+  targetId: int('target_id', { unsigned: true }).references(() => socialPostTargets.id, { onDelete: 'cascade' }),
+  level: mysqlEnum('level', ['info', 'warn', 'error']).default('info').notNull(),
+  message: varchar('message', { length: 1000 }).notNull(),
+  payload: json('payload'),
+  createdAt: createdAt(),
+}, (t) => [
+  index('idx_social_log_post').on(t.postId, t.createdAt),
+]);
+
+export const socialPostsRelations = relations(socialPosts, ({ many }) => ({
+  targets: many(socialPostTargets),
+  media: many(socialPostMedia),
+}));
+export const socialPostTargetsRelations = relations(socialPostTargets, ({ one }) => ({
+  post: one(socialPosts, { fields: [socialPostTargets.postId], references: [socialPosts.id] }),
+  account: one(socialAccounts, { fields: [socialPostTargets.socialAccountId], references: [socialAccounts.id] }),
+}));
+export const socialPostMediaRelations = relations(socialPostMedia, ({ one }) => ({
+  post: one(socialPosts, { fields: [socialPostMedia.postId], references: [socialPosts.id] }),
+  node: one(storageNodes, { fields: [socialPostMedia.storageNodeId], references: [storageNodes.id] }),
+}));

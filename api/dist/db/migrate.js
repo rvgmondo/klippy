@@ -7,6 +7,13 @@ import { db } from './client.js';
  * the schema means adding it here too.
  */
 const EXPECTED_TABLES = [
+    'social_accounts',
+    'social_posts',
+    'social_post_targets',
+    'social_post_media',
+    'social_hashtag_sets',
+    'social_metrics',
+    'social_publish_log',
     // Added 2026-09: this guard is what notices a skipped migration, so every new table
     // belongs here in the same commit that creates it.
     'focus_items',

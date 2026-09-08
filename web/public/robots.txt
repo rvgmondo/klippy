@@ -2,8 +2,29 @@
 # The marketing page is the only thing worth indexing; everything behind the
 # login needs a session anyway, and the signed public links (pay, quote,
 # calendar) carry tokens that have no business in a search index.
+#
+# THE ONE EXCEPTION IS SOCIAL MEDIA. Instagram and Facebook publish by downloading
+# the image or video from a URL Klippy hands them, and Meta refuses to fetch from a
+# host whose robots.txt blocks its crawler. With a blanket "Disallow: /api/" the
+# media route would be refused every time and no post would ever carry a picture.
+# So /api/v1/m/ is opened deliberately. It is safe to open: those URLs carry a
+# random per-file token, the route serves nothing else, and being un-guessable is
+# the whole security model. The Allow line is longest-match so it wins over the
+# Disallow below it for that path only.
 User-agent: *
 Allow: /$
+Allow: /api/v1/m/
 Disallow: /api/
 Disallow: /?portal
 Disallow: /?reset
+
+# Meta's fetcher, named explicitly because a crawler reads only the block that
+# matches it best. Without this it would fall to the group above, and a future edit
+# there could break publishing without anyone connecting the two.
+User-agent: facebookexternalhit
+Allow: /api/v1/m/
+Disallow: /
+
+User-agent: facebookcatalog
+Allow: /api/v1/m/
+Disallow: /
