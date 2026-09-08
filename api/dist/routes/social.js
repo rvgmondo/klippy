@@ -51,6 +51,35 @@ const APPROVABLE = new Set(['draft', 'needs_media', 'awaiting_approval', 'approv
  * same reason. The page also accepts the path form, for a host that does rewrite.
  */
 const approvalUrl = (token) => `${appUrl()}/?approve=${token}`;
+/**
+ * Throw away a sign-off, because what was signed off no longer exists.
+ *
+ * AN APPROVAL COVERS THE PICTURES AS MUCH AS THE WORDS. The client's page leads with
+ * the images and the caption sits under them, so swapping a photo after sign-off
+ * publishes something nobody agreed to with their name recorded as the approver. On
+ * Instagram even REORDERING counts, because a carousel is cropped to the aspect ratio
+ * of whichever image leads.
+ *
+ * The link is withdrawn at the same time, and that is not tidiness. A live token on a
+ * draft is how the approval page recognises a post the CLIENT sent back; leaving one
+ * behind after a staff edit makes their own page tell them they asked for changes they
+ * never wrote, and refuse their answer. One meaning per state.
+ *
+ * Returns whether anything was actually withdrawn, so a route can say so.
+ */
+async function withdrawApproval(accountId, post) {
+    const signedOff = !!post.approvedAt || post.status === 'approved' || post.status === 'awaiting_approval';
+    if (!signedOff)
+        return false;
+    await db.update(socialPosts).set({
+        status: 'draft', approvedAt: null, approvedByName: null, approvalToken: null,
+    }).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, post.id)));
+    await db.insert(socialPublishLog).values(withTenant(accountId, {
+        postId: post.id, level: 'warn',
+        message: 'The post changed after it was signed off, so the approval and the link were withdrawn. Send it round again.',
+    }));
+    return true;
+}
 async function timezoneOf(accountId) {
     const [a] = await db.select({ tz: accounts.timezone }).from(accounts)
         .where(eq(accounts.id, accountId)).limit(1);
@@ -319,14 +348,25 @@ export async function socialRoutes(app) {
          * hour later is ordinary work that should not need chasing a client again.
          */
         const CLIENT_VISIBLE = ['caption', 'firstComment', 'postType'];
-        const changedForClient = CLIENT_VISIBLE.some((k) => d[k] !== undefined && d[k] !== post[k])
+        // Compared with the empty string folded into null, because the composer autosaves
+        // every 700ms and sends '' for a first comment that was never filled in. Treating
+        // that as a change would throw a real approval away on an idle keystroke.
+        const same = (a, b) => (a ?? '') === (b ?? '');
+        const changedForClient = CLIENT_VISIBLE.some((k) => d[k] !== undefined && !same(d[k], post[k]))
             // Sorted both sides: picking the same two networks in a different order is not
             // a change, and treating it as one would throw away a real approval.
             || (!!d.networks && [...d.networks].sort().join() !== (await targetsOf(accountId, [id])).map((t) => t.network).sort().join());
-        if (changedForClient && (post.approvedAt || post.status === 'approved' || post.status === 'awaiting_approval')) {
-            patch.status = 'draft';
-            patch.approvedAt = null;
-            patch.approvedByName = null;
+        let withdrawn = false;
+        if (changedForClient) {
+            // Done through the shared helper so an edit and a swapped photo end in exactly
+            // the same state, including the token going with it.
+            withdrawn = await withdrawApproval(accountId, post);
+            if (withdrawn) {
+                patch.status = 'draft';
+                patch.approvedAt = null;
+                patch.approvedByName = null;
+                patch.approvalToken = null;
+            }
         }
         if (Object.keys(patch).length) {
             await db.update(socialPosts).set(patch)
@@ -334,7 +374,7 @@ export async function socialRoutes(app) {
         }
         if (d.networks)
             await setTargets(accountId, id, post.businessId, d.networks);
-        return { ok: true };
+        return { ok: true, approvalWithdrawn: withdrawn };
     });
     /**
      * Delete or cancel.
@@ -409,8 +449,9 @@ export async function socialRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        const [post] = await db.select({ businessId: socialPosts.businessId, status: socialPosts.status })
-            .from(socialPosts).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
+        // The whole row: withdrawApproval below needs the sign-off fields, not just the status.
+        const [post] = await db.select().from(socialPosts)
+            .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
         if (!post)
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
@@ -456,7 +497,11 @@ export async function socialRoutes(app) {
             await db.update(socialPosts).set({ status: 'draft' })
                 .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
         }
-        return reply.code(201).send({ id: Number(ins[0].insertId), media: await mediaOf(accountId, id) });
+        // A picture the client never saw must not go out under their sign-off.
+        const withdrawn = await withdrawApproval(accountId, post);
+        return reply.code(201).send({
+            id: Number(ins[0].insertId), media: await mediaOf(accountId, id), approvalWithdrawn: withdrawn,
+        });
     });
     app.delete('/api/v1/social/posts/:id/media/:mediaId', async (req, reply) => {
         const { accountId } = authOf(req);
@@ -464,7 +509,7 @@ export async function socialRoutes(app) {
             .safeParse(req.params);
         if (!p.success)
             return reply.code(400).send({ error: 'Bad id.' });
-        const [post] = await db.select({ businessId: socialPosts.businessId }).from(socialPosts)
+        const [post] = await db.select().from(socialPosts)
             .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, p.data.id))).limit(1);
         if (!post)
             return reply.code(404).send({ error: 'Post not found.' });
@@ -473,7 +518,8 @@ export async function socialRoutes(app) {
         // The link row goes; the file stays. It may be in the client's Files tree, and
         // removing a photo from one post must never delete it from under another.
         await db.delete(socialPostMedia).where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.id, p.data.mediaId), eq(socialPostMedia.postId, p.data.id)));
-        return { ok: true, media: await mediaOf(accountId, p.data.id) };
+        const withdrawn = await withdrawApproval(accountId, post);
+        return { ok: true, media: await mediaOf(accountId, p.data.id), approvalWithdrawn: withdrawn };
     });
     app.post('/api/v1/social/posts/:id/reorder-media', async (req, reply) => {
         const { accountId } = authOf(req);
@@ -483,20 +529,22 @@ export async function socialRoutes(app) {
         const parsed = z.object({ order: z.array(z.number().int().positive()).max(20) }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: 'Send an order array of media ids.' });
-        const [post] = await db.select({ businessId: socialPosts.businessId }).from(socialPosts)
+        const [post] = await db.select().from(socialPosts)
             .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
         if (!post)
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
             return;
         // Order matters on Instagram: a carousel is cropped to the aspect ratio of its
-        // FIRST image, so which one leads changes how every other one looks.
+        // FIRST image, so which one leads changes how every other one looks. Which is
+        // exactly why a reorder throws the sign-off away too.
         let position = 0;
         for (const mediaId of parsed.data.order) {
             await db.update(socialPostMedia).set({ position: position++ })
                 .where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.id, mediaId), eq(socialPostMedia.postId, id)));
         }
-        return { ok: true, media: await mediaOf(accountId, id) };
+        const withdrawn = await withdrawApproval(accountId, post);
+        return { ok: true, media: await mediaOf(accountId, id), approvalWithdrawn: withdrawn };
     });
     // ---- Scheduling ----------------------------------------------------------------
     /**
@@ -609,6 +657,22 @@ export async function socialRoutes(app) {
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
             return;
+        /**
+         * Never schedule a post that is still out for sign-off.
+         *
+         * Without this the whole approval feature is optional in the worst way: staff send
+         * the link, click Schedule while the client is still reading, and the post goes
+         * out unanswered. The client then opens their link and is told it was approved,
+         * because a scheduled post reads as approved, and there was never a moment they
+         * could have said no.
+         *
+         * Withdrawing the link first is the deliberate way through, and it says so.
+         */
+        if (post.status === 'awaiting_approval') {
+            return reply.code(409).send({
+                error: 'This is with the client for sign-off. Wait for their answer, or withdraw the link first.',
+            });
+        }
         const when = parsed.data.scheduledAt ? new Date(parsed.data.scheduledAt) : post.scheduledAt;
         if (!when)
             return reply.code(400).send({ error: 'Pick a date and time first.' });

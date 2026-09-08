@@ -58,7 +58,14 @@ function approvalToken(): string | null {
 export function ApprovePage() {
   const token = approvalToken() ?? '';
   const qc = useQueryClient();
-  const [name, setName] = useState(() => localStorage.getItem('klippy.approver') ?? '');
+  // Wrapped, like the paired write below. Reading localStorage THROWS, it does not
+  // return null, when the browser has site data blocked for the origin or the page is
+  // in a sandboxed frame. This runs during the first render, so an unguarded read
+  // takes the whole page to the error boundary and every reload lands there again,
+  // leaving the client no way to approve anything.
+  const [name, setName] = useState(() => {
+    try { return localStorage.getItem('klippy.approver') ?? ''; } catch { return ''; }
+  });
   const [comment, setComment] = useState('');
   const [asking, setAsking] = useState(false);
 
@@ -80,6 +87,20 @@ export function ApprovePage() {
       qc.invalidateQueries({ queryKey: ['approval', token] });
       setAsking(false);
       setComment('');
+    },
+    /**
+     * A refusal has to move the page, or it argues with itself.
+     *
+     * The common one is two people on the same WhatsApp link: the partner approves it
+     * from his laptop, she taps Approve on her phone and gets a 409. Without this the
+     * heading still says "Ready for your approval", both buttons stay live, and every
+     * tap repeats the same red strip. Refetching shows her what actually happened.
+     */
+    onError: (e: Error) => {
+      if (e instanceof ApiError && (e.status === 409 || e.status === 404)) {
+        qc.invalidateQueries({ queryKey: ['approval', token] });
+        setAsking(false);
+      }
     },
   });
 

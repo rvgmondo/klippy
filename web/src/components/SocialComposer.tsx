@@ -66,9 +66,23 @@ export function SocialComposer({ postId, onClose }: {
     qc.invalidateQueries({ queryKey: ['social-posts'] });
   };
 
+  /**
+   * Say so when a change has just killed the client's link.
+   *
+   * The server withdraws a sign-off whenever the words or the pictures change, which
+   * is right, but it happens on an autosave 700ms after somebody fixes a typo. Without
+   * a word here the only sign is a status pill quietly going back to draft, and the
+   * client is left holding a link that no longer opens.
+   */
+  const sayIfWithdrawn = (r: unknown) => {
+    if ((r as { approvalWithdrawn?: boolean } | null)?.approvalWithdrawn) {
+      notify('That changed what the client approved, so the sign-off and the link were withdrawn. Send it round again.', 'ok');
+    }
+  };
+
   const save = useMutation({
     mutationFn: (body: Record<string, unknown>) => apiPatch(`/social/posts/${postId}`, body),
-    onSuccess: () => { setDirty(false); invalidate(); },
+    onSuccess: (r) => { setDirty(false); invalidate(); sayIfWithdrawn(r); },
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
@@ -108,13 +122,13 @@ export function SocialComposer({ postId, onClose }: {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Upload failed.');
       return res.json();
     },
-    onSuccess: () => { invalidate(); check.mutate(); },
+    onSuccess: (r) => { invalidate(); check.mutate(); sayIfWithdrawn(r); },
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
   const removeMedia = useMutation({
     mutationFn: (mediaId: number) => apiDelete(`/social/posts/${postId}/media/${mediaId}`),
-    onSuccess: () => { invalidate(); check.mutate(); },
+    onSuccess: (r) => { invalidate(); check.mutate(); sayIfWithdrawn(r); },
   });
 
   // Re-check shortly after typing stops, so issues track what is actually written
@@ -126,7 +140,7 @@ export function SocialComposer({ postId, onClose }: {
         title: draft.title, caption: draft.caption, firstComment: draft.firstComment || null,
         postType: draft.postType, deliveryMode: draft.deliveryMode,
         mediaAsk: draft.mediaAsk || null, networks: draft.networks,
-      }, { onSuccess: () => { setDirty(false); invalidate(); check.mutate(); } });
+      }, { onSuccess: (r) => { setDirty(false); invalidate(); check.mutate(); sayIfWithdrawn(r); } });
     }, 700);
     return () => clearTimeout(t);
   }, [dirty, draft]);
@@ -366,10 +380,15 @@ export function SocialComposer({ postId, onClose }: {
                 <Check size={14} /> Mark as posted
               </button>
             )}
+            {/* A post out for sign-off cannot be scheduled, and the server refuses it.
+                Offering the button anyway would be inviting a 409. */}
             <button
               onClick={() => schedule.mutate()}
-              disabled={schedule.isPending || issues.some((i) => i.severity === 'error')}
-              title={issues.some((i) => i.severity === 'error') ? 'Fix the problems above first' : undefined}
+              disabled={schedule.isPending || post.status === 'awaiting_approval'
+                || issues.some((i) => i.severity === 'error')}
+              title={post.status === 'awaiting_approval'
+                ? 'Waiting on the client. Withdraw the link if you want to go ahead without them.'
+                : issues.some((i) => i.severity === 'error') ? 'Fix the problems above first' : undefined}
               className={btnPrimary + ' flex items-center gap-1.5'}>
               <Send size={14} /> {post.status === 'scheduled' ? 'Reschedule' : 'Schedule'}
             </button>

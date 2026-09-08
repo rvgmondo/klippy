@@ -52,10 +52,22 @@ type Outcome = 'awaiting' | 'approved' | 'changes' | 'closed';
  */
 function outcomeOf(status: string, approvedAt: Date | null): Outcome {
   if (status === 'awaiting_approval') return 'awaiting';
-  if (['approved', 'scheduled', 'publishing', 'published', 'partially_published'].includes(status)) return 'approved';
-  if (approvedAt) return 'approved';
-  // A post back in draft holding a live token is one the client sent back.
+  /**
+   * Dead first, and this ORDER is the fix.
+   *
+   * Cancelling a post leaves approvedAt where it was, so a rule that reads the stamp
+   * before the status tells a client their cancelled post is approved and still going
+   * out on Friday. A client who cancelled a campaign by phone on Tuesday and reopens
+   * the link on Wednesday is exactly the person who would believe it.
+   */
+  if (status === 'cancelled' || status === 'failed') return 'closed';
+  if (['approved', 'scheduled', 'publishing', 'published', 'partially_published', 'needs_manual'].includes(status)) {
+    return 'approved';
+  }
+  // A post back in draft holding a live token is one the client sent back. Nothing
+  // else can be in that state: a staff edit withdraws the token with the approval.
   if (status === 'draft' || status === 'needs_media') return 'changes';
+  if (approvedAt) return 'approved';
   return 'closed';
 }
 
@@ -105,6 +117,10 @@ export async function socialApprovalRoutes(app: FastifyInstance) {
     ]);
 
     const logoToken = biz?.logoPath ? signLogoToken('business', biz.id) : null;
+    const outcome = outcomeOf(post.status, post.approvedAt);
+    // A post that is not going out has no date to promise. "Planned for Friday" beside
+    // "nothing to do here" is the page arguing with itself.
+    const showSchedule = outcome !== 'closed';
 
     return {
       brand: {
@@ -112,13 +128,13 @@ export async function socialApprovalRoutes(app: FastifyInstance) {
         color: biz?.color ?? '#6366f1',
         logoUrl: logoToken && biz ? `${appUrl()}/api/v1/public/logo/business/${biz.id}?t=${logoToken}` : null,
       },
-      outcome: outcomeOf(post.status, post.approvedAt),
+      outcome,
       post: {
         caption: post.caption ?? '',
         firstComment: post.firstComment,
         postType: post.postType,
-        scheduledAt: post.scheduledAt ? post.scheduledAt.toISOString() : null,
-        whenLabel: whenLabel(post.scheduledAt, timezone),
+        scheduledAt: showSchedule && post.scheduledAt ? post.scheduledAt.toISOString() : null,
+        whenLabel: showSchedule ? whenLabel(post.scheduledAt, timezone) : null,
         // Per network, because a caption override means the client is approving
         // something different on LinkedIn than on Instagram, and showing one of them
         // twice is showing them something they never agreed to.

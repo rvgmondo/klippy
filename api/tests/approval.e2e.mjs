@@ -40,6 +40,7 @@ const cookieOf = (r) => (r.headers.getSetCookie?.() ?? [r.headers.get('set-cooki
 
 const clean = async () => {
   await db.query("DELETE FROM social_posts WHERE account_id = 1 AND title LIKE 'E2E-APR%'");
+  await db.query("DELETE FROM storage_nodes WHERE account_id = 1 AND name LIKE 'e2e-apr-%'");
 };
 await clean();
 
@@ -55,6 +56,10 @@ const H = { 'content-type': 'application/json', cookie };
 const post = (p, b) => fetch(API + p, { method: 'POST', headers: H, body: JSON.stringify(b ?? {}) });
 const patch = (p, b) => fetch(API + p, { method: 'PATCH', headers: H, body: JSON.stringify(b ?? {}) });
 const getj = (p) => fetch(API + p, { headers: { cookie } }).then((r) => r.json());
+// Cookie only, no content type. Fastify refuses a bodyless request that claims to be
+// JSON ("Body cannot be empty when content-type is set to 'application/json'"), which
+// turns a delete into a silent 400 and a test into a green lie.
+const del = (p) => fetch(API + p, { method: 'DELETE', headers: { cookie } });
 
 /**
  * The client's browser. NO COOKIE, deliberately, on every single call: this is the
@@ -68,6 +73,31 @@ const anonJson = async (p, init) => {
 
 const [[biz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 ORDER BY position LIMIT 1');
 const BID = biz.id;
+
+/** A real one-pixel JPEG, so the media routes are exercised rather than mocked. */
+const PIXEL = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a'
+  + 'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA'
+  + 'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==', 'base64');
+
+const postMedia = async (postId, name) => {
+  const form = new FormData();
+  form.append('file', new Blob([PIXEL], { type: 'image/jpeg' }), name);
+  return fetch(API + `/social/posts/${postId}/media?width=1&height=1`, {
+    method: 'POST', headers: { cookie }, body: form,
+  });
+};
+
+/** Send for sign-off and approve as the client. Returns the token. */
+const approveIt = async (postId, name) => {
+  const link = (await (await post(`/social/posts/${postId}/request-approval`)).json()).approvalUrl;
+  const tok = new URL(link, 'http://x').searchParams.get('approve');
+  await anonJson(`/approve/${tok}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ decision: 'approve', name }),
+  });
+  return tok;
+};
 
 const makePost = async (title, caption) => {
   const r = await post('/social/posts', {
@@ -193,7 +223,11 @@ let PID; let TOKEN; let LINK;
 
   // The internal title is not published and is nobody's business but the agency's, so
   // renaming it must NOT cost a real approval.
-  await post(`/social/posts/${PID}/request-approval`);
+  // A fresh link, because the edit above withdrew the old one along with the approval.
+  const relink = (await (await post(`/social/posts/${PID}/request-approval`)).json()).approvalUrl;
+  const fresh = new URL(relink, 'http://x').searchParams.get('approve');
+  ok(fresh !== TOKEN, 'an edited post gets a NEW link, since the old one was withdrawn with the approval');
+  TOKEN = fresh;
   await anonJson(`/approve/${TOKEN}`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ decision: 'approve', name: 'Thandi' }),
@@ -254,6 +288,150 @@ let PID; let TOKEN; let LINK;
   const [[row]] = await db.query('SELECT status, approval_token FROM social_posts WHERE id = ?', [P3]);
   ok(row.approval_token === null, 'because the token is gone from the row, not merely marked');
   ok(row.status === 'draft', 'and the post is back to a draft', row.status);
+}
+
+/**
+ * ---- an approval covers the PICTURES, not only the words --------------------------
+ *
+ * Found by review, and it was the biggest hole in the feature: the clearing rule
+ * listed caption, firstComment, postType and networks, and media is what a client
+ * actually looks at. Every one of these three routes left the sign-off standing.
+ */
+{
+  const P = await makePost('E2E-APR the one whose photo was swapped', 'Two models, one counter.');
+  await approveIt(P, 'Thandi');
+
+  // A photo arriving is a different post from the one that was approved.
+  const up = await postMedia(P, 'e2e-apr-swap.jpg');
+  ok(up.status === 201, 'a photo can be added to an approved post', String(up.status));
+  const [[afterAdd]] = await db.query(
+    'SELECT status, approved_by_name, approval_token FROM social_posts WHERE id = ?', [P]);
+  ok(afterAdd.status === 'draft' && !afterAdd.approved_by_name,
+    'adding a photo to an approved post throws the sign-off away', afterAdd.status);
+  ok(afterAdd.approval_token === null,
+    'and takes the link with it, so the client is not left holding a stale one');
+
+  // And deleting one.
+  const P2 = await makePost('E2E-APR the one whose photo was deleted', 'Words.');
+  const m2 = await (await postMedia(P2, 'e2e-apr-del.jpg')).json();
+  await approveIt(P2, 'Thandi');
+  const gone = await del(`/social/posts/${P2}/media/${m2.id}`);
+  ok(gone.status === 200, 'the photo can be deleted', String(gone.status));
+  const [[afterDel]] = await db.query('SELECT status, approved_by_name FROM social_posts WHERE id = ?', [P2]);
+  ok(afterDel.status === 'draft' && !afterDel.approved_by_name,
+    'deleting the approved photo throws the sign-off away too', afterDel.status);
+
+  // And reordering, which on Instagram changes the crop of every image in a carousel.
+  const P3 = await makePost('E2E-APR the carousel that was reordered', 'Words.');
+  const a = await (await postMedia(P3, 'e2e-apr-a.jpg')).json();
+  const b = await (await postMedia(P3, 'e2e-apr-b.jpg')).json();
+  await approveIt(P3, 'Thandi');
+  const re = await post(`/social/posts/${P3}/reorder-media`, { order: [b.id, a.id] });
+  ok(re.status === 200, 'the carousel can be reordered', String(re.status));
+  const [[afterRe]] = await db.query('SELECT status, approved_by_name FROM social_posts WHERE id = ?', [P3]);
+  ok(afterRe.status === 'draft' && !afterRe.approved_by_name,
+    'and reordering a carousel does as well, since the lead image sets the crop', afterRe.status);
+}
+
+/**
+ * ---- a post out for sign-off cannot be scheduled behind the client's back ----------
+ *
+ * The worst of the findings: nothing stopped awaiting_approval going straight to
+ * scheduled, the publisher claims on status alone, and the client then opens their
+ * link and is told it was approved.
+ */
+{
+  const P = await makePost('E2E-APR the one scheduled behind their back', 'Going out whatever you say.');
+  const link = (await (await post(`/social/posts/${P}/request-approval`)).json()).approvalUrl;
+  const tok = new URL(link, 'http://x').searchParams.get('approve');
+
+  const sched = await post(`/social/posts/${P}/schedule`, {
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+  });
+  ok(sched.status === 409, 'scheduling a post that is still with the client is refused', String(sched.status));
+
+  const [[row]] = await db.query('SELECT status FROM social_posts WHERE id = ?', [P]);
+  ok(row.status === 'awaiting_approval', 'so it stays with them', row.status);
+
+  const view = await anonJson(`/approve/${tok}`);
+  ok(view.body.outcome === 'awaiting',
+    'and their page still asks for an answer rather than claiming they gave one', view.body.outcome);
+
+  // Withdrawing the link is the deliberate way through, and then it schedules.
+  await post(`/social/posts/${P}/revoke-approval`);
+  const after = await post(`/social/posts/${P}/schedule`, {
+    scheduledAt: new Date(Date.now() + 86400000).toISOString(),
+  });
+  ok(after.status === 200, 'withdrawing the link first is the way through', String(after.status));
+}
+
+/**
+ * ---- a staff edit must not tell the client they asked for changes ------------------
+ *
+ * draft plus a live token is how the page recognises a post the CLIENT sent back. A
+ * staff edit used to leave one behind, so the client's own page told them their notes
+ * had landed, for notes they never wrote, and refused their answer.
+ */
+{
+  const P = await makePost('E2E-APR the one edited under them', 'First words.');
+  const link = (await (await post(`/social/posts/${P}/request-approval`)).json()).approvalUrl;
+  const tok = new URL(link, 'http://x').searchParams.get('approve');
+  ok((await anonJson(`/approve/${tok}`)).status === 200, 'the client can open it');
+
+  await patch(`/social/posts/${P}`, { caption: 'Second words, changed under them.' });
+
+  const view = await anonJson(`/approve/${tok}`);
+  ok(view.status === 404,
+    'once staff edit it, the old link is dead rather than lying about what happened', String(view.status));
+
+  const decide = await anonJson(`/approve/${tok}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ decision: 'approve', name: 'Thandi' }),
+  });
+  ok(decide.status === 404, 'and cannot approve words that were replaced');
+
+  const [[log]] = await db.query(
+    'SELECT message FROM social_publish_log WHERE post_id = ? ORDER BY id DESC LIMIT 1', [P]);
+  ok(/withdrawn/i.test(log?.message ?? ''), 'with the reason recorded for whoever reopens it', log?.message);
+}
+
+// ---- a cancelled post does not read as approved and still going out ----------------
+{
+  const P = await makePost('E2E-APR the one cancelled after sign-off', 'Never mind.');
+  const tok = await approveIt(P, 'Thandi');
+  await del(`/social/posts/${P}`);
+
+  const [[row]] = await db.query('SELECT status FROM social_posts WHERE id = ?', [P]);
+  ok(row.status === 'cancelled', 'the post is cancelled', row.status);
+
+  const view = await anonJson(`/approve/${tok}`);
+  ok(view.body.outcome === 'closed',
+    'and the client is told there is nothing to do, not that it is approved', view.body.outcome);
+  ok(view.body.post.whenLabel === null,
+    'with no date promised for a post that will never go out', String(view.body.post.whenLabel));
+}
+
+/**
+ * ---- an idle autosave does not throw away a real approval --------------------------
+ *
+ * The composer PATCHes every 700ms and sends '' for a first comment that was never
+ * filled in, against a column holding NULL. Treating that as a change would withdraw
+ * a sign-off nobody touched.
+ */
+{
+  const P = await makePost('E2E-APR the one autosaved', 'Unchanged words.');
+  await approveIt(P, 'Thandi');
+  await patch(`/social/posts/${P}`, {
+    caption: 'Unchanged words.', firstComment: '', postType: 'post', networks: ['linkedin', 'facebook'],
+  });
+  const [[row]] = await db.query('SELECT status, approved_by_name FROM social_posts WHERE id = ?', [P]);
+  ok(row.status === 'approved' && row.approved_by_name === 'Thandi',
+    'an autosave that changes nothing leaves the approval alone', `${row.status} / ${row.approved_by_name}`);
+
+  // The empty string is only "no change" against a null. Real words still count.
+  await patch(`/social/posts/${P}`, { firstComment: '#coffee' });
+  const [[after]] = await db.query('SELECT status FROM social_posts WHERE id = ?', [P]);
+  ok(after.status === 'draft', 'while a first comment that really arrives does withdraw it', after.status);
 }
 
 // ---- the staff side sees the link, and only the staff side -------------------------

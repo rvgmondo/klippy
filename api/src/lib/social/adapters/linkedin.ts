@@ -38,12 +38,25 @@ const VERSION = process.env.LINKEDIN_VERSION || '202608';
 /** The app identity, passed in rather than read from the environment. See meta.ts. */
 export interface LinkedInApp { appId: string; appSecret: string }
 
-/** LI-POST-03. Everything an organisation post needs, plus comments and the profile. */
+/**
+ * LI-POST-03. Everything an organisation post needs, plus comments and the profile.
+ *
+ * r_organization_social_feed is here for READING engagement, and it is easy to miss
+ * because its write twin is already in the list. socialMetadata and socialActions both
+ * require it (LI-STATS-07, LI-STATS-08), so without it the live reaction and comment
+ * counts are uncollectable for every account connected under the old string.
+ *
+ * ADDING A SCOPE LATER IS NOT FREE. LinkedIn invalidates every existing token when an
+ * app's scope set changes, so each connected member has to go round the login again
+ * (LI-AUTH-03). Getting this list right before any real account connects is the only
+ * cheap moment there is.
+ */
 const SCOPES = [
   'openid', 'profile',
   'w_member_social',
   'w_organization_social', 'w_organization_social_feed',
-  'r_organization_social', 'rw_organization_admin',
+  'r_organization_social', 'r_organization_social_feed',
+  'rw_organization_admin',
 ].join(' ');
 
 function headers(token: string, extra: Record<string, string> = {}): Record<string, string> {
