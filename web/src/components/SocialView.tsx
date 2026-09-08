@@ -89,7 +89,11 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
   }, [posts]);
 
   const queue = (all.data?.posts ?? []).filter((p) =>
-    ['needs_manual', 'failed', 'partially_published', 'awaiting_approval'].includes(p.status));
+    ['needs_manual', 'failed', 'partially_published', 'awaiting_approval'].includes(p.status)
+    // A post back in draft still holding a live approval link is one the client sent
+    // back with notes. Without this it would drop off every list and be waited on by
+    // both sides, which is the exact failure the approval flow exists to prevent.
+    || sentBack(p));
   const asks = (all.data?.posts ?? []).filter((p) => p.status === 'needs_media' && p.mediaAsk);
 
   if (error) return <ErrorNote error={error} onRetry={() => refetch()} />;
@@ -189,7 +193,10 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
         {tab === 'accounts' && <SocialAccounts businessId={bid} />}
       </PageBody>
 
-      {openId != null && bid != null && (
+      {/* Not gated on a business being picked. The composer looks the post up by id
+          and needs nothing else, and gating it meant a row in Needs you could be
+          clicked, across every business, and simply do nothing. */}
+      {openId != null && (
         <SocialComposer postId={openId} onClose={() => {
           setOpenId(null);
           qc.invalidateQueries({ queryKey: ['social-posts'] });
@@ -225,6 +232,13 @@ function Tabs({ tab, setTab, queue, asks }: {
   );
 }
 
+/**
+ * A draft still holding a live approval link is a post the client sent back with
+ * notes, and "draft" is a useless thing to call that on a card somebody is scanning.
+ * The queue and the calendar both read it through here so they cannot disagree.
+ */
+const sentBack = (p: SocialPostListItem) => p.status === 'draft' && !!p.approvalToken && !p.approvedAt;
+
 function DayCard({ post, onOpen }: { post: SocialPostListItem; onOpen: () => void }) {
   const thumb = post.media[0]?.url;
   return (
@@ -241,7 +255,11 @@ function DayCard({ post, onOpen }: { post: SocialPostListItem; onOpen: () => voi
         <span className="line-clamp-2 text-[11px] leading-tight text-slate-300">{post.title}</span>
       </div>
       {post.status !== 'scheduled' && post.status !== 'published' && (
-        <div className="scale-90 origin-left"><StatusPill status={post.status} /></div>
+        <div className="scale-90 origin-left">
+          {sentBack(post)
+            ? <span className="mt-1 inline-block rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">changes asked for</span>
+            : <StatusPill status={post.status} />}
+        </div>
       )}
     </button>
   );
@@ -264,7 +282,15 @@ function QueueList({ posts, onOpen, emptyLabel }: {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="truncate text-sm text-slate-200">{p.title}</span>
-                <StatusPill status={p.status} />
+                {/* "draft" is technically what it is and useless as a label here.
+                    What the person needs to read is that a client sent it back. */}
+                {sentBack(p) ? (
+                  <span className="mt-1 inline-block rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
+                    changes asked for
+                  </span>
+                ) : (
+                  <StatusPill status={p.status} />
+                )}
               </div>
               {p.scheduledAt && (
                 <div className="num mt-0.5 text-[11px] text-slate-500">

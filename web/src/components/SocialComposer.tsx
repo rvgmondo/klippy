@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Upload, X, Trash2, Send, Save, Copy, Check, AlertTriangle } from 'lucide-react';
+import { Upload, X, Trash2, Send, Save, Copy, Check, AlertTriangle, Link2, ExternalLink } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { Modal } from './Modal';
 import { fieldClass, btnPrimary, btnSecondary } from './ui';
@@ -313,6 +313,9 @@ export function SocialComposer({ postId, onClose }: {
               </p>
             </div>
 
+            {/* ---- client sign-off ------------------------------------------ */}
+            <ApprovalBlock detail={data} postId={postId} onChanged={invalidate} />
+
             {/* ---- what already happened ------------------------------------ */}
             {data.targets.some((t) => t.permalink || t.error) && (
               <div className="rounded-lg border border-slate-800 p-3">
@@ -374,6 +377,120 @@ export function SocialComposer({ postId, onClose }: {
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Getting a client to say yes.
+ *
+ * The link is the entire mechanism: no client account, no invitation, no second
+ * system to keep in step. Whoever has the link can approve the post, which is exactly
+ * how an agency already works over WhatsApp, and it can be taken back in one click.
+ *
+ * The copy button matters more than it looks. Chasing a sign-off happens in WhatsApp,
+ * so the useful thing is a message ready to paste, not a URL on its own.
+ */
+function ApprovalBlock({ detail, postId, onChanged }: {
+  detail: SocialPostDetail;
+  postId: number;
+  onChanged: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const post = detail.post;
+  const url = detail.approvalUrl;
+  // The log is newest first, so the first change request in it is the live one.
+  const note = detail.log.find((l) => l.message.startsWith('Changes asked for'));
+
+  const request = useMutation({
+    mutationFn: () => apiPost<{ approvalUrl: string }>(`/social/posts/${postId}/request-approval`),
+    onSuccess: () => { onChanged(); notify('Link ready. Send it to the client.', 'ok'); },
+    onError: (e: Error) => notify(e.message, 'error'),
+  });
+
+  const revoke = useMutation({
+    mutationFn: () => apiPost(`/social/posts/${postId}/revoke-approval`),
+    onSuccess: () => { onChanged(); notify('Link withdrawn. It stops working now.', 'ok'); },
+    onError: (e: Error) => notify(e.message, 'error'),
+  });
+
+  const copyLink = async () => {
+    if (!url) return;
+    const message = ['Hi, could you have a look at this post before it goes out?', '', url].join('\n');
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { notify('Could not copy. Select the link and copy it.', 'error'); }
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-800 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="text-[11px] uppercase tracking-wide text-slate-500">Client sign-off</div>
+        <div className="flex-1" />
+        {!url && (
+          <button onClick={() => request.mutate()} disabled={request.isPending}
+            className={btnSecondary + ' flex items-center gap-1.5 !px-2 !py-1 text-xs'}>
+            <Link2 size={13} /> {request.isPending ? 'Making a link...' : 'Get an approval link'}
+          </button>
+        )}
+      </div>
+
+      {post.approvedByName && post.approvedAt && (
+        <p className="mt-1.5 text-xs text-emerald-300">
+          Approved by {post.approvedByName} on {new Date(post.approvedAt).toLocaleDateString()}.
+        </p>
+      )}
+
+      {/* What they actually asked for, in their words, next to the fields that fix it.
+          It reaches a notification as well, but a notification is read once and gone,
+          and the person opening this post a day later needs to see the note itself. */}
+      {note && !post.approvedAt && (
+        <p className="mt-1.5 rounded border border-amber-500/25 bg-amber-500/[0.05] p-2 text-xs text-amber-200">
+          {note.message}
+        </p>
+      )}
+
+      {!url && !post.approvedByName && (
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Makes a private link the client can open on their phone. No login, and it
+          shows them the post the way it will look.
+        </p>
+      )}
+
+      {url && (
+        <div className="mt-2 space-y-2">
+          <div className="num truncate rounded border border-slate-800 bg-slate-900/60 px-2 py-1.5 text-[11px] text-slate-400">
+            {url}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={copyLink} className={btnSecondary + ' flex items-center gap-1.5 !px-2 !py-1 text-xs'}>
+              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? 'Copied' : 'Copy message'}
+            </button>
+            <a href={url} target="_blank" rel="noreferrer"
+              className={btnSecondary + ' flex items-center gap-1.5 !px-2 !py-1 text-xs'}>
+              <ExternalLink size={13} /> See what they see
+            </a>
+            <button
+              onClick={async () => {
+                const yes = await confirmDialog(
+                  'Withdraw this link? It stops working immediately, including in a message already sent.',
+                  { confirmLabel: 'Withdraw' });
+                if (yes) revoke.mutate();
+              }}
+              className={btnSecondary + ' flex items-center gap-1.5 !px-2 !py-1 text-xs'}>
+              <X size={13} /> Withdraw
+            </button>
+          </div>
+          {post.status === 'awaiting_approval' && (
+            <p className="text-[11px] text-slate-500">
+              Waiting on them. Their answer lands in your notifications, and any changes
+              they ask for show up under What happened.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -74,6 +74,10 @@ export interface SocialPost {
   mediaAsk: string | null;
   mediaAskDue: string | null;
   attempts: number;
+  /** Live while a client can still open the link. Null once it is withdrawn. */
+  approvalToken: string | null;
+  approvedAt: string | null;
+  approvedByName: string | null;
 }
 
 /** The list shape: media carries `url` rather than the detail shape's `publicUrl`. */
@@ -88,6 +92,12 @@ export interface SocialPostDetail {
   media: SocialMedia[];
   log: { id: number; level: 'info' | 'warn' | 'error'; message: string; createdAt: string }[];
   timezone: string;
+  /**
+   * Built by the server, never assembled here. The app's public address is a server
+   * setting, and a link made from whatever host the staff user happens to be on works
+   * for them and 404s for the client.
+   */
+  approvalUrl: string | null;
 }
 
 export interface SocialAccountsResponse {

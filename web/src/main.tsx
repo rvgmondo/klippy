@@ -13,11 +13,24 @@ import { ConfirmHost } from './components/ConfirmDialog';
  */
 const Root = lazy(() => import('./Root').then((m) => ({ default: m.Root })));
 const PortalRoot = lazy(() => import('./portal/PortalRoot').then((m) => ({ default: m.PortalRoot })));
+/**
+ * A third application, smaller than either: one post, two buttons, no login. A client
+ * approving a caption on their phone should download that and nothing else.
+ */
+const ApprovePage = lazy(() => import('./approve/ApprovePage').then((m) => ({ default: m.ApprovePage })));
 
 // Inlined from PortalRoot so deciding WHICH app to load does not load either.
 function isPortalRequest(): boolean {
   const q = new URLSearchParams(window.location.search);
   return q.has('portal') || window.location.pathname.startsWith('/portal');
+}
+
+// Same reasoning, and the same two link shapes. The query form is what Klippy sends,
+// because the static site has no rewrite rule and a path would 404 before any of this
+// runs; the path form is accepted for a host that does rewrite.
+function isApprovalRequest(): boolean {
+  const q = new URLSearchParams(window.location.search);
+  return !!q.get('approve') || /^\/approve\/[A-Za-z0-9]+/.test(window.location.pathname);
 }
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -31,8 +44,9 @@ const queryClient = new QueryClient({
 // mounts INSTEAD of Klippy, outside AuthProvider, so it never asks who the staff
 // user is and a client never sees a trace of the tool behind their supplier.
 const portal = isPortalRequest();
+const approval = isApprovalRequest();
 
-if (!portal) {
+if (!portal && !approval) {
   // Paint in the remembered theme immediately, before /me resolves. The portal is
   // always light and takes its colour from the business instead.
   const cached = readCachedAppearance();
@@ -42,7 +56,11 @@ if (!portal) {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      {portal ? (
+      {approval ? (
+        <ErrorBoundary portal>
+          <Suspense fallback={null}><ApprovePage /></Suspense>
+        </ErrorBoundary>
+      ) : portal ? (
         <ErrorBoundary portal>
           <Suspense fallback={null}><PortalRoot /></Suspense>
         </ErrorBoundary>

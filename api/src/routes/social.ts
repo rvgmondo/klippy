@@ -19,6 +19,7 @@ import { NETWORKS, type Network, type MediaItem } from '../lib/social/types.js';
 import { canAutoPublish, whyNotAutomatic } from '../lib/social/registry.js';
 import { canConnect } from '../lib/social/credentials.js';
 import { publicMediaUrl } from '../lib/social/mediaUrl.js';
+import { appUrl } from '../lib/mailer.js';
 
 /**
  * Planning, approving and scheduling social posts.
@@ -42,6 +43,24 @@ const ALLOWED_MEDIA = new Set([
 ]);
 
 const EDITABLE = new Set(['draft', 'needs_media', 'awaiting_approval', 'approved', 'scheduled', 'failed', 'needs_manual']);
+
+/**
+ * Statuses a post can be sent for sign-off from. Anything already scheduled or out is
+ * past the point where a client's answer could change it, and asking for one then is
+ * asking a question whose answer cannot be honoured.
+ */
+const APPROVABLE = new Set(['draft', 'needs_media', 'awaiting_approval', 'approved']);
+
+/**
+ * The link a client is actually sent.
+ *
+ * A QUERY STRING, not a path, and that is not a style choice. The static site is
+ * served straight off the docroot with no rewrite rule in this repo, so a request for
+ * /approve/<token> is a 404 from Apache before any JavaScript loads. Every public link
+ * Klippy already sends (portal sign-in, payment returns) is built this way for the
+ * same reason. The page also accepts the path form, for a host that does rewrite.
+ */
+const approvalUrl = (token: string) => `${appUrl()}/?approve=${token}`;
 
 async function timezoneOf(accountId: number): Promise<string> {
   const [a] = await db.select({ tz: accounts.timezone }).from(accounts)
@@ -238,7 +257,14 @@ export async function socialRoutes(app: FastifyInstance) {
         .where(tenantWhere(socialPublishLog, accountId, eq(socialPublishLog.postId, id)))
         .orderBy(desc(socialPublishLog.id)).limit(50),
     ]);
-    return { post, targets, media, log, timezone: await timezoneOf(accountId) };
+    return {
+      post, targets, media, log,
+      timezone: await timezoneOf(accountId),
+      // Built here rather than in the browser: the app's public address is a server
+      // setting, and a link assembled from whatever host the staff user happens to be
+      // on is a link that works for them and 404s for the client.
+      approvalUrl: post.approvalToken ? approvalUrl(post.approvalToken) : null,
+    };
   });
 
   const postBody = z.object({
@@ -308,6 +334,29 @@ export async function socialRoutes(app: FastifyInstance) {
     // Editing a scheduled post drops it back to approved: the thing that was approved
     // is not the thing that would now go out.
     if (post.status === 'scheduled' && Object.keys(patch).length) patch.status = 'approved';
+
+    /**
+     * An approval is for the words the client actually read.
+     *
+     * So changing any of those words throws the sign-off away and the post goes back
+     * to draft, to be sent round again. Without this, a client approves one caption,
+     * somebody edits it afterwards, and a post nobody agreed to goes out carrying
+     * their name on the approval.
+     *
+     * The internal title, the media ask, the delivery mode and the time are all left
+     * alone on purpose. None of them changes what is published, and moving a post an
+     * hour later is ordinary work that should not need chasing a client again.
+     */
+    const CLIENT_VISIBLE = ['caption', 'firstComment', 'postType'] as const;
+    const changedForClient = CLIENT_VISIBLE.some((k) => d[k] !== undefined && d[k] !== post[k])
+      // Sorted both sides: picking the same two networks in a different order is not
+      // a change, and treating it as one would throw away a real approval.
+      || (!!d.networks && [...d.networks].sort().join() !== (await targetsOf(accountId, [id])).map((t) => t.network).sort().join());
+    if (changedForClient && (post.approvedAt || post.status === 'approved' || post.status === 'awaiting_approval')) {
+      patch.status = 'draft';
+      patch.approvedAt = null;
+      patch.approvedByName = null;
+    }
 
     if (Object.keys(patch).length) {
       await db.update(socialPosts).set(patch)
@@ -490,6 +539,78 @@ export async function socialRoutes(app: FastifyInstance) {
    * The composer calls this as the person types, so problems appear next to the field
    * that causes them rather than as a refusal at the end.
    */
+  /**
+   * Send it to the client for sign-off.
+   *
+   * The link is a random 32 bytes and nothing else. No email address, no account, no
+   * expiry: an approval link that has quietly gone stale is a client who thinks the
+   * agency ignored them. It is revoked by withdrawing it, which is one click and
+   * takes effect instantly, and one post's link can never open another post.
+   *
+   * The same link is reused when a post goes round a second time, so a client who
+   * asked for changes can go back to the message they already have rather than
+   * hunting for a newer one.
+   */
+  app.post('/api/v1/social/posts/:id/request-approval', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [post] = await db.select().from(socialPosts)
+      .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
+    if (!post) return reply.code(404).send({ error: 'Post not found.' });
+    if (!(await assertBusinessAccess(req, reply, post.businessId, 'member'))) return;
+    if (!APPROVABLE.has(post.status)) {
+      return reply.code(409).send({
+        error: `This post is ${post.status.replace('_', ' ')}. Only something still being planned can be sent for approval.`,
+      });
+    }
+    if (!(post.caption ?? '').trim()) {
+      return reply.code(400).send({ error: 'Write the caption first. There is nothing to approve yet.' });
+    }
+
+    const token = post.approvalToken ?? randomBytes(32).toString('hex');
+    await db.update(socialPosts).set({
+      status: 'awaiting_approval', approvalToken: token,
+      // A fresh round starts unsigned, so an old name cannot sit on new words.
+      approvedAt: null, approvedByName: null,
+    }).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
+
+    await db.insert(socialPublishLog).values(withTenant(accountId, {
+      postId: id, level: 'info' as const, message: 'Sent to the client for approval.',
+    } as never));
+
+    return { ok: true, approvalUrl: approvalUrl(token) };
+  });
+
+  /**
+   * Withdraw the link.
+   *
+   * Nulling the column is the whole revocation: the public route looks the token up
+   * in this table, so a withdrawn link stops working the moment this returns, even in
+   * a mailbox that already has it.
+   */
+  app.post('/api/v1/social/posts/:id/revoke-approval', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [post] = await db.select({ businessId: socialPosts.businessId, status: socialPosts.status })
+      .from(socialPosts).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
+    if (!post) return reply.code(404).send({ error: 'Post not found.' });
+    if (!(await assertBusinessAccess(req, reply, post.businessId, 'member'))) return;
+
+    await db.update(socialPosts).set({
+      approvalToken: null,
+      // Only the waiting state goes back. A post already approved keeps its sign-off:
+      // withdrawing the link is closing the door, not undoing what was agreed.
+      ...(post.status === 'awaiting_approval' ? { status: 'draft' as const } : {}),
+    }).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
+
+    await db.insert(socialPublishLog).values(withTenant(accountId, {
+      postId: id, level: 'info' as const, message: 'Approval link withdrawn.',
+    } as never));
+    return { ok: true };
+  });
+
   app.post('/api/v1/social/posts/:id/check', async (req, reply) => {
     const { accountId } = authOf(req);
     const id = intId(req);

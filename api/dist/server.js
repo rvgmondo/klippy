@@ -53,6 +53,7 @@ import { leadRoutes } from './routes/leads.js';
 import { socialRoutes } from './routes/social.js';
 import { socialMediaRoutes } from './routes/socialMedia.js';
 import { socialConnectRoutes } from './routes/socialConnect.js';
+import { socialApprovalRoutes } from './routes/socialApproval.js';
 import { VERSION } from './version.js';
 import { DEPLOYED } from './lib/deployed.js';
 const isProd = process.env.NODE_ENV === 'production';
@@ -208,6 +209,9 @@ export function buildServer() {
     // Public and unauthenticated on purpose: Meta fetches media as an anonymous
     // crawler. See routes/socialMedia.ts for why that is safe.
     app.register(socialMediaRoutes);
+    // Public for the same reason: a client signing off a post has no Klippy login and
+    // is never going to be given one. See routes/socialApproval.ts.
+    app.register(socialApprovalRoutes);
     return app;
 }
 // Passenger sets PORT; default for local dev.
