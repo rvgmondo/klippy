@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, ChevronLeft, ChevronRight,
-  Camera, Copy, Check, ListChecks, CalendarDays, AlertTriangle,
+  Camera, Copy, Check, ListChecks, CalendarDays, AlertTriangle, Link2,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { Page, PageHeader, PageBody } from './PageHeader';
@@ -10,6 +10,7 @@ import { Skeleton, btnPrimary, btnSecondary, fieldCompactClass } from './ui';
 import { ErrorNote } from './ErrorNote';
 import { notify } from './ConfirmDialog';
 import { SocialComposer, StatusPill } from './SocialComposer';
+import { SocialAccounts } from './SocialAccounts';
 import { iso, hhmm, addDays, monthGrid, weekDays, MONTHS, DOW, sameDay } from '../lib/dates';
 import { NETWORK_META, type SocialPostListItem } from '../lib/socialTypes';
 import { NetworkBadge } from './NetworkBadge';
@@ -26,11 +27,16 @@ import type { BusinessSelection } from './BusinessSwitcher';
  * is a month-shaped thing. Anyone who wants the detail switches to the week.
  */
 
-type Tab = 'calendar' | 'queue' | 'asks';
+type Tab = 'calendar' | 'queue' | 'asks' | 'accounts';
 
 export function SocialView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('calendar');
+  // Coming back from a network's login lands on Accounts, because that is where the
+  // picker appears. Landing on the calendar would look like nothing happened.
+  const [tab, setTab] = useState<Tab>(() => {
+    const q = new URLSearchParams(window.location.search);
+    return q.has('connect') || q.has('connectError') ? 'accounts' : 'calendar';
+  });
   const [mode, setMode] = useState<'month' | 'week'>(() => (window.innerWidth < 768 ? 'week' : 'month'));
   const [cursor, setCursor] = useState(new Date());
   const [openId, setOpenId] = useState<number | null>(null);
@@ -179,6 +185,8 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
         )}
 
         {tab === 'asks' && <MediaAsks posts={asks} onOpen={setOpenId} />}
+
+        {tab === 'accounts' && <SocialAccounts businessId={bid} />}
       </PageBody>
 
       {openId != null && bid != null && (
@@ -199,6 +207,7 @@ function Tabs({ tab, setTab, queue, asks }: {
     { key: 'calendar', label: 'Calendar', icon: CalendarDays },
     { key: 'queue', label: 'Needs you', icon: ListChecks, count: queue },
     { key: 'asks', label: 'Media asks', icon: Camera, count: asks },
+    { key: 'accounts', label: 'Accounts', icon: Link2 },
   ];
   return (
     <div className="flex gap-1">
