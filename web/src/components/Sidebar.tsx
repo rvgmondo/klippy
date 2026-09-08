@@ -5,7 +5,7 @@ import {
   ChevronRight, ChevronDown, FolderPlus,
   Home, Briefcase, Target, Wallet, Settings, Users,
   CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle, TrendingUp,
-  type LucideIcon, CreditCard,
+  type LucideIcon, CreditCard, Share2,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
@@ -70,6 +70,7 @@ const MODULE_ICON: Record<string, LucideIcon> = {
   today: CalendarCheck, calendar: CalendarDays, reports: BarChart3,
   billing: Receipt, collections: AlertTriangle, cashflow: TrendingUp, expenses: Wallet,
   takings: CreditCard,
+  social: Share2,
   files: HardDrive, contacts: Users,
 };
 
