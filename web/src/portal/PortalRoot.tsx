@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, ApiError } from '../lib/api';
+import { usePageTitle, useNoIndex } from '../lib/publicPage';
 import { PortalLogin } from './PortalLogin';
 import { PortalApp } from './PortalApp';
 
@@ -73,6 +74,18 @@ export function PortalRoot() {
     if (!data?.brand.accent) return;
     document.documentElement.style.setProperty('--portal-accent', data.brand.accent);
   }, [data?.brand.accent]);
+
+  /**
+   * The tab, which was still saying Klippy.
+   *
+   * Signed in, it is the supplier's name, matching the header. Before that it is the
+   * neutral wording the sign-in screen already uses, and it CANNOT be the brand name:
+   * until someone signs in we do not know whose portal this is, and guessing from the
+   * address bar would leak which businesses exist. Same reason that screen carries no
+   * logo.
+   */
+  usePageTitle(data?.brand.name || 'Your account');
+  useNoIndex();
 
   if (isLoading || entering) {
     return (

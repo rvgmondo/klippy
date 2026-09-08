@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, ApiError } from '../lib/api';
+import { usePageTitle, useNoIndex } from '../lib/publicPage';
 
 /**
  * The page a client opens to sign off a post.
@@ -41,16 +42,17 @@ const NETWORK_TINT: Record<string, string> = {
   linkedin: 'bg-sky-50 text-sky-700 border-sky-200',
 };
 
-/** The token, from either link shape. See the note on approvalUrl in routes/social.ts. */
-export function approvalToken(): string | null {
+/**
+ * The token, from either link shape. See the note on approvalUrl in routes/social.ts.
+ *
+ * Not exported: main.tsx keeps its own copy of this check on purpose, so deciding
+ * WHICH of the three apps to load does not pull in the chunk for any of them.
+ */
+function approvalToken(): string | null {
   const q = new URLSearchParams(window.location.search).get('approve');
   if (q) return q;
   const m = /^\/approve\/([A-Za-z0-9]+)/.exec(window.location.pathname);
   return m ? m[1] : null;
-}
-
-export function isApprovalRequest(): boolean {
-  return !!approvalToken();
 }
 
 export function ApprovePage() {
@@ -81,24 +83,9 @@ export function ApprovePage() {
     },
   });
 
-  /**
-   * Two things the shared index.html gets wrong for this page.
-   *
-   * The tab would otherwise read "Klippy: run the work, the time and the invoice in
-   * one place", which is a client being shown the tool their supplier uses. And an
-   * approval link is public by design, so it has to say plainly that it is not for a
-   * search index, even though nothing links to it.
-   */
-  useEffect(() => {
-    if (data?.brand.name) document.title = `Approve a post for ${data.brand.name}`;
-    let tag = document.querySelector('meta[name="robots"]');
-    if (!tag) {
-      tag = document.createElement('meta');
-      tag.setAttribute('name', 'robots');
-      document.head.appendChild(tag);
-    }
-    tag.setAttribute('content', 'noindex, nofollow');
-  }, [data?.brand.name]);
+  // Both shared with the portal, which had the same problem: see lib/publicPage.ts.
+  usePageTitle(data?.brand.name ? `Approve a post for ${data.brand.name}` : null);
+  useNoIndex();
 
   if (isLoading) {
     return <Shell><p className="py-16 text-center text-sm text-slate-500">Loading...</p></Shell>;
