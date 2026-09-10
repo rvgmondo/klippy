@@ -257,6 +257,18 @@ export async function importAccountData(
         name: f.name ?? 'Client', pillar: f.pillar ?? 'delivery',
         billingEmail: f.billingEmail ?? null, billingPhone: f.billingPhone ?? null,
         billingVatNumber: f.billingVatNumber ?? null, billingAddress: f.billingAddress ?? null,
+        // The company record, restored alongside the billing details. Ids that
+        // point at other rows (accountManagerId, primaryContactId) are left out
+        // deliberately: they name rows in the OLD account and would be dangling
+        // or, worse, point at a real row belonging to somebody else.
+        legalName: f.legalName ?? null, regNumber: f.regNumber ?? null,
+        companyType: f.companyType ?? null, country: f.country ?? null,
+        taxNumber: f.taxNumber ?? null, industry: f.industry ?? null,
+        website: f.website ?? null, bbbeeLevel: f.bbbeeLevel ?? null,
+        financialYearEnd: f.financialYearEnd ?? null, paymentTermsDays: f.paymentTermsDays ?? null,
+        creditLimit: f.creditLimit ?? null, currency: f.currency ?? null,
+        clientStatus: f.clientStatus ?? 'active', clientSince: f.clientSince ?? null,
+        source: f.source ?? null,
         hourlyRate: f.hourlyRate ?? null, monthlyHoursBudget: f.monthlyHoursBudget ?? null,
         notes: f.notes ?? null, isArchived: !!f.isArchived,
         deletedAt: trashStamp(f.deletedAt),

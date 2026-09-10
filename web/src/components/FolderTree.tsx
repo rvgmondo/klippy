@@ -21,6 +21,7 @@ import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { Menu } from './Menu';
 import { PortalAccessModal } from './PortalAccessModal';
+import { ClientDetails } from './ClientDetails';
 import type { Board, Folder as TFolder } from '../lib/types';
 
 // A drag-sortable list of sibling folders. Persists order via /folders/reorder.
@@ -70,6 +71,7 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
   const qc = useQueryClient();
   const [open, setOpen] = useState(depth === 0);
   const [portalFor, setPortalFor] = useState<{ id: number; name: string } | null>(null);
+  const [detailsFor, setDetailsFor] = useState<TFolder | null>(null);
   const children = all.filter((f) => f.parentId === folder.id);
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
     useSortable({ id: `f-${folder.id}` });
@@ -99,22 +101,6 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
   });
   const removeImage = useMutation({
     mutationFn: () => apiDelete(`/folders/${folder.id}/image`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
-  });
-  const setBillingEmail = useMutation({
-    mutationFn: (email: string) => apiPatch(`/folders/${folder.id}`, { billingEmail: email }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
-  });
-  const setBillingPhone = useMutation({
-    mutationFn: (phone: string) => apiPatch(`/folders/${folder.id}`, { billingPhone: phone || null }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
-  });
-  const setRate = useMutation({
-    mutationFn: (rate: number | null) => apiPatch(`/folders/${folder.id}`, { hourlyRate: rate }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
-  });
-  const setBudget = useMutation({
-    mutationFn: (h: number | null) => apiPatch(`/folders/${folder.id}`, { monthlyHoursBudget: h }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['folders'] }),
   });
   const setPillar = useMutation({
@@ -166,39 +152,12 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
         <Menu
           trigger={<span className="hidden text-slate-500 hover:text-slate-200 group-hover:block max-lg:block"><MoreHorizontal size={14} /></span>}
           items={[
+            ...(depth === 0 ? [{ label: 'Client details', onClick: () => setDetailsFor(folder) }] : []),
             { label: 'Add board', onClick: async () => { const n = await ask('Board name', ''); if (n) createBoard.mutate(n); } },
             { label: 'Add subfolder', onClick: async () => { const n = await ask('Subfolder name', ''); if (n) createFolder.mutate(n); } },
             { label: 'Rename', onClick: async () => { const n = await ask('Rename folder', folder.name); if (n) renameFolder.mutate(n); } },
             { label: folder.imagePath ? 'Change image' : 'Add image', onClick: () => pickImage() },
             ...(depth === 0 ? [{ label: (folder.pillar === 'operations') ? 'Move to Delivery' : 'Move to Operations', onClick: () => setPillar.mutate(folder.pillar === 'operations' ? 'delivery' : 'operations') }] : []),
-            ...(depth === 0 ? [{ label: folder.hourlyRate != null ? `Rate: ${folder.hourlyRate}/h (change)` : 'Set billing rate', onClick: async () => {
-              const cur = folder.hourlyRate != null ? String(folder.hourlyRate) : '';
-              const v = await promptDialog('Hourly rate for this client (blank to clear)', cur);
-              if (v === null) return;
-              const t = v.trim();
-              setRate.mutate(t === '' ? null : Number(t));
-            } }] : []),
-            /* A retainer's monthly allowance. Reports compare tracked hours to it. */
-            ...(depth === 0 ? [{ label: folder.monthlyHoursBudget != null ? `Retainer: ${Number(folder.monthlyHoursBudget)}h/month (change)` : 'Set retainer hours', onClick: async () => {
-              const cur = folder.monthlyHoursBudget != null ? String(Number(folder.monthlyHoursBudget)) : '';
-              const v = await promptDialog('Hours included per month for this client (blank to clear)', cur);
-              if (v === null) return;
-              const t = v.trim();
-              setBudget.mutate(t === '' ? null : Number(t));
-            } }] : []),
-            // Without a billing email a recurring invoice can only ever be a draft
-            // someone has to send by hand, and nothing can be chased automatically.
-            ...(depth === 0 ? [{ label: folder.billingEmail ? `Billing email: ${folder.billingEmail}` : 'Set billing email', onClick: async () => {
-              const v = await promptDialog('Where should invoices and payment reminders go? (blank to clear)', folder.billingEmail ?? '');
-              if (v === null) return;
-              setBillingEmail.mutate(v.trim());
-            } }] : []),
-            // The number WhatsApp reminders go to, and SMS when that is switched on.
-            ...(depth === 0 ? [{ label: folder.billingPhone ? `Phone: ${folder.billingPhone}` : 'Set phone number', onClick: async () => {
-              const v = await promptDialog('Mobile number for WhatsApp and SMS reminders (blank to clear)', folder.billingPhone ?? '');
-              if (v === null) return;
-              setBillingPhone.mutate(v.trim());
-            } }] : []),
             // Only top-level folders are clients, and only a client has a portal.
             ...(depth === 0 ? [{ label: 'Portal access', onClick: () => setPortalFor({ id: folder.id, name: folder.name }) }] : []),
             ...(folder.imagePath ? [{ label: 'Remove image', onClick: () => removeImage.mutate() }] : []),
@@ -220,6 +179,8 @@ export function FolderNode({ folder, all, depth, selectedBoardId, onSelectBoard 
         <PortalAccessModal folderId={portalFor.id} folderName={portalFor.name}
           onClose={() => setPortalFor(null)} />
       )}
+
+      {detailsFor && <ClientDetails folder={detailsFor} onClose={() => setDetailsFor(null)} />}
     </div>
   );
 }

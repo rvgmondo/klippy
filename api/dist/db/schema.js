@@ -337,6 +337,122 @@ export const folders = mysqlTable('folders', {
     // the reports compare tracked hours against it so "we are over on this client"
     // is a fact on a screen instead of a month-end surprise.
     monthlyHoursBudget: decimal('monthly_hours_budget', { precision: 6, scale: 2 }),
+    /**
+     * ---- Who this company actually is ------------------------------------------
+     *
+     * `name` above is what you call them. These are what a contract, a tax invoice
+     * and a credit application need, and they are the questions that get asked at
+     * the worst possible moment: the afternoon a quote has to go out, or the week
+     * an auditor wants to know who you invoiced.
+     *
+     * All optional. A one-person client with no registration number is a normal
+     * client, and a form that refuses to save without one is a form nobody fills in.
+     */
+    /**
+     * The registered name, when it is not the name on the door.
+     *
+     * "Early Bird Coffee" trades; "Sunrise Hospitality Group (Pty) Ltd" signs. A tax
+     * invoice needs the second one and every screen in Klippy should still say the
+     * first, which is why this is a separate column rather than a correction of it.
+     */
+    legalName: varchar('legal_name', { length: 200 }),
+    /**
+     * Company registration number. Deliberately free text and deliberately not
+     * validated: this is a CIPC number in South Africa, a Companies House number in
+     * the UK, an EIN in the US, and a format check written for one of them rejects
+     * the other two. `country` below is what makes the label right.
+     */
+    regNumber: varchar('reg_number', { length: 60 }),
+    /**
+     * Legal form: Pty Ltd, CC, Sole Proprietor, Trust, LLC, GmbH.
+     *
+     * Free text with suggestions per country rather than an enum, because an enum
+     * here means a migration every time Klippy meets a new country, and the list is
+     * genuinely open. It changes how the client is invoiced and whether a personal
+     * guarantee means anything, so it is worth recording even loosely.
+     */
+    companyType: varchar('company_type', { length: 60 }),
+    /** ISO 3166-1 alpha-2. Drives the labels above and the tax rules around them. */
+    country: varchar('country', { length: 2 }),
+    /**
+     * Income tax reference, which is NOT the VAT number already held in
+     * billingVatNumber. In South Africa they are different numbers issued for
+     * different things, and a client can have one without the other.
+     */
+    taxNumber: varchar('tax_number', { length: 60 }),
+    industry: varchar('industry', { length: 80 }),
+    website: varchar('website', { length: 255 }),
+    /**
+     * B-BBEE contributor level, and the reason it is here rather than in a notes
+     * field: an agency invoicing a South African corporate gets asked for its
+     * clients' levels, and the answer lives on a certificate nobody can find. Shown
+     * only when country is ZA, so it is not noise for everybody else.
+     */
+    bbbeeLevel: varchar('bbbee_level', { length: 20 }),
+    /**
+     * ---- Money, as it applies to THIS client -----------------------------------
+     */
+    /**
+     * Financial year end as MM-DD, in the client's own calendar.
+     *
+     * Stored as text rather than a date because it has no year: it is 28 February
+     * every year, not 28 February 2026. Two columns for month and day would need
+     * both read every time they are used, and a real date would invite somebody to
+     * compare it against today.
+     */
+    financialYearEnd: varchar('financial_year_end', { length: 5 }),
+    /**
+     * How long this client gets to pay, overriding the business default.
+     *
+     * Null means "use the business setting", which is the honest default: a client
+     * with nothing agreed is not a client on 14 days, it is a client on whatever the
+     * workspace does. Zero is a real value and means on receipt.
+     */
+    paymentTermsDays: int('payment_terms_days', { unsigned: true }),
+    /** What they are trusted with. Informational, in the client's currency. */
+    creditLimit: decimal('credit_limit', { precision: 12, scale: 2 }),
+    /**
+     * What this client is invoiced in, when it is not the business currency.
+     *
+     * Klippy never converts between currencies anywhere, and this does not change
+     * that. It only stops somebody raising a rand invoice for a client who has
+     * always been billed in pounds.
+     */
+    currency: varchar('currency', { length: 3 }),
+    /**
+     * ---- The relationship ------------------------------------------------------
+     */
+    /**
+     * Where this stands. A prospect is not a client yet and a former client is not
+     * a client any more, and both are worth keeping: one is a pipeline, the other is
+     * a history and the reason last year's invoices still make sense.
+     */
+    clientStatus: mysqlEnum('client_status', ['prospect', 'active', 'dormant', 'former'])
+        .default('active').notNull(),
+    /** When the relationship started. What "a client for two years" is measured from. */
+    clientSince: date('client_since', { mode: 'string' }),
+    /**
+     * Who owns this client internally. Set null rather than cascade: somebody
+     * leaving must not take the client record with them.
+     */
+    accountManagerId: int('account_manager_id', { unsigned: true })
+        .references(() => users.id, { onDelete: 'set null' }),
+    /** How they found you. The only field here that ever tells you where to spend. */
+    source: varchar('source', { length: 80 }),
+    /**
+     * The person authorised to sign things off for this company.
+     *
+     * A pointer into `contacts`, not a copy of a name and an email. Contacts already
+     * carry name, email, phone and role and already belong to a folder, so
+     * duplicating them here would create a second place to be wrong the first time
+     * somebody changes jobs. Set null on delete: losing the contact must not take
+     * the company record with it.
+     */
+    primaryContactId: int('primary_contact_id', { unsigned: true })
+        // A thunk, because `contacts` is declared further down this file. Drizzle calls
+        // it lazily once the module has finished, which is the same mechanism parentId
+        // above uses to point at folders itself.
+        .references(() => contacts.id, { onDelete: 'set null' }),
     // Which business pillar this top-level folder belongs to.
     pillar: mysqlEnum('pillar', ['delivery', 'operations']).default('delivery').notNull(),
     isArchived: boolean('is_archived').default(false).notNull(),

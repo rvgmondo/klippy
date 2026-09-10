@@ -139,6 +139,26 @@ export interface Folder {
   /** Billing details the client maintains themselves in their portal. */
   billingVatNumber?: string | null;
   billingAddress?: string | null;
+  /** The company behind the client, as a contract or a tax invoice needs it. */
+  legalName?: string | null;
+  regNumber?: string | null;
+  companyType?: string | null;
+  country?: string | null;
+  taxNumber?: string | null;
+  industry?: string | null;
+  website?: string | null;
+  bbbeeLevel?: string | null;
+  /** MM-DD. No year, because it is the same day every year. */
+  financialYearEnd?: string | null;
+  /** Null means "use the business default", which is not the same as zero. */
+  paymentTermsDays?: number | null;
+  creditLimit?: string | null;
+  currency?: string | null;
+  clientStatus?: 'prospect' | 'active' | 'dormant' | 'former';
+  clientSince?: string | null;
+  accountManagerId?: number | null;
+  source?: string | null;
+  primaryContactId?: number | null;
   pillar?: 'delivery' | 'operations';
   isArchived: boolean;
   position: number;

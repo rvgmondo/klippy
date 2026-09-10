@@ -2,11 +2,55 @@ import { z } from 'zod';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { boards } from '../db/schema.js';
 import { db } from '../db/client.js';
-import { folders, businesses, documents, deals, dealActivities } from '../db/schema.js';
+import { folders, businesses, documents, deals, dealActivities, contacts, memberships } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
 import { accessibleBusinessIds, assertMaybeBusiness } from '../lib/access.js';
+/**
+ * The company behind the client, as a contract or a tax invoice needs it.
+ *
+ * Nearly all of it is loose on purpose. A registration number is a CIPC number
+ * here, a Companies House number there and an EIN somewhere else, so a format
+ * check written for one country rejects the other two; `country` is what makes the
+ * LABEL right, and the value itself is whatever the client's certificate says.
+ *
+ * The two that are checked are the two a machine later reads: a financial year end
+ * that has to be a real day of a real month, and a currency that has to be a
+ * currency code. Everything else is a human reading a human.
+ */
+const companySchema = {
+    legalName: z.string().trim().max(200).nullable().optional(),
+    regNumber: z.string().trim().max(60).nullable().optional(),
+    companyType: z.string().trim().max(60).nullable().optional(),
+    country: z.string().trim().length(2).toUpperCase().nullable().optional().or(z.literal('')),
+    taxNumber: z.string().trim().max(60).nullable().optional(),
+    industry: z.string().trim().max(80).nullable().optional(),
+    website: z.string().trim().max(255).nullable().optional(),
+    bbbeeLevel: z.string().trim().max(20).nullable().optional(),
+    /**
+     * MM-DD, and the day is checked against the month, so 02-30 is refused rather
+     * than stored and shown back as a date that does not exist. February is allowed
+     * 29 because a leap year is a real year.
+     */
+    financialYearEnd: z.string().trim().regex(/^\d{2}-\d{2}$/, 'Use MM-DD, for example 02-28.')
+        .refine((v) => {
+        const m = Number(v.slice(0, 2));
+        const d = Number(v.slice(3, 5));
+        const last = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 0;
+        return m >= 1 && m <= 12 && d >= 1 && d <= last;
+    }, 'That is not a day of that month.')
+        .nullable().optional().or(z.literal('')),
+    /** Zero is a real answer and means on receipt, so this is not min(1). */
+    paymentTermsDays: z.number().int().min(0).max(365).nullable().optional(),
+    creditLimit: z.number().nonnegative().max(999999999).nullable().optional(),
+    currency: z.string().trim().length(3).toUpperCase().nullable().optional().or(z.literal('')),
+    clientStatus: z.enum(['prospect', 'active', 'dormant', 'former']).optional(),
+    clientSince: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD.').nullable().optional().or(z.literal('')),
+    accountManagerId: z.number().int().positive().nullable().optional(),
+    source: z.string().trim().max(80).nullable().optional(),
+    primaryContactId: z.number().int().positive().nullable().optional(),
+};
 const createSchema = z.object({
     name: z.string().trim().min(1).max(150),
     parentId: z.number().int().positive().nullable().optional(),
@@ -33,6 +77,7 @@ const updateSchema = z.object({
     billingVatNumber: z.string().trim().max(60).nullable().optional(),
     billingAddress: z.string().trim().max(500).nullable().optional(),
     pillar: z.enum(['delivery', 'operations']).optional(),
+    ...companySchema,
 });
 /** True if `candidateParent` is `folderId` itself or a descendant of it. */
 async function wouldCycle(accountId, folderId, candidateParent) {
@@ -126,6 +171,51 @@ export async function folderRoutes(app) {
         }
         if (parsed.data.hourlyRate !== undefined) {
             patch.hourlyRate = parsed.data.hourlyRate === null ? null : String(parsed.data.hourlyRate);
+        }
+        /**
+         * An empty box means "clear this", not "store an empty string".
+         *
+         * The form sends '' for every field somebody blanked, and a column holding ''
+         * reads as set everywhere else: a country of '' fails a two-letter lookup, a
+         * currency of '' would be printed on an invoice. One pass, so no field is
+         * remembered to be normalised and no field is forgotten.
+         */
+        for (const k of ['legalName', 'regNumber', 'companyType', 'country', 'taxNumber',
+            'industry', 'website', 'bbbeeLevel', 'financialYearEnd', 'clientSince', 'source',
+            'currency']) {
+            if (patch[k] !== undefined)
+                patch[k] = patch[k]?.trim() || null;
+        }
+        // DECIMAL columns are string-typed in Drizzle, like hourlyRate above.
+        if (parsed.data.creditLimit !== undefined) {
+            patch.creditLimit = parsed.data.creditLimit === null ? null : String(parsed.data.creditLimit);
+        }
+        // A website somebody typed as "acme.co.za" is a relative link in an href, which
+        // silently sends them to klippy.example.com/acme.co.za. Give it a scheme here so
+        // every screen that renders it can just render it.
+        if (typeof patch.website === 'string' && !/^https?:\/\//i.test(patch.website)) {
+            patch.website = `https://${patch.website}`;
+        }
+        /**
+         * Both of these are ids the caller chose, so both are checked against this
+         * account before they are stored. Without it, a number from another workspace
+         * lands in the row and the client record starts naming a stranger.
+         */
+        if (parsed.data.accountManagerId) {
+            const [mgr] = await db.select({ id: memberships.userId }).from(memberships)
+                .where(and(eq(memberships.accountId, accountId), eq(memberships.userId, parsed.data.accountManagerId), eq(memberships.isActive, true))).limit(1);
+            if (!mgr)
+                return reply.code(400).send({ error: 'That person is not in this workspace.' });
+        }
+        if (parsed.data.primaryContactId) {
+            const [person] = await db.select({ id: contacts.id }).from(contacts)
+                .where(tenantWhere(contacts, accountId, eq(contacts.id, parsed.data.primaryContactId))).limit(1);
+            if (!person)
+                return reply.code(400).send({ error: 'That contact does not exist.' });
+            // Filed under this client from now on, so the authorised person is reachable
+            // from the company as well as from the contacts list.
+            await db.update(contacts).set({ folderId: id })
+                .where(tenantWhere(contacts, accountId, eq(contacts.id, parsed.data.primaryContactId)));
         }
         const newParent = parsed.data.parentId;
         if (newParent !== undefined && newParent !== existing.parentId) {

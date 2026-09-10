@@ -519,6 +519,13 @@
       "when": 1788860361676,
       "tag": "0073_social_app_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "5",
+      "when": 1789021320289,
+      "tag": "0074_dry_jackpot",
+      "breakpoints": true
     }
   ]
 }
