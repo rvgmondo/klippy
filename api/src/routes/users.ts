@@ -2,12 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { users, memberships } from '../db/schema.js';
+import { users, memberships, folders } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { hashPassword, verifyPassword, COOKIE_NAME, signToken, cookieOptions, verifyToken } from '../lib/auth.js';
 import { intId } from '../lib/http.js';
 import { membersOf, getMembership, addMember } from '../lib/membership.js';
 import { invitations } from '../db/schema.js';
+import { tenantWhere } from '../lib/tenant.js';
 import { issueInvitation, sendInvitationEmail, acceptInvitation } from '../lib/invites.js';
 import { isNull, desc } from 'drizzle-orm';
 
@@ -184,6 +185,21 @@ export async function userRoutes(app: FastifyInstance) {
     if (parsed.data.isActive !== undefined) memPatch.isActive = parsed.data.isActive;
     if (Object.keys(memPatch).length) {
       await db.update(memberships).set(memPatch).where(eq(memberships.id, target.id));
+    }
+
+    /**
+     * Somebody leaving hands their clients back, rather than staying named on them.
+     *
+     * The FK on folders.accountManagerId is SET NULL on DELETE, which never fires
+     * here: the user row survives, because that same login may belong to another
+     * workspace. So a former colleague stayed listed as who looks after the client,
+     * and because the save route refuses a manager who is not in the workspace, every
+     * subsequent save of that client failed with a message naming no field. The
+     * record went read-only and nothing said why.
+     */
+    if (parsed.data.isActive === false) {
+      await db.update(folders).set({ accountManagerId: null })
+        .where(tenantWhere(folders, accountId, eq(folders.accountManagerId, id)));
     }
     // A password reset writes the person's GLOBAL login, not a per-workspace one,
     // so it is fenced hard. Without this fence the route was a full cross-tenant

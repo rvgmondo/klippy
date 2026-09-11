@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Save, Building2, Wallet, Handshake, ExternalLink } from 'lucide-react';
 import { apiGet, apiPatch } from '../lib/api';
 import { Modal } from './Modal';
 import { fieldClass, btnPrimary, btnSecondary } from './ui';
-import { notify } from './ConfirmDialog';
+import { notify, confirmDialog } from './ConfirmDialog';
 import type { Folder } from '../lib/types';
 
 /**
@@ -26,7 +26,7 @@ import type { Folder } from '../lib/types';
  */
 
 interface Contact { id: number; name: string; email: string | null; role: string | null; folderId: number | null }
-interface Member { id: number; name: string | null; email: string }
+interface Member { id: number; name: string | null; email: string; isActive?: boolean }
 
 /** Enough of the world to be useful, with the ones Klippy actually serves first. */
 const COUNTRIES: { code: string; name: string }[] = [
@@ -96,6 +96,16 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
   const [tab, setTab] = useState<'company' | 'money' | 'relationship'>('company');
   const [draft, setDraft] = useState<Draft>({});
   const [dirty, setDirty] = useState(false);
+  /**
+   * What the row said when this drawer opened.
+   *
+   * Kept so Save can send ONLY what was actually edited. Posting all 23 fields back
+   * meant opening the drawer, changing one thing and pressing Save wrote a stale
+   * snapshot over everything else: a VAT number the client had corrected in their
+   * own portal that morning would silently snap back, and the next tax invoice would
+   * carry the wrong one, with "Saved." as the only feedback.
+   */
+  const seed = useRef<Draft>({});
 
   useEffect(() => {
     const d: Draft = {};
@@ -104,12 +114,16 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
       d[f] = v === null || v === undefined ? '' : String(v);
     }
     setDraft(d);
+    seed.current = { ...d };
     setDirty(false);
   }, [folder]);
 
   const contacts = useQuery({
-    queryKey: ['contacts'],
-    queryFn: () => apiGet<{ contacts: Contact[] }>('/contacts'),
+    queryKey: ['contacts', folder.businessId],
+    // Scoped to this client's own business. The server refuses a contact from another
+    // one, and offering people who cannot be chosen is a list of dead ends.
+    queryFn: () => apiGet<{ contacts: Contact[] }>(
+      folder.businessId ? `/contacts?businessId=${folder.businessId}` : '/contacts'),
   });
   const members = useQuery({
     queryKey: ['users'],
@@ -121,6 +135,10 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
       const body: Record<string, unknown> = {};
       for (const f of FIELDS) {
         const v = (draft[f] ?? '').trim();
+        // Untouched fields are left out entirely. The PATCH route only writes keys
+        // it is sent, so anything nobody looked at keeps whatever it holds now, even
+        // if that changed while this drawer was open.
+        if (v === (seed.current[f] ?? '').trim()) continue;
         // Numbers go as numbers or null. An empty box means clear it, and the
         // server turns '' into null for the text fields for the same reason.
         if (f === 'paymentTermsDays' || f === 'accountManagerId' || f === 'primaryContactId') {
@@ -160,7 +178,10 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
     .filter((c) => c.folderId === folder.id || c.folderId === null);
 
   return (
-    <Modal onClose={onClose} variant="drawer">
+    <Modal onClose={onClose} variant="drawer"
+      confirmClose={() => (dirty
+        ? confirmDialog('Close without saving these details?', { confirmLabel: 'Discard', danger: true })
+        : true)}>
       <div className="flex h-full flex-col">
         <div className="flex items-start gap-3 border-b border-slate-800 p-4">
           <div className="min-w-0 flex-1">
@@ -263,7 +284,8 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
                 </Field>
               )}
 
-              <Field label="Registered address">
+              <Field label="Billing address"
+                hint="Where invoices are addressed. The client can correct this themselves in their portal.">
                 <textarea className={fieldClass + ' resize-y'} rows={3} value={draft.billingAddress ?? ''}
                   onChange={(e) => set('billingAddress', e.target.value)} />
               </Field>
@@ -366,9 +388,18 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
                 <select className={fieldClass} value={draft.accountManagerId ?? ''}
                   onChange={(e) => set('accountManagerId', e.target.value)}>
                   <option value="">Not set</option>
-                  {(members.data?.users ?? []).map((u) => (
+                  {/* Only people still here. The server refuses a former colleague, so
+                      offering one turns the whole drawer read-only: every Save fails
+                      with a message that names no field. */}
+                  {(members.data?.users ?? []).filter((u) => u.isActive !== false).map((u) => (
                     <option key={u.id} value={u.id}>{u.name || u.email}</option>
                   ))}
+                  {/* A stale one is still shown, or the box would look empty while the
+                      stored value quietly blocks saving. Picking anything replaces it. */}
+                  {draft.accountManagerId
+                    && !(members.data?.users ?? []).some((u) => String(u.id) === draft.accountManagerId && u.isActive !== false) && (
+                    <option value={draft.accountManagerId}>Someone who has left, pick again</option>
+                  )}
                 </select>
               </Field>
 

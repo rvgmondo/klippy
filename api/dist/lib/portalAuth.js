@@ -101,7 +101,17 @@ export async function portalContext(token) {
     }
     const [client] = await db.select().from(folders)
         .where(and(eq(folders.id, user.folderId), eq(folders.accountId, user.accountId))).limit(1);
-    if (!client || client.isArchived)
+    /**
+     * A deleted client loses their portal, immediately.
+     *
+     * This checked isArchived alone, and nothing in Klippy sets that column: deleting a
+     * client stamps deletedAt and moves the row to the Trash, where it sits for 30 days
+     * before the purge. For those 30 days the client had vanished from the sidebar, the
+     * picker and billing, while still being able to sign in with the link they already
+     * had, read every invoice, download the PDFs, accept an outstanding quote and pay.
+     * Nothing left in the app showed they were still in there.
+     */
+    if (!client || client.isArchived || client.deletedAt)
         return null;
     const [business] = await db.select().from(businesses)
         .where(and(eq(businesses.id, user.businessId), eq(businesses.accountId, user.accountId))).limit(1);

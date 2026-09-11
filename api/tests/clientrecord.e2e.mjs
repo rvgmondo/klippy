@@ -53,6 +53,9 @@ if (!cookie) { await db.end(); process.exit(1); }
 const H = { 'content-type': 'application/json', cookie };
 const post = (p, b) => fetch(API + p, { method: 'POST', headers: H, body: JSON.stringify(b ?? {}) });
 const patch = (p, b) => fetch(API + p, { method: 'PATCH', headers: H, body: JSON.stringify(b ?? {}) });
+// Cookie only: Fastify refuses a bodyless request that claims to be JSON, which
+// turns a delete into a silent 400 and a test into a green lie.
+const del = (p) => fetch(API + p, { method: 'DELETE', headers: { cookie } });
 
 const [[biz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 ORDER BY position LIMIT 1');
 
@@ -256,6 +259,218 @@ ok(!!CID, 'a client is created', String(CID));
 
   await db.query('DELETE FROM documents WHERE folder_id = ?', [FID]);
   await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
+/**
+ * ---- the client's currency, and the places it must NOT reach ----------------------
+ *
+ * Klippy never converts between currencies anywhere. So a client billed in something
+ * other than the business currency is safe only where a person is typing the amounts
+ * and can see the symbol. An automated biller taking a price out of an offering
+ * denominated in rand and stamping it GBP would not restate the invoice, it would
+ * multiply it, which is why the subscription biller and the handoff keep the
+ * business currency on purpose.
+ */
+{
+  const made = await post('/folders', { name: 'E2E-CR Thames Group', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+  await patch(`/folders/${FID}`, { currency: 'GBP', legalName: 'Thames Group Ltd' });
+
+  const [[b]] = await db.query('SELECT currency FROM businesses WHERE id = ?', [biz.id]);
+  const bizCur = b.currency || 'ZAR';
+
+  const r = await post('/documents', {
+    type: 'invoice', businessId: biz.id, folderId: FID,
+    clientName: 'Thames Group Ltd',
+    issueDate: new Date().toISOString().slice(0, 10),
+    lines: [{ description: 'Consulting', quantity: 1, unitPrice: 1000 }],
+  });
+  const doc = (await r.json()).document;
+  ok(doc?.currency === 'GBP',
+    "a hand-raised invoice uses the client's own currency, since a person can see the symbol",
+    `${doc?.currency} (business bills in ${bizCur})`);
+
+  // No client currency set means the business currency, unchanged from before.
+  const plain = await post('/folders', { name: 'E2E-CR Plain Client', businessId: biz.id });
+  const PID2 = (await plain.json()).folder.id;
+  const r2 = await post('/documents', {
+    type: 'invoice', businessId: biz.id, folderId: PID2, clientName: 'Plain',
+    issueDate: new Date().toISOString().slice(0, 10),
+    lines: [{ description: 'Work', quantity: 1, unitPrice: 100 }],
+  });
+  const doc2 = (await r2.json()).document;
+  ok(doc2?.currency === bizCur,
+    'and a client with no currency of their own still gets the business currency', doc2?.currency);
+
+  await db.query('DELETE FROM document_lines WHERE document_id IN (?, ?)', [doc?.id ?? 0, doc2?.id ?? 0]);
+  await db.query('DELETE FROM documents WHERE folder_id IN (?, ?)', [FID, PID2]);
+  await db.query('DELETE FROM folders WHERE id IN (?, ?)', [FID, PID2]);
+}
+
+/**
+ * ---- an invoice always has a due date, or nobody ever chases it -------------------
+ *
+ * Collections, the reminder job, the command bar, the Focus screen and the debtor
+ * ageing report every one filter on due_date IS NOT NULL. A null drops the invoice
+ * out of all of them at once and prints no Due line on the PDF, so it ages forever
+ * while Collections reads as healthy. The editor used to leave it blank for the
+ * commonest case of all: a client with no payment terms of their own.
+ */
+{
+  const made = await post('/folders', { name: 'E2E-CR Silent Ager', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+  const [[b]] = await db.query('SELECT default_due_days FROM businesses WHERE id = ?', [biz.id]);
+
+  // Exactly what the browser posts when nobody touched the due date box.
+  const r = await post('/documents', {
+    type: 'invoice', businessId: biz.id, folderId: FID, clientName: 'Silent Ager',
+    issueDate: new Date().toISOString().slice(0, 10), dueDate: null,
+    lines: [{ description: 'Work', quantity: 1, unitPrice: 1000 }],
+  });
+  const doc = (await r.json()).document;
+  ok(!!doc?.dueDate,
+    'an invoice saved with no due date still gets one, rather than ageing unchased forever',
+    String(doc?.dueDate));
+
+  const gap = doc?.dueDate
+    ? Math.round((new Date(doc.dueDate + 'T00:00:00Z') - new Date(doc.issueDate + 'T00:00:00Z')) / 86400000)
+    : -1;
+  ok(gap === (b.default_due_days ?? 14),
+    'and it is the business default, since this client has no term of their own',
+    `${gap} days vs business ${b.default_due_days}`);
+
+  // A quote must NOT get one: its date field means "valid until", a different promise.
+  const q = await post('/documents', {
+    type: 'quote', businessId: biz.id, folderId: FID, clientName: 'Silent Ager',
+    issueDate: new Date().toISOString().slice(0, 10), dueDate: null,
+    lines: [{ description: 'Work', quantity: 1, unitPrice: 1000 }],
+  });
+  const quote = (await q.json()).document;
+  ok(quote?.dueDate === null,
+    'while a quote is left blank, because valid-until is not a due date', String(quote?.dueDate));
+
+  await db.query('DELETE FROM document_lines WHERE document_id IN (?, ?)', [doc?.id ?? 0, quote?.id ?? 0]);
+  await db.query('DELETE FROM documents WHERE folder_id = ?', [FID]);
+  await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
+/**
+ * ---- converting a quote bills the client as they are TODAY ------------------------
+ *
+ * A quote freezes the client's details the day it is typed. Between then and
+ * acceptance a client registers for VAT or moves offices and corrects it in their own
+ * portal. Converting used to hand them an invoice with the old address and no VAT
+ * number, which they cannot claim against.
+ */
+{
+  const made = await post('/folders', { name: 'E2E-CR Late Registrant', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+
+  const q = await post('/documents', {
+    type: 'quote', businessId: biz.id, folderId: FID,
+    clientName: 'Late Registrant', issueDate: new Date().toISOString().slice(0, 10),
+    lines: [{ description: 'Project', quantity: 1, unitPrice: 9000 }],
+  });
+  const quote = (await q.json()).document;
+  ok(quote?.clientVatNumber == null, 'the quote is written before they registered for VAT');
+
+  // They register, and correct it themselves.
+  await patch(`/folders/${FID}`, {
+    legalName: 'Late Registrant Holdings (Pty) Ltd',
+    billingVatNumber: '4900011122',
+    billingAddress: '9 New Street, Durban',
+  });
+
+  const conv = await post(`/documents/${quote.id}/convert`);
+  const inv = (await conv.json()).document;
+  ok(inv?.clientVatNumber === '4900011122',
+    'and the invoice carries the VAT number they registered since, not the blank on the quote',
+    String(inv?.clientVatNumber));
+  ok(inv?.clientName === 'Late Registrant Holdings (Pty) Ltd',
+    'with the registered name they gave, not the one frozen on the quote', inv?.clientName);
+  ok(inv?.clientAddress === '9 New Street, Durban', 'and the address they moved to', inv?.clientAddress);
+
+  await db.query('DELETE FROM document_lines WHERE document_id IN (?, ?)', [quote?.id ?? 0, inv?.id ?? 0]);
+  await db.query('DELETE FROM documents WHERE folder_id = ?', [FID]);
+  await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
+/**
+ * ---- a contact from another business cannot be made the authorised person ---------
+ */
+{
+  const [[other]] = await db.query(
+    'SELECT id FROM businesses WHERE account_id = 1 AND id <> ? LIMIT 1', [biz.id]);
+  if (other) {
+    const mine = await post('/folders', { name: 'E2E-CR Scoped Client', businessId: biz.id });
+    const FID = (await mine.json()).folder.id;
+    const c = await post('/contacts', { name: 'E2E-CR Outsider', businessId: other.id });
+    const cid = (await c.json()).contact?.id;
+    const r = await patch(`/folders/${FID}`, { primaryContactId: cid });
+    ok(r.status === 400,
+      'a contact belonging to another business is refused as the authorised person', String(r.status));
+    const [[link]] = await db.query('SELECT folder_id FROM contacts WHERE id = ?', [cid]);
+    ok(link.folder_id === null, 'and is not quietly re-filed under this client anyway');
+    await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+  } else {
+    ok(true, 'only one business in this workspace, so the cross-business case cannot arise here');
+  }
+}
+
+/**
+ * ---- deleting a client closes their portal, today, not in 30 days -----------------
+ *
+ * The gate checked isArchived, a column nothing in Klippy sets. Deleting stamps
+ * deletedAt and moves the row to the Trash for 30 days. For those 30 days the client
+ * had vanished from the sidebar, the picker and billing while still being able to
+ * sign in with the link they already had, read every invoice, download the PDFs,
+ * accept an outstanding quote and pay. Nothing left in the app showed they were in.
+ */
+{
+  const made = await post('/folders', { name: 'E2E-CR Departed Client', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+
+  // Staff preview uses the same portalContext gate the client's own session does, so
+  // it is the honest way to ask "would a session be granted for this client".
+  const before = await post(`/folders/${FID}/portal-preview`);
+  ok(before.status === 200, 'a live client has a portal', String(before.status));
+
+  const cookie2 = (before.headers.getSetCookie?.() ?? [])
+    .filter(Boolean).map((c) => c.split(';')[0]).join('; ');
+  const meBefore = await fetch(API + '/portal/me', { headers: { cookie: cookie2 } });
+  ok(meBefore.status === 200, 'and that session can read it', String(meBefore.status));
+
+  // Delete the client. It goes to the Trash, not away.
+  await del(`/folders/${FID}`);
+  const [[row]] = await db.query('SELECT deleted_at FROM folders WHERE id = ?', [FID]);
+  ok(!!row.deleted_at, 'deleting stamps deletedAt rather than removing the row', String(!!row.deleted_at));
+
+  // The SAME cookie, which is what the client would still be holding.
+  const meAfter = await fetch(API + '/portal/me', { headers: { cookie: cookie2 } });
+  ok(meAfter.status === 401,
+    'and the session they already had stops working immediately, not in 30 days', String(meAfter.status));
+
+  await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
+/**
+ * ---- the backup remembers which hours were already billed -------------------------
+ *
+ * Reports, Unbilled work reads a null billedDocumentId as "never invoiced". The
+ * export dropped the column, so restoring turned every hour the business had ever
+ * billed back into work it offered to invoice again, and clients who had already paid
+ * got a second bill for the same hours.
+ */
+{
+  const r = await fetch(API + '/account/export', { headers: { cookie } });
+  ok(r.ok, 'the export answers', String(r.status));
+  if (r.ok) {
+    const dump = await r.json();
+    const entries = dump.timeEntries ?? [];
+    ok(entries.length === 0 || 'billedDocumentId' in entries[0],
+      'and every tracked hour carries which document billed it',
+      entries.length ? Object.keys(entries[0]).join(',') : 'no time entries to check');
+  }
 }
 
 // ---- the backup carries the company record ------------------------------------------

@@ -9,6 +9,8 @@ export interface PickedClient {
   name: string;
   /** Null means the client has no term of their own; the business default applies. */
   paymentTermsDays?: number | null;
+  /** Null means bill them in whatever the business bills in. */
+  currency?: string | null;
   email: string;
   address: string;
   vatNumber: string;
@@ -57,7 +59,7 @@ export function ClientPicker({ businessId, value, onChange }: {
       setAdding(false); setNewName(''); setNewEmail(''); setErr('');
       qc.invalidateQueries({ queryKey: ['folders'] });
       onChange({
-        folderId: r.folder.id, name: r.folder.name, paymentTermsDays: null,
+        folderId: r.folder.id, name: r.folder.name, paymentTermsDays: null, currency: null,
         email: r.folder.billingEmail ?? '', address: '', vatNumber: '',
       });
     },
@@ -66,7 +68,7 @@ export function ClientPicker({ businessId, value, onChange }: {
 
   const pick = (id: string) => {
     if (id === '__new') { setAdding(true); return; }
-    if (id === '') { onChange({ folderId: null, name: '', email: '', address: '', vatNumber: '', paymentTermsDays: null }); return; }
+    if (id === '') { onChange({ folderId: null, name: '', email: '', address: '', vatNumber: '', paymentTermsDays: null, currency: null }); return; }
     const f = clients.find((c) => String(c.id) === id);
     if (!f) return;
     onChange({
@@ -82,6 +84,7 @@ export function ClientPicker({ businessId, value, onChange }: {
       address: f.billingAddress ?? '',
       vatNumber: f.billingVatNumber ?? '',
       paymentTermsDays: f.paymentTermsDays ?? null,
+      currency: f.currency ?? null,
     });
   };
 

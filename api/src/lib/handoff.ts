@@ -106,7 +106,9 @@ on<DealWonPayload>('deal.won', 'draft-opening-invoice', async (p, ctx): Promise<
   const taxRate = await taxRateFor(accountId, p.businessId);
   // Same resolver as the editor and the subscription biller, so a client's own
   // payment terms are honoured wherever the invoice happens to be raised from.
-  const billTo = await clientBillingFor(accountId, folderId, p.businessId ?? null);
+  // The deal's own company name is the fallback, because a deal won before the
+  // client folder exists still has to produce something addressed to somebody.
+  const billTo = await clientBillingFor(accountId, folderId, p.businessId ?? null, p.company || p.title);
   const dueDays = billTo.dueDays;
   const issueDate = new Date().toISOString().slice(0, 10);
   const due = new Date(`${issueDate}T00:00:00.000Z`);
@@ -121,7 +123,21 @@ on<DealWonPayload>('deal.won', 'draft-opening-invoice', async (p, ctx): Promise<
   const docId = await db.transaction(async (tx) => {
     const ins = await tx.insert(documents).values(withTenant(accountId, {
       type: 'invoice' as const, seq, number, businessId: p.businessId, folderId,
-      clientName: p.company || p.title, clientEmail: p.contactEmail || null,
+      /**
+       * The client record, not the deal's own scribbled company name.
+       *
+       * This wrote whatever was typed on the deal and no address or VAT number at
+       * all, which is the same hole the subscription biller had: a draft invoice
+       * that has to be retyped before it can be sent, and a tax invoice a
+       * VAT-registered client cannot validly claim against if it is not.
+       *
+       * The deal's values are the fallback, because a deal won before the client
+       * folder exists still has to produce something addressed to somebody.
+       */
+      clientName: billTo.name,
+      clientEmail: billTo.email ?? p.contactEmail ?? null,
+      clientAddress: billTo.address,
+      clientVatNumber: billTo.vatNumber,
       issueDate, dueDate: due.toISOString().slice(0, 10),
       currency: await currencyFor(accountId, p.businessId),
       taxRate: money(taxRate), subtotal: money(subtotal),

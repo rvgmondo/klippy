@@ -483,6 +483,24 @@ export async function importAccountData(
           .where(tenantWhere(documents, accountId, eq(documents.id, self)));
       }
     }
+    /**
+     * Re-point each tracked hour at the document that billed it.
+     *
+     * A second pass, like sourceDocumentId above, because the documents do not exist
+     * yet while the time entries are being written. Leaving it null is not a harmless
+     * gap: Reports, Unbilled work reads null as "never invoiced", so a restore turns
+     * every hour the business has ever billed back into work it offers to invoice
+     * again, and clients who have already paid get a second bill for the same hours.
+     */
+    for (const e of arr(data, 'timeEntries')) {
+      const billed = ref('documents', (e as { billedDocumentId?: number }).billedDocumentId);
+      const self = ref('timeEntries', (e as { id?: number }).id);
+      if (billed && self) {
+        await tx.update(timeEntries).set({ billedDocumentId: billed })
+          .where(tenantWhere(timeEntries, accountId, eq(timeEntries.id, self)));
+      }
+    }
+
     for (const l of arr(data, 'documentLines')) {
       const documentId = ref('documents', l.documentId);
       if (!documentId) continue;

@@ -509,10 +509,41 @@ export async function documentRoutes(app) {
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
         const businessId = await resolveBusinessId(accountId, d.businessId);
-        // The business decides what it bills in, so this has to be settled before the
-        // totals: rounding depends on the currency. Copied onto the document and never
-        // re-read, so changing the setting later cannot restate what was already issued.
-        const currency = await currencyFor(accountId, businessId);
+        /**
+         * The business decides what it bills in, unless this client is billed in
+         * something else. Settled before the totals, because rounding depends on it, and
+         * copied onto the document and never re-read, so changing a setting later cannot
+         * restate what was already issued.
+         *
+         * A CLIENT CURRENCY IS ONLY HONOURED HERE, where a person is typing the amounts
+         * and can see the symbol beside every line. The automated billers keep the
+         * business currency on purpose: their line prices come from offerings and deal
+         * values that are denominated in it, and Klippy never converts, so relabelling
+         * 5000 rand as 5000 pounds would not restate the invoice, it would multiply it.
+         */
+        /**
+         * An invoice with no due date is an invoice nobody ever chases.
+         *
+         * Collections, the reminder job, the command bar, the Focus screen and the debtor
+         * ageing report all filter on `due_date IS NOT NULL`, so a null drops the invoice
+         * out of every screen that would have surfaced it, and the PDF prints no Due line
+         * at all. It ages forever while Collections reads as healthy.
+         *
+         * Resolved here rather than trusted from the browser, because the browser is not
+         * the only caller and because this is the last place it can be caught. A quote is
+         * left alone on purpose: its date field means "valid until", which is a different
+         * promise and is allowed to be blank.
+         */
+        const needsDueDate = d.type === 'invoice' && !d.dueDate;
+        const billTo = needsDueDate
+            ? await clientBillingFor(accountId, d.folderId ?? null, businessId)
+            : null;
+        const dueDate = billTo ? addDays(d.issueDate, billTo.dueDays) : (d.dueDate ?? null);
+        const clientCurrency = d.folderId
+            ? (await db.select({ c: folders.currency }).from(folders)
+                .where(tenantWhere(folders, accountId, eq(folders.id, d.folderId))).limit(1))[0]?.c
+            : null;
+        const currency = clientCurrency || await currencyFor(accountId, businessId);
         const taxRate = d.taxRate ?? 0;
         const discountType = d.discountType ?? 'none';
         const discountValue = d.discountValue ?? 0;
@@ -530,7 +561,7 @@ export async function documentRoutes(app) {
                 type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
                 clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
                 clientVatNumber: d.clientVatNumber || null,
-                issueDate: d.issueDate, dueDate: d.dueDate ?? null, currency,
+                issueDate: d.issueDate, dueDate, currency,
                 discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
                 depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
                 taxRate: money(taxRate), subtotal: money(totals.subtotal),
@@ -769,8 +800,23 @@ export async function documentRoutes(app) {
         const newId = await db.transaction(async (tx) => {
             const ins = await tx.insert(documents).values(withTenant(accountId, {
                 type: 'invoice', seq, number, businessId: quote.businessId, folderId: quote.folderId,
-                clientName: quote.clientName, clientEmail: quote.clientEmail, clientAddress: quote.clientAddress,
-                clientVatNumber: quote.clientVatNumber,
+                /**
+                 * The client as they are TODAY, not as they were when the quote was written.
+                 *
+                 * A quote froze these the day it was typed. Between then and acceptance a
+                 * client registers for VAT, or moves offices, and corrects it in their own
+                 * portal; converting used to hand them an invoice with the old address and no
+                 * VAT number, which they cannot claim against, while their recurring invoice
+                 * that same month carried the right details. One client, billed two ways.
+                 *
+                 * Only when the quote is attached to a client. An ad-hoc quote typed for
+                 * somebody with no folder keeps exactly what was typed, or converting it
+                 * would blank the only record of who it was for.
+                 */
+                clientName: quote.folderId ? billTo.name : quote.clientName,
+                clientEmail: (quote.folderId ? billTo.email : null) ?? quote.clientEmail,
+                clientAddress: (quote.folderId ? billTo.address : null) ?? quote.clientAddress,
+                clientVatNumber: (quote.folderId ? billTo.vatNumber : null) ?? quote.clientVatNumber,
                 issueDate: today, dueDate, currency: quote.currency, taxRate: quote.taxRate,
                 discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
                 // The deposit was part of what the client accepted, so it comes across

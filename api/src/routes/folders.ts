@@ -214,9 +214,21 @@ export async function folderRoutes(app: FastifyInstance) {
       if (!mgr) return reply.code(400).send({ error: 'That person is not in this workspace.' });
     }
     if (parsed.data.primaryContactId) {
-      const [person] = await db.select({ id: contacts.id }).from(contacts)
+      const [person] = await db.select({ id: contacts.id, businessId: contacts.businessId }).from(contacts)
         .where(tenantWhere(contacts, accountId, eq(contacts.id, parsed.data.primaryContactId))).limit(1);
       if (!person) return reply.code(400).send({ error: 'That contact does not exist.' });
+      /**
+       * Same business, not merely the same workspace.
+       *
+       * The re-filing below sets contacts.folderId, so without this a person from one
+       * business gets filed under another business's client. They then show in the
+       * Contacts screen labelled with a client the viewer has no access to, and the
+       * phone fallback in messaging picks them up, so the wrong business's payment
+       * reminders start going to their mobile.
+       */
+      if (person.businessId && existing.businessId && person.businessId !== existing.businessId) {
+        return reply.code(400).send({ error: 'That contact belongs to a different business.' });
+      }
       // Filed under this client from now on, so the authorised person is reachable
       // from the company as well as from the contacts list.
       await db.update(contacts).set({ folderId: id })

@@ -304,6 +304,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
     setClientEmail(f.billingEmail ?? '');
     setClientAddress(f.billingAddress ?? '');
     setClientVat(f.billingVatNumber ?? '');
+    setClientCurrency(f.currency ?? null);
     if (type === 'invoice' && f.paymentTermsDays != null) {
       const due = new Date(`${todayStr()}T00:00:00`);
       due.setDate(due.getDate() + f.paymentTermsDays);
@@ -315,6 +316,8 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   const [clientEmail, setClientEmail] = useState('');
   const [clientAddress, setClientAddress] = useState('');
   const [clientVat, setClientVat] = useState('');
+  // What this client is billed in, when it is not what the business bills in.
+  const [clientCurrency, setClientCurrency] = useState<string | null>(null);
   const [issueDate, setIssueDate] = useState(todayStr());
   const [dueDate, setDueDate] = useState('');
   const [taxRate, setTaxRate] = useState(15);
@@ -334,7 +337,16 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   });
   const offeringList = (offeringsQ.data?.offerings ?? []).filter((o) => o.active);
   const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(isNew);
+  /**
+   * Run-once guard for the two blocks below, and it was initialised BACKWARDS.
+   *
+   * It read useState(isNew), so on a new document it began true and the block that
+   * applies the business's tax rate and payment term was skipped on the first render
+   * and never ran again. Every new invoice therefore opened at the hardcoded 15% tax
+   * and a blank due date, whatever the business had been set to. False is right for
+   * both: a new document then takes its defaults, an existing one hydrates.
+   */
+  const [ready, setReady] = useState(false);
 
   // "Pull from tracked time" state
   const [showTime, setShowTime] = useState(false);
@@ -369,13 +381,17 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   // so the common case needs no adjusting. Falls back to nothing when no business.
   const bizDefaults = useQuery({
     queryKey: ['businesses'], enabled: isNew,
-    queryFn: () => apiGet<{ businesses: { id: number; defaultTaxRate: string | null; defaultDueDays: number }[] }>('/businesses'),
+    queryFn: () => apiGet<{ businesses: { id: number; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null }[] }>('/businesses'),
   });
   if (isNew && (bizDefaults.data || !businessId) && !ready) {
     const biz = bizDefaults.data?.businesses.find((b) => b.id === businessId);
     if (biz) {
       if (biz.defaultTaxRate != null) setTaxRate(Number(biz.defaultTaxRate));
-      if (type === 'invoice' && biz.defaultDueDays > 0) {
+      // `!= null` and not `> 0`: a business billing on receipt is set to zero days,
+      // and `> 0` reads that as "unset" and leaves the date blank instead.
+      // Only when nothing has set one already, so a client picked before this query
+      // resolved keeps their own term rather than being overwritten by the default.
+      if (type === 'invoice' && biz.defaultDueDays != null && !dueDate) {
         const due = new Date(`${issueDate}T00:00:00`);
         due.setDate(due.getDate() + biz.defaultDueDays);
         setDueDate(iso(due));
@@ -411,7 +427,17 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   const grand = subtotal - discount + tax;
   const deposit = depositType === 'percent' ? grand * (Math.min(depositValue, 100) / 100)
     : depositType === 'amount' ? Math.min(depositValue, grand) : 0;
-  const currency = existing.data?.document.currency ?? 'ZAR';
+  /**
+   * What to show the amounts in.
+   *
+   * An existing document carries its own, copied at the moment it was raised. A new
+   * one was hardcoded to ZAR, which is simply wrong for a business billing in
+   * anything else: the screen said R and the server saved GBP. Resolved the same way
+   * the server resolves it, so the two agree before anything is typed.
+   */
+  const bizCurrency = bizDefaults.data?.businesses.find((b) => b.id === businessId)?.currency ?? null;
+  const currency = existing.data?.document.currency
+    ?? clientCurrency ?? bizCurrency ?? 'ZAR';
 
   const save = useMutation({
     mutationFn: async (opts?: { send?: boolean }) => {
@@ -485,6 +511,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
             // hand on a one-off is not wiped by choosing nothing.
             if (v.folderId) {
               setClientEmail(v.email); setClientAddress(v.address); setClientVat(v.vatNumber);
+              setClientCurrency(v.currency ?? null);
               // Their own payment terms, if they have any. `!= null` rather than a
               // truthy check: zero days is a real arrangement meaning on receipt,
               // and treating it as unset would quietly give them the default instead.
@@ -499,6 +526,20 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
         </div>
         <textarea className={field + ' mt-3'} placeholder="Client address (optional)" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />
         <input className={field + ' mt-3'} placeholder="Client VAT number (optional, for tax invoices)" value={clientVat} onChange={(e) => setClientVat(e.target.value)} />
+
+        {/* Klippy never converts between currencies, anywhere. So billing a client in
+            something other than the business currency is safe only as long as the
+            person typing knows the amounts have to be entered in it: an offering
+            priced at 5000 rand dropped into a pounds invoice does not become 5000
+            rand, it becomes 5000 pounds. Worth a line on screen rather than a
+            surprise at the bottom of a PDF. */}
+        {clientCurrency && bizCurrency && clientCurrency !== bizCurrency && (
+          <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-2 text-[11px] text-amber-200">
+            This client is billed in {clientCurrency}, and {bizCurrency} is what the
+            business bills in. Klippy does not convert, so enter every amount in
+            {' '}{clientCurrency}, including anything you add from your offerings.
+          </p>
+        )}
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><label className="mb-1 block text-[11px] text-slate-500">Issue date</label><input type="date" className={field} value={issueDate} onChange={(e) => setIssueDate(e.target.value)} /></div>
           <div><label className="mb-1 block text-[11px] text-slate-500">{type === 'quote' ? 'Valid until' : 'Due date'}</label><input type="date" className={field} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
