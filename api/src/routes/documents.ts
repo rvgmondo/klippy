@@ -18,7 +18,7 @@ import { settleIfCovered } from '../lib/settle.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor } from '../lib/numbering.js';
-import { addDays } from '../lib/billing.js';
+import { addDays, clientBillingFor } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
 import { quoteLinkFor } from './quotes.js';
@@ -789,13 +789,10 @@ export async function documentRoutes(app: FastifyInstance) {
     // Collections, never triggered a reminder, and never counted toward hosting
     // suspension. Give it the business's standard term (fallback 14 days) so the
     // most common invoice source is actually chased.
-    const dueDays = await (async () => {
-      if (!quote.businessId) return 14;
-      const [b] = await db.select({ d: businesses.defaultDueDays }).from(businesses)
-        .where(tenantWhere(businesses, accountId, eq(businesses.id, quote.businessId))).limit(1);
-      return b?.d ?? 14;
-    })();
-    const dueDate = addDays(today, dueDays);
+    // Through the shared resolver, so a client on their own payment terms gets them
+    // here too rather than only when somebody raises the invoice by hand.
+    const billTo = await clientBillingFor(accountId, quote.folderId, quote.businessId, quote.clientName);
+    const dueDate = addDays(today, billTo.dueDays);
 
     const newId = await db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {

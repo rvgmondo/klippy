@@ -6,6 +6,7 @@ import { db } from './../db/client.js';
 import { deals, folders, boards, boardColumns, documents, documentLines, accounts, businesses, memberships, } from '../db/schema.js';
 import { tenantWhere, withTenant } from './tenant.js';
 import { nextNumberFor } from './numbering.js';
+import { clientBillingFor } from './billing.js';
 import { nextPosition } from './http.js';
 import { on } from './events.js';
 import { notify } from './push.js';
@@ -83,7 +84,10 @@ on('deal.won', 'draft-opening-invoice', async (p, ctx) => {
     // One implementation of the business-then-workspace rule, shared with the
     // subscription biller, rather than a second copy that can drift from it.
     const taxRate = await taxRateFor(accountId, p.businessId);
-    const dueDays = business?.defaultDueDays ?? account?.defaultDueDays ?? 14;
+    // Same resolver as the editor and the subscription biller, so a client's own
+    // payment terms are honoured wherever the invoice happens to be raised from.
+    const billTo = await clientBillingFor(accountId, folderId, p.businessId ?? null);
+    const dueDays = billTo.dueDays;
     const issueDate = new Date().toISOString().slice(0, 10);
     const due = new Date(`${issueDate}T00:00:00.000Z`);
     due.setUTCDate(due.getUTCDate() + dueDays);

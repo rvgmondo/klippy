@@ -11,6 +11,26 @@ import { sendBusinessMail, emailBrandFor } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
 import { renderDocumentPdf } from './pdf.js';
+export async function clientBillingFor(accountId, folderId, businessId, fallbackName) {
+    const [folder] = folderId
+        ? await db.select().from(folders)
+            .where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1)
+        : [undefined];
+    const [business] = businessId
+        ? await db.select({ d: businesses.defaultDueDays }).from(businesses)
+            .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1)
+        : [undefined];
+    const [account] = await db.select({ d: accounts.defaultDueDays }).from(accounts)
+        .where(eq(accounts.id, accountId)).limit(1);
+    return {
+        name: folder?.legalName?.trim() || folder?.name || fallbackName || 'Client',
+        email: folder?.billingEmail ?? null,
+        address: folder?.billingAddress ?? null,
+        vatNumber: folder?.billingVatNumber ?? null,
+        dueDays: folder?.paymentTermsDays ?? business?.d ?? account?.d ?? 14,
+        currency: folder?.currency ?? null,
+    };
+}
 /**
  * Next billing date, one month on.
  *
@@ -104,14 +124,29 @@ export async function generateSubscriptionInvoice(accountId, sub) {
     const taxAmount = roundMoney(price * (taxRate / 100), currency);
     const total = roundMoney(price + taxAmount, currency);
     const issueDate = new Date().toISOString().slice(0, 10);
-    const dueDate = addDays(issueDate, 7);
+    /**
+     * Was a hardcoded seven days, which ignored the business's own standard term and
+     * every arrangement made with the client. A retainer client on 30 days got a
+     * recurring invoice on 7 and was chased for being overdue three weeks early.
+     */
+    const billTo = await clientBillingFor(accountId, sub.folderId, sub.businessId, folder.name);
+    const dueDate = addDays(issueDate, billTo.dueDays);
     // Numbering honours this business's prefix and starting number.
     const { seq, number } = await nextNumberFor(accountId, sub.businessId, 'invoice');
     const docId = await db.transaction(async (tx) => {
         const ins = await tx.insert(documents).values(withTenant(accountId, {
             type: 'invoice', seq, number, businessId: sub.businessId, folderId: sub.folderId,
             subscriptionId: sub.subscriptionId ?? null,
-            clientName: folder.name, clientEmail: folder.billingEmail ?? null, clientAddress: null,
+            /**
+             * The client's real details, not a name and a null.
+             *
+             * This wrote clientAddress: null and no VAT number at all, so every recurring
+             * invoice went out missing both. Where the client is VAT-registered that is a
+             * document they cannot validly claim against, which is the same failure the
+             * note above describes about the tax rate.
+             */
+            clientName: billTo.name, clientEmail: billTo.email, clientAddress: billTo.address,
+            clientVatNumber: billTo.vatNumber,
             issueDate, dueDate, currency,
             taxRate: money(taxRate), subtotal: money(price),
             taxAmount: money(taxAmount), total: money(total),

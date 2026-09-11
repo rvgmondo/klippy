@@ -192,6 +192,72 @@ ok(!!CID, 'a client is created', String(CID));
   ok(row.account_manager_id === me.user_id, 'and it sticks', String(row.account_manager_id));
 }
 
+/**
+ * ---- the company record changes what an invoice says and when it falls due ---------
+ *
+ * A field nobody reads is a field nobody fills in. These two do something:
+ * legalName is who the client legally is on a document, and paymentTermsDays is
+ * their own arrangement, which used to be ignored by every path that raised an
+ * invoice without a person present.
+ */
+{
+  const made = await post('/folders', { name: 'E2E-CR Kestrel Trading', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+  await patch(`/folders/${FID}`, {
+    legalName: 'Kestrel Trading Enterprises (Pty) Ltd',
+    billingEmail: 'accounts@kestrel.example',
+    billingAddress: '12 Loop Street, Cape Town',
+    billingVatNumber: '4111222333',
+    paymentTermsDays: 45,
+  });
+
+  // A quote turned into an invoice is the most common source in the app.
+  const q = await post('/documents', {
+    type: 'quote', businessId: biz.id, folderId: FID,
+    clientName: 'Kestrel Trading Enterprises (Pty) Ltd',
+    issueDate: new Date().toISOString().slice(0, 10),
+    lines: [{ description: 'Retainer', quantity: 1, unitPrice: 5000 }],
+  });
+  const quote = (await q.json()).document;
+  ok(q.status === 201 || q.status === 200, 'a quote is raised for them', String(q.status));
+
+  const conv = await post(`/documents/${quote.id}/convert`);
+  const invoiceId = (await conv.json().catch(() => ({}))).document?.id;
+  ok(!!invoiceId, 'and turned into an invoice', String(conv.status));
+
+  if (invoiceId) {
+    const [[inv]] = await db.query(
+      `SELECT DATE_FORMAT(issue_date, '%Y-%m-%d') AS issued,
+              DATE_FORMAT(due_date, '%Y-%m-%d') AS due
+         FROM documents WHERE id = ?`, [invoiceId]);
+    const days = Math.round(
+      (new Date(inv.due + 'T00:00:00Z') - new Date(inv.issued + 'T00:00:00Z')) / 86400000);
+    ok(days === 45,
+      "the client's own 45 day terms set the due date, not the business default", `${days} days`);
+  }
+
+  // Zero is a real arrangement and must not be read as "unset".
+  await patch(`/folders/${FID}`, { paymentTermsDays: 0 });
+  const q2 = await post('/documents', {
+    type: 'quote', businessId: biz.id, folderId: FID, clientName: 'Kestrel',
+    issueDate: new Date().toISOString().slice(0, 10),
+    lines: [{ description: 'Ad hoc', quantity: 1, unitPrice: 100 }],
+  });
+  const quote2 = (await q2.json()).document;
+  const conv2 = await post(`/documents/${quote2.id}/convert`);
+  const inv2Id = (await conv2.json().catch(() => ({}))).document?.id;
+  if (inv2Id) {
+    const [[inv2]] = await db.query(
+      `SELECT DATE_FORMAT(issue_date, '%Y-%m-%d') AS issued,
+              DATE_FORMAT(due_date, '%Y-%m-%d') AS due FROM documents WHERE id = ?`, [inv2Id]);
+    ok(inv2.due === inv2.issued,
+      'and zero days means due on receipt, not "fall back to the default"', `${inv2.issued} -> ${inv2.due}`);
+  }
+
+  await db.query('DELETE FROM documents WHERE folder_id = ?', [FID]);
+  await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
 // ---- the backup carries the company record ------------------------------------------
 {
   const r = await fetch(API + '/account/export', { headers: { cookie } });

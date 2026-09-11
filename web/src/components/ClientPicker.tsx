@@ -7,6 +7,8 @@ import { fieldClass } from './ui';
 export interface PickedClient {
   folderId: number | null;
   name: string;
+  /** Null means the client has no term of their own; the business default applies. */
+  paymentTermsDays?: number | null;
   email: string;
   address: string;
   vatNumber: string;
@@ -55,7 +57,7 @@ export function ClientPicker({ businessId, value, onChange }: {
       setAdding(false); setNewName(''); setNewEmail(''); setErr('');
       qc.invalidateQueries({ queryKey: ['folders'] });
       onChange({
-        folderId: r.folder.id, name: r.folder.name,
+        folderId: r.folder.id, name: r.folder.name, paymentTermsDays: null,
         email: r.folder.billingEmail ?? '', address: '', vatNumber: '',
       });
     },
@@ -64,17 +66,22 @@ export function ClientPicker({ businessId, value, onChange }: {
 
   const pick = (id: string) => {
     if (id === '__new') { setAdding(true); return; }
-    if (id === '') { onChange({ folderId: null, name: '', email: '', address: '', vatNumber: '' }); return; }
+    if (id === '') { onChange({ folderId: null, name: '', email: '', address: '', vatNumber: '', paymentTermsDays: null }); return; }
     const f = clients.find((c) => String(c.id) === id);
     if (!f) return;
     onChange({
       folderId: f.id,
-      name: f.name,
+      // The REGISTERED name on a document when there is one. Everywhere else in
+      // Klippy a client is what you call them; on an invoice they have to be who
+      // they legally are, which is why legalName is a column of its own. Still
+      // editable here, because a one-off can be addressed however you like.
+      name: f.legalName?.trim() || f.name,
       email: f.billingEmail ?? '',
       // Whatever the client has corrected about themselves in their portal wins,
       // since they are the ones who know their own VAT number.
       address: f.billingAddress ?? '',
       vatNumber: f.billingVatNumber ?? '',
+      paymentTermsDays: f.paymentTermsDays ?? null,
     });
   };
 

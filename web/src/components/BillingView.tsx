@@ -4,6 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Pencil, Clock, DollarSign, MoreHorizontal, Trash2 } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
+// iso() builds a date from LOCAL parts. toISOString() converts to UTC first, so
+// anywhere east of Greenwich it can hand back yesterday.
+import { iso } from '../lib/dates';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
 import { EmptyState, Skeleton } from './ui';
@@ -297,10 +300,15 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
     const f = foldersQ.data?.folders.find((x) => x.id === initialFolderId);
     if (!f) return;
     setFolderId(f.id);
-    setClientName(f.name);
+    setClientName(f.legalName?.trim() || f.name);
     setClientEmail(f.billingEmail ?? '');
     setClientAddress(f.billingAddress ?? '');
     setClientVat(f.billingVatNumber ?? '');
+    if (type === 'invoice' && f.paymentTermsDays != null) {
+      const due = new Date(`${todayStr()}T00:00:00`);
+      due.setDate(due.getDate() + f.paymentTermsDays);
+      setDueDate(iso(due));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [foldersQ.data, initialFolderId, id]);
   const [clientName, setClientName] = useState('');
@@ -370,7 +378,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
       if (type === 'invoice' && biz.defaultDueDays > 0) {
         const due = new Date(`${issueDate}T00:00:00`);
         due.setDate(due.getDate() + biz.defaultDueDays);
-        setDueDate(due.toISOString().slice(0, 10));
+        setDueDate(iso(due));
       }
     }
     setReady(true);
@@ -475,7 +483,17 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
             setFolderId(v.folderId); setClientName(v.name);
             // Only overwrite details that came with the client, so a name typed by
             // hand on a one-off is not wiped by choosing nothing.
-            if (v.folderId) { setClientEmail(v.email); setClientAddress(v.address); setClientVat(v.vatNumber); }
+            if (v.folderId) {
+              setClientEmail(v.email); setClientAddress(v.address); setClientVat(v.vatNumber);
+              // Their own payment terms, if they have any. `!= null` rather than a
+              // truthy check: zero days is a real arrangement meaning on receipt,
+              // and treating it as unset would quietly give them the default instead.
+              if (type === 'invoice' && v.paymentTermsDays != null) {
+                const due = new Date(`${issueDate}T00:00:00`);
+                due.setDate(due.getDate() + v.paymentTermsDays);
+                setDueDate(iso(due));
+              }
+            }
           }} />
           <input className={field} placeholder="Client email (optional)" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
         </div>
