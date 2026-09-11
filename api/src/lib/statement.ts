@@ -49,9 +49,19 @@ export async function buildStatement(
   const wantCurrency = opts.currency?.toUpperCase();
 
   const [client] = await db.select({
-    id: folders.id, name: folders.name, businessId: folders.businessId, billingEmail: folders.billingEmail,
+    id: folders.id, name: folders.name, legalName: folders.legalName,
+    businessId: folders.businessId, billingEmail: folders.billingEmail,
   }).from(folders).where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
   if (!client) return null;
+  /**
+   * The registered name, the same rule the invoices use.
+   *
+   * A statement is a financial document listing invoices that are all made out to the
+   * registered name. Heading it with the trading name gave a client's bookkeeper two
+   * names for one account on one email, and a statement they could not match to a
+   * supplier in their ledger.
+   */
+  const clientName = client.legalName?.trim() || client.name;
 
   // Every issued document for this client, unranged: the currency choice and the
   // opening balance both need the full history, not just the window.
@@ -126,7 +136,9 @@ export async function buildStatement(
   }
 
   return {
-    client,
+    // The registered name, so the statement, its file name and its email all agree
+    // with the invoices listed on it.
+    client: { ...client, name: clientName },
     from: from ?? null,
     to: to ?? null,
     currency,

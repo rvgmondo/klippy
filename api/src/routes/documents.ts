@@ -334,13 +334,26 @@ export async function documentRoutes(app: FastifyInstance) {
         }
       }
 
+      /**
+       * Who to chase, resolved from the client rather than from whichever invoice the
+       * database happened to return first.
+       *
+       * `first` is usually the OLDEST invoice in the group, so it carries the oldest
+       * copy of the client's details. A client who told you their accounts address had
+       * changed would get the combined chase at the dead address and it would bounce,
+       * while Klippy reported it sent and stamped lastReminderOn across every invoice
+       * in the group, suppressing tomorrow's attempt too.
+       */
+      const chaseTo = first.folderId
+        ? await clientBillingFor(accountId, first.folderId, first.businessId, first.clientName)
+        : null;
       const emailBrand = await emailBrandFor(accountId, first.businessId);
       const content = {
         heading: group.length === 1
           ? `Invoice ${first.number} is overdue`
           : `${group.length} invoices are overdue`,
         body: [
-          `Hi ${first.clientName},`,
+          `Hi ${chaseTo?.name ?? first.clientName},`,
           group.length === 1
             ? `Invoice ${first.number} has passed its due date and is still outstanding.`
             : 'The following invoices have passed their due dates and are still outstanding.',
@@ -352,7 +365,7 @@ export async function documentRoutes(app: FastifyInstance) {
       try {
         await sendBusinessMail({
           accountId, businessId: first.businessId, purpose: 'invoice',
-          to: first.clientEmail!,
+          to: chaseTo?.email ?? first.clientEmail!,
           subject: content.heading,
           text: renderEmailText(emailBrand, content),
           html: renderEmail(emailBrand, content),

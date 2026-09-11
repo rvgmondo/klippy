@@ -571,6 +571,18 @@ function layoutCompact(c) {
     y += 12;
     pdf.font(f.bold).fontSize(8).fillColor(MUTED).text('BILL TO', c.M, y);
     pdf.font(f.bold).fontSize(9.5).fillColor(INK_STRONG).text(d.client.name, c.M + 52, y - 0.5, { width: 260 });
+    /**
+     * The address, which this design printed nowhere.
+     *
+     * A South African tax invoice over R5,000 has to carry the recipient's address, so
+     * every invoice a business sent on the Compact design was not validly claimable,
+     * while the same invoice on screen and in its print view showed it. Comma-joined so
+     * it stays one tight line in a layout built for tight lines.
+     */
+    if (d.client.address) {
+        pdf.font(f.regular).fontSize(8).fillColor(MUTED)
+            .text(d.client.address.replace(/\s*\n\s*/g, ', '), c.M + 52, pdf.y + 1, { width: 300 });
+    }
     const extra = [d.client.email, d.client.vat && `VAT ${d.client.vat}`].filter(Boolean).join('  |  ');
     if (extra) {
         pdf.font(f.regular).fontSize(8).fillColor(MUTED).text(extra, c.M + 52, pdf.y + 1, { width: 300 });

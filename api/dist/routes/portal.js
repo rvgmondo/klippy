@@ -269,7 +269,15 @@ export async function portalRoutes(app) {
         const wanted = req.query.currency?.toUpperCase();
         const latest = allDocs.reduce((best, d) => (!best || d.issueDate > best.issueDate ? d : best), undefined);
         const currency = (wanted && currencies.includes(wanted)) ? wanted : (latest?.currency ?? 'ZAR');
-        const docs = allDocs.filter((d) => d.currency === currency);
+        /**
+         * Voided documents are not part of the account, and nor are their payments.
+         *
+         * Voiding an invoice the client had already paid left the payment counted here
+         * while the emailed statement excluded it, so the portal showed a credit balance
+         * the email said did not exist, and the client either asked for a refund or
+         * short-paid the next invoice by that amount.
+         */
+        const docs = allDocs.filter((d) => d.currency === currency && d.status !== 'void');
         const ids = docs.map((d) => d.id);
         const pays = ids.length
             ? await db.select({

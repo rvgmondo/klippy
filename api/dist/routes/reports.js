@@ -47,6 +47,7 @@ export async function reportRoutes(app) {
         const allFolders = await db.select({
             id: folders.id, parentId: folders.parentId, name: folders.name,
             hourlyRate: folders.hourlyRate, businessId: folders.businessId,
+            deletedAt: folders.deletedAt,
         }).from(folders).where(tenantWhere(folders, accountId));
         const byId = new Map(allFolders.map((f) => [f.id, f]));
         const rootOf = (folderId) => {
@@ -86,6 +87,11 @@ export async function reportRoutes(app) {
             const root = rootOf(e.folderId);
             if (!canBiz(root?.businessId ?? null))
                 continue;
+            // A client in the Trash is gone everywhere else, including the Unbilled work
+            // screen, so leaving them here had two reports quoting different totals for the
+            // same period and offering to bill for somebody already deleted.
+            if (root?.deletedAt)
+                continue;
             // When scoped to one business, only count work under that business.
             if (onlyBusiness !== undefined && root?.businessId !== onlyBusiness)
                 continue;
@@ -113,7 +119,9 @@ export async function reportRoutes(app) {
             if (e.folderId == null)
                 continue; // general overhead, not attributed to a client
             const root = rootOf(e.folderId);
-            if (!root || (onlyBusiness !== undefined && root.businessId !== onlyBusiness))
+            // Same guard as the hours above: a deleted client must not reappear here with
+            // costs attached, or the two halves of one report disagree.
+            if (!root || root.deletedAt || (onlyBusiness !== undefined && root.businessId !== onlyBusiness))
                 continue;
             const cur = perClient.get(root.id)
                 ?? { name: root.name, seconds: 0, cost: 0, currency: curOf(root.businessId) };
