@@ -82,7 +82,7 @@ const ACCOUNT: Item[] = [
 ];
 
 export function SettingsView({ businessId }: { businessId: BusinessSelection }) {
-  const { user } = useAuth();
+  const { user, account } = useAuth();
   const { data } = useQuery({
     queryKey: ['businesses'],
     queryFn: () => apiGet<{ businesses: Business[] }>('/businesses'),
@@ -164,7 +164,29 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
               <h2 className="text-base font-semibold text-slate-100">{current.label}</h2>
               {current.hint && <p className="mt-0.5 text-xs text-slate-500">{current.hint}</p>}
             </div>
-            <SectionBody id={current.id} business={focused} />
+            {/*
+              The key is the whole fix, and it has to carry both the workspace and the
+              business being configured.
+
+              Every panel copies its fields into local state ONCE, when it first loads,
+              while its Save reads the business id fresh on each render. With no key,
+              changing "Business to configure" kept the same component and only swapped
+              the id: the fields still held business A while Save wrote to business B.
+              Measured: B received A's bank details, VAT and registration numbers,
+              currency, tax rate, reminder schedule, SMTP settings and PayFast merchant
+              ID, and B's online payments were switched off, all under a normal "Saved".
+              B's name was in the heading the whole time.
+
+              The workspace id is in the key for the same failure one level up. The
+              workspace-wide sections have the same key in every workspace, so switching
+              workspace left workspace 1's name, currency, merchant ID and hosting server
+              in the fields, ready to be saved into workspace 2.
+
+              Remounting drops unsaved edits when the business changes, which is correct.
+            */}
+            <SectionBody
+              key={`${account?.id ?? 'none'}:${current.id.startsWith('biz:') ? `biz:${focused?.id ?? 'none'}` : current.id}`}
+              id={current.id} business={focused} />
           </div>
         </div>
       </div>

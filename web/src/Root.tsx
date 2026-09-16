@@ -11,7 +11,7 @@ import { Workspace } from './pages/Workspace';
 const LandingPage = lazy(() => import('./pages/LandingPage').then((m) => ({ default: m.LandingPage })));
 
 export function Root() {
-  const { user, loading } = useAuth();
+  const { user, account, loading } = useAuth();
   // Not-logged-in visitors see the landing page first, unless they arrive on a
   // password-reset link or an invitation, in which case go straight to the auth
   // screen. An invitation especially: someone whose only way back in IS that link
@@ -30,7 +30,10 @@ export function Root() {
     );
   }
 
-  if (user) return <Workspace />;
+  // Keyed on the workspace, so switching workspace starts every screen fresh. Without it
+  // the whole app stayed mounted across the switch, and any screen holding form state
+  // copied from one workspace could save it into the next.
+  if (user) return <Workspace key={account?.id ?? 'none'} />;
 
   if (auth || hasResetToken || hasInvite) {
     return <AuthPage initialMode={auth ?? 'login'} onBack={() => setAuth(null)} />;
