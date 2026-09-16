@@ -54,6 +54,7 @@ import { socialRoutes } from './routes/social.js';
 import { socialMediaRoutes } from './routes/socialMedia.js';
 import { socialConnectRoutes } from './routes/socialConnect.js';
 import { socialApprovalRoutes } from './routes/socialApproval.js';
+import { directoryAuditRoutes } from './routes/directoryAudit.js';
 import { VERSION } from './version.js';
 import { DEPLOYED } from './lib/deployed.js';
 
@@ -218,6 +219,9 @@ export function buildServer() {
   // Public for the same reason: a client signing off a post has no Klippy login and
   // is never going to be given one. See routes/socialApproval.ts.
   app.register(socialApprovalRoutes);
+  // Read-only report on the state of client folders, for a person to read before
+  // customers become a record of their own. See routes/directoryAudit.ts.
+  app.register(directoryAuditRoutes);
 
   return app;
 }

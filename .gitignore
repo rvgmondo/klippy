@@ -18,3 +18,8 @@ api/.env
 
 # Written by the cPanel deploy on the server; never committed.
 api/deployed.json
+
+# Throwaway probe and verification scripts. An underscore prefix marks a file as
+# temporary: agents and repros create them in api/tests while running, and a
+# `git add -A` mid-run once swept four of them into a commit.
+api/tests/_*
