@@ -298,15 +298,42 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
         </>)}
       </PageBody>
 
-      {editing && <Editor id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} />}
+      {/* Keyed per intent, so opening "New invoice" again while an editor is mounted starts
+          a fresh one. Without it a remembered draft id would survive, and the next save
+          would overwrite that earlier draft with an unrelated document. */}
+      {editing && <Editor key={`${String(editing)}:${tab}`} id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onChanged={invalidate} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
     </Page>
   );
 }
 
-function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { id: number | 'new'; type: DocType; businessId?: number; initialFolderId?: number | null; onClose: () => void; onSaved: () => void }) {
+function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onChanged }: { id: number | 'new'; type: DocType; businessId?: number; initialFolderId?: number | null; onClose: () => void; onSaved: () => void; onChanged: () => void }) {
   const isNew = id === 'new';
+  /**
+   * The document this editor has ALREADY created, when a save went through but the send
+   * after it did not.
+   *
+   * "Save & send" on a new document is two requests: create it, then email it. When the
+   * email failed, the new id was thrown away and the editor stayed in "new" mode, so every
+   * retry created another invoice with the next number. Verified live: three clicks made
+   * INV-0001, INV-0002 and INV-0003 for one intended invoice. Deleting the strays leaves
+   * gaps in a sequence SARS expects to be continuous, and hours pulled from tracked time
+   * stay stamped against the first stray while the invoice actually sent carries none.
+   *
+   * Once this is set, every save updates this document instead of creating one.
+   *
+   * KNOWN GAP, recorded rather than claimed fixed: if the create request commits on the
+   * server but its response never reaches the browser (a proxy timeout mid-request), the
+   * id is never learned and a retry still duplicates. Closing that needs an idempotency
+   * key on POST /documents.
+   *
+   * Named savedDoc, not saved: the save mutation already has a local called saved, and
+   * reading this before that local's declaration would throw at runtime.
+   */
+  const [savedDoc, setSavedDoc] = useState<{
+    id: number; number: string; currency: string; status: string;
+  } | null>(null);
   const existing = useQuery({
     queryKey: ['document', id], enabled: !isNew,
     queryFn: () => apiGet<FullDoc>(`/documents/${id}`),
@@ -458,19 +485,27 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
    * the server resolves it, so the two agree before anything is typed.
    */
   const bizCurrency = bizDefaults.data?.businesses.find((b) => b.id === businessId)?.currency ?? null;
-  const currency = existing.data?.document.currency
+  // A saved draft's currency is fixed on the server and PUT never recomputes it, so once
+  // one exists it wins; otherwise picking a client billed elsewhere would show their
+  // currency on screen while the stored document kept the original.
+  const currency = existing.data?.document.currency ?? savedDoc?.currency
     ?? clientCurrency ?? bizCurrency ?? 'ZAR';
 
   const save = useMutation({
     mutationFn: async (opts?: { send?: boolean }) => {
+      // Update what this editor already made, rather than making another.
+      const targetId = savedDoc?.id ?? (isNew ? null : id);
+      const creating = targetId === null;
       const body = {
         type, folderId, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
         issueDate, dueDate: dueDate || null,
         taxRate, discountType, discountValue: Number(discountValue) || 0,
         depositType, depositValue: Number(depositValue) || 0, notes: notes.trim() || null,
-        ...(isNew && businessId ? { businessId } : {}),
-        ...(isNew && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
+        // Only on create. PUT does not take a business, and restamping tracked time onto a
+        // retry would link the same hours twice.
+        ...(creating && businessId ? { businessId } : {}),
+        ...(creating && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
           description: l.description.trim(),
           detail: l.detail?.trim() || null,
@@ -480,19 +515,54 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
           recurringMonths: l.offeringId ? (l.recurringMonths ?? null) : null,
         })),
       };
-      const saved = isNew
-        ? await apiPost<{ document: { id: number } }>('/documents', body)
-        : await apiPut<{ document: { id: number } }>(`/documents/${id}`, body);
-      // Sending used to live only behind a 14px mail icon on the row, a full
-      // screen away from where the document was written. Saving and sending is
-      // one intent, so it is one button.
+      type Doc = { id: number; number: string; currency: string; status: string; dueDate: string | null };
+      let doc: Doc;
+      if (creating) {
+        doc = (await apiPost<{ document: Doc }>('/documents', body)).document;
+        // Recorded BEFORE the send, which is the whole point: if the send fails, a retry
+        // now finds this document instead of creating a second one.
+        setSavedDoc({ id: doc.id, number: doc.number, currency: doc.currency, status: doc.status });
+        // Show the due date the server actually stored. Leaving the field blank while the
+        // document carries a server-set date would mean the next PUT writes null over it.
+        setDueDate(doc.dueDate ?? '');
+        // Put it in the list now, so it is visible however this editor is closed.
+        onChanged();
+      } else {
+        doc = (await apiPut<{ document: Doc }>(`/documents/${targetId}`, body)).document;
+      }
+
       if (opts?.send) {
-        const r = await apiPost<{ to: string }>(`/documents/${saved.document.id}/email`, {});
-        return { sentTo: r.to };
+        /**
+         * A retry must not email the client twice. An email request can time out at a proxy
+         * while the server carries on and sends, which marks the document sent. So when this
+         * is a retry, check first and ask.
+         */
+        if (savedDoc) {
+          const fresh = await apiGet<{ document: { status: string } }>(`/documents/${doc.id}`);
+          if (fresh.document.status === 'sent') {
+            const again = await confirmDialog(
+              `${doc.number} is already marked as sent, so the last attempt may have reached the client. Send it again?`,
+              { confirmLabel: 'Send again' });
+            if (!again) return { sentTo: null, stopped: true };
+          }
+        }
+        try {
+          const r = await apiPost<{ to: string }>(`/documents/${doc.id}/email`, {});
+          return { sentTo: r.to };
+        } catch (e) {
+          // Say the document EXISTS. The old message only said the email failed, so people
+          // reasonably assumed nothing was saved and created it again.
+          const why = e instanceof Error ? e.message : 'the email could not be sent.';
+          throw new Error(`Saved as ${doc.number}, but not sent: ${why} Fix the mail settings, then press Save & send again. It will send ${doc.number}, not make a new one.`);
+        }
       }
       return { sentTo: null };
     },
-    onSuccess: (r) => { if (r.sentTo) notify(`Saved and sent to ${r.sentTo}.`); onSaved(); },
+    onSuccess: (r) => {
+      if ('stopped' in r && r.stopped) return;
+      if (r.sentTo) notify(`Saved and sent to ${r.sentTo}.`);
+      onSaved();
+    },
     onError: (e) => setError(e instanceof Error ? e.message : 'Could not save.'),
   });
 
@@ -512,6 +582,12 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
   );
   const confirmClose = async () => {
     if (!hasContent) return true;
+    // Once a draft has been saved, "everything will be lost" is false, and believing it is
+    // exactly what made people type the invoice in again. Say what is actually true.
+    if (savedDoc) {
+      return confirmDialog(`${savedDoc.number} is saved as a draft. Any changes since then will not be kept.`,
+        { confirmLabel: 'Close' });
+    }
     return confirmDialog('Close without saving? Anything you have entered on this document will be lost.',
       { confirmLabel: 'Discard', danger: true });
   };
@@ -520,7 +596,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
     <Modal onClose={onClose} size="lg" confirmClose={confirmClose} labelledBy="doc-editor-title">
       <div className="p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 id="doc-editor-title" className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew ? `New ${type}` : `Edit ${type}`}</h2>
+          <h2 id="doc-editor-title" className="font-display text-lg font-semibold text-slate-100 capitalize">{isNew && !savedDoc ? `New ${type}` : `Edit ${type}${savedDoc ? ` ${savedDoc.number}` : ''}`}</h2>
           <button onClick={async () => { if (await confirmClose()) onClose(); }} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
 
@@ -610,7 +686,13 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved }: { i
         {/* Pull from tracked time */}
         {type === 'invoice' && (
           <div className="mt-4">
-            {!showTime ? (
+            {savedDoc ? (
+              // Updating a saved draft cannot link tracked hours to it, so pulling time now
+              // would leave those hours unbilled and open to being billed twice.
+              <p className="text-[11px] text-slate-500">
+                Tracked time can only be pulled in when a document is first created.
+              </p>
+            ) : !showTime ? (
               <button onClick={() => setShowTime(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
                 <Clock size={13} /> Pull from tracked time
