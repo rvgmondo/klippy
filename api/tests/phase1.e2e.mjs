@@ -149,6 +149,49 @@ const onCollections = async (docId) => {
     'and removing it leaves it owed, with nothing to reopen', await statusOf(id));
 }
 
+/**
+ * ---- only a quote can be accepted ---------------------------------------------------
+ *
+ * Set on an invoice, 'accepted' matched none of the filters that decide whether money is
+ * owed, so the invoice dropped off Collections, reminders, the forecast and hosting
+ * suspension, and vanished from the client's own portal, while the profit and VAT reports
+ * still counted it as owed.
+ */
+{
+  const inv = await issuedInvoice('Accepted By Mistake');
+  const r = await patch(`/documents/${inv}/status`, { status: 'accepted' });
+  ok(r.status === 400, 'an invoice cannot be set to accepted', String(r.status));
+  ok((await statusOf(inv)) === 'sent', 'so it stays sent, where every chase can still see it', await statusOf(inv));
+  const msg = (await r.json()).error ?? '';
+  ok(/only a quote/i.test(msg), 'and the refusal says why, in words a person can act on', msg);
+
+  const q = await post('/documents', {
+    type: 'quote', businessId: biz.id, clientName: `${TAG} Real Quote`,
+    issueDate: '2026-07-01', taxRate: 0, lines: [{ description: 'Work', quantity: 1, unitPrice: 500 }],
+  });
+  const quoteId = (await q.json()).document.id;
+  await patch(`/documents/${quoteId}/status`, { status: 'sent' });
+  const qa = await patch(`/documents/${quoteId}/status`, { status: 'accepted' });
+  ok(qa.status === 200 && (await statusOf(quoteId)) === 'accepted',
+    'while a quote can still be accepted, which is what the status is for', String(qa.status));
+}
+
+/**
+ * ---- a voided document cannot be revived --------------------------------------------
+ *
+ * Void cancels an issued document and keeps its number and trail; a voided tax invoice may
+ * already sit in a filed VAT period. PATCH back to sent revived it with no event recorded.
+ */
+{
+  const inv = await issuedInvoice('Voided');
+  const v = await patch(`/documents/${inv}/status`, { status: 'void' });
+  ok(v.status === 200 && (await statusOf(inv)) === 'void',
+    'an issued invoice can still be voided this way, the existing sanctioned way to cancel', String(v.status));
+  const back = await patch(`/documents/${inv}/status`, { status: 'sent' });
+  ok(back.status === 400 && (await statusOf(inv)) === 'void',
+    'but a voided invoice cannot be set back to sent', `${back.status} -> ${await statusOf(inv)}`);
+}
+
 await clean();
 await db.end();
 console.log(failures === 0 ? '\nALL PASS' : '\n' + failures + ' FAILURES');

@@ -24,6 +24,25 @@ import {
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+/**
+ * The statuses a person may pick for one document.
+ *
+ * "accepted" is a quote's answer and means nothing on an invoice; set there, it dropped
+ * the invoice off every screen that chases money. So an invoice offers draft and sent,
+ * and a quote adds accepted. Nothing issued offers draft, which the server refuses.
+ *
+ * The row's CURRENT status is always included, even when it is no longer allowed. An
+ * invoice already stuck at "accepted" from before this change would otherwise render a
+ * select whose value matches no option: the browser shows "sent", choosing "sent" fires no
+ * change, and the bad state could never be corrected from the screen.
+ */
+function statusOptions(type: string, current: Status): Status[] {
+  const allowed: Status[] = type === 'quote'
+    ? (current === 'draft' ? ['draft', 'sent', 'accepted'] : ['sent', 'accepted'])
+    : (current === 'draft' ? ['draft', 'sent'] : ['sent']);
+  return allowed.includes(current) ? allowed : [current, ...allowed];
+}
+
 export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<DocType>('invoice');
@@ -96,6 +115,9 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const setStatus = useMutation({
     mutationFn: (v: { id: number; status: Status }) => apiPatch(`/documents/${v.id}/status`, { status: v.status }),
     onSuccess: invalidate,
+    // The server refuses some of these with a reason. With no onError the dropdown just
+    // snapped back and the person had no idea why their change did not take.
+    onError: (e: Error) => { invalidate(); notify(e.message || 'Could not change the status.', 'error'); },
   });
   const del = useMutation({ mutationFn: (id: number) => apiDelete(`/documents/${id}`), onSuccess: invalidate });
   const convert = useMutation({
@@ -176,7 +198,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                     ) : (
                       <select value={d.status} onChange={(e) => setStatus.mutate({ id: d.id, status: e.target.value as Status })}
                         className={`rounded-md px-2 py-0.5 text-[11px] ${STATUS_COLOR[d.status]}`}>
-                        {(['draft', 'sent', 'accepted'] as Status[]).map((s) => <option key={s} value={s}>{s}</option>)}
+                        {statusOptions(d.type, d.status).map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     )}
                   </td>

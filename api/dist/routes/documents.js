@@ -726,13 +726,50 @@ export async function documentRoutes(app) {
         const parsed = z.object({ status: z.enum(['draft', 'sent', 'accepted', 'paid', 'void']) }).safeParse(req.body);
         if (!parsed.success)
             return reply.code(400).send({ error: 'Bad status.' });
-        const [own] = await db.select({ businessId: documents.businessId, status: documents.status, number: documents.number })
-            .from(documents)
+        const [own] = await db.select({
+            businessId: documents.businessId, status: documents.status, number: documents.number, type: documents.type,
+        }).from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
         if (!own)
             return reply.code(404).send({ error: 'Not found.' });
         if (!(await assertMaybeBusiness(req, reply, own.businessId)))
             return;
+        /**
+         * Only a QUOTE can be accepted.
+         *
+         * 'accepted' is a quote's answer from the client. Set on an invoice, it matched none
+         * of the filters that decide whether money is owed, all of which read 'sent': the
+         * invoice dropped off Collections, the bulk chase, scheduled reminders by email, SMS
+         * and WhatsApp, the Focus and command-bar money lists, the cash flow forecast, the
+         * digest's owed figure and hosting suspension. It vanished from the client's own
+         * portal too, so they could not see it or pay it there. Meanwhile the profit and VAT
+         * reports still counted it as owed. The books and the chasing screens disagreed, and
+         * nothing said so.
+         *
+         * The natural way in was innocent: raise an invoice, pick "accepted" meaning the client
+         * agreed, then email it. Emailing only moves a draft to sent, so it stayed accepted.
+         *
+         * Blocked here rather than by widening ten chase filters to include 'accepted', which
+         * would leave the invalid state standing and every future filter to get it right again.
+         */
+        if (parsed.data.status === 'accepted' && own.type !== 'quote') {
+            return reply.code(400).send({
+                error: `Only a quote can be accepted. ${own.number} is an invoice, so it stays sent until it is paid.`,
+            });
+        }
+        /**
+         * A voided document stays void.
+         *
+         * Void is how an issued document is cancelled while its number and trail survive, and
+         * a voided tax invoice may already sit in a filed VAT period. Setting it back to sent
+         * revived it with no event recorded. The DELETE route writes the void, this route must
+         * not quietly undo it.
+         */
+        if (own.status === 'void' && parsed.data.status !== 'void') {
+            return reply.code(400).send({
+                error: `${own.number} has been voided, so it cannot be reopened. Raise a new one if it should stand.`,
+            });
+        }
         // Once a document has been issued it cannot go back to being a draft. A draft is
         // "not yet a document"; an issued invoice is one the client holds and one the VAT
         // report counts, so dropping it to draft would remove a real tax invoice from a
