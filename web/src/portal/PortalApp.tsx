@@ -137,7 +137,10 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         )}
         {tab === 'statement' && <Statement />}
         {tab === 'report' && <WorkReport />}
-        {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)} />}
+        {/* The Documents tab already shows a payment that failed to start. The Hosting tab
+            did not, so a client pressing Pay there got nothing at all when it failed. */}
+        {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)}
+          payError={pay.error instanceof Error ? pay.error.message : ''} />}
         {tab === 'details' && (me.preview
           ? <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
               The client edits their own details here. Hidden while previewing.
@@ -443,7 +446,7 @@ function Statement() {
   );
 }
 
-function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: number) => void }) {
+function Hosting({ accent, onPay, payError }: { accent: React.CSSProperties; onPay: (id: number) => void; payError: string }) {
   const { data } = useQuery({
     queryKey: ['portal-hosting'],
     queryFn: () => apiGet<{ hosting: HostingRow[]; cpanelUrl: string | null }>('/portal/hosting'),
@@ -462,6 +465,9 @@ function Hosting({ accent, onPay }: { accent: React.CSSProperties; onPay: (id: n
   return (
     <div className="space-y-2">
       <AwaitingDomain />
+      {payError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">{payError}</div>
+      )}
       {rows.map((h) => (
         <div key={h.id} className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">

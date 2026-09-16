@@ -89,14 +89,20 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     qc.invalidateQueries({ queryKey: ['report'] });
     qc.invalidateQueries({ queryKey: ['dashboard-money'] });
   };
+  // Pausing, cancelling or switching auto-debit on a repeating invoice failed in silence:
+  // the control snapped back and nothing said why. For a cancel that nobody notices has
+  // failed, the client simply keeps being billed.
+  const reportSubError = (e: Error) => notify(e.message || 'Could not change that repeating invoice.', 'error');
   const setSubStatus = useMutation({
     mutationFn: (v: { id: number; status: Subscription['status'] }) => apiPatch(`/subscriptions/${v.id}`, { status: v.status }),
     onSuccess: invalidateSubs,
+    onError: reportSubError,
   });
-  const delSub = useMutation({ mutationFn: (id: number) => apiDelete(`/subscriptions/${id}`), onSuccess: invalidateSubs });
+  const delSub = useMutation({ mutationFn: (id: number) => apiDelete(`/subscriptions/${id}`), onSuccess: invalidateSubs, onError: reportSubError });
   const setAutoDebit = useMutation({
     mutationFn: (v: { id: number; autoDebit: boolean }) => apiPatch(`/subscriptions/${v.id}`, { autoDebit: v.autoDebit }),
     onSuccess: invalidateSubs,
+    onError: reportSubError,
   });
   const recurringOfferings = rows.filter((o) => o.recurring && o.active);
 

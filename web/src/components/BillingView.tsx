@@ -119,10 +119,21 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     // snapped back and the person had no idea why their change did not take.
     onError: (e: Error) => { invalidate(); notify(e.message || 'Could not change the status.', 'error'); },
   });
-  const del = useMutation({ mutationFn: (id: number) => apiDelete(`/documents/${id}`), onSuccess: invalidate });
+  /**
+   * Void, delete and convert failed in silence. The confirm dialog closed, the row stayed
+   * exactly as it was, and nothing said why, so a person could reasonably believe an
+   * invoice was voided while it went on being chased. The server already explains every
+   * refusal (a viewer's 403, a stale row's 404); it just never reached the screen.
+   */
+  const del = useMutation({
+    mutationFn: (id: number) => apiDelete(`/documents/${id}`),
+    onSuccess: invalidate,
+    onError: (e: Error) => notify(e.message || 'Could not void or delete that document.', 'error'),
+  });
   const convert = useMutation({
     mutationFn: (id: number) => apiPost(`/documents/${id}/convert`),
     onSuccess: () => { invalidate(); setTab('invoice'); },
+    onError: (e: Error) => notify(e.message || 'Could not turn the quote into an invoice.', 'error'),
   });
   const email = useMutation({
     mutationFn: (v: { id: number; message?: string }) => apiPost<{ to: string }>(`/documents/${v.id}/email`, { message: v.message }),

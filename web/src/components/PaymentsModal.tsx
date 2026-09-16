@@ -32,9 +32,16 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
     // an open statement used to leave it showing the old balance.
     qc.invalidateQueries({ queryKey: ['statement'] });
   };
+  /**
+   * Recording a payment failed in silence: the amount stayed in the box and nothing
+   * happened, so a person could close the modal believing it was recorded while the
+   * invoice went on being chased. Real triggers, reproduced: a method longer than the
+   * server's 40 characters, a cleared date, a viewer's 403.
+   */
   const add = useMutation({
     mutationFn: () => apiPost(`/documents/${doc.id}/payments`, { amount: Number(amount), paidOn, method: method.trim() || null }),
     onSuccess: () => { setAmount(''); setMethod(''); invalidate(); },
+    onError: (e: Error) => notify(e.message || 'Could not record the payment.', 'error'),
   });
   /**
    * Deleting a payment is a client-facing action now, so it asks first and reports back.
@@ -102,8 +109,15 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
         <div className="mb-3 flex flex-wrap gap-2">
           <input className={field + ' w-24'} type="number" placeholder="Amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
           <input className={field} type="date" value={paidOn} onChange={(e) => setPaidOn(e.target.value)} />
-          <input className={field + ' w-24'} placeholder="Method" value={method} onChange={(e) => setMethod(e.target.value)} />
-          <button onClick={() => Number(amount) !== 0 && add.mutate()} disabled={!(Number(amount) !== 0)}
+          {/* 40 matches the server's limit, so the most common silent refusal cannot happen. */}
+          <input className={field + ' w-24'} placeholder="Method" maxLength={40} value={method} onChange={(e) => setMethod(e.target.value)} />
+          {/* Disabled while a record is on its way. Two quick clicks used to record the same
+              payment twice, verified: two rows of 30.00 from one intended payment. This is a
+              guard for a person's double click, not a guarantee: the endpoint has no
+              idempotency, so a second tab could still do it. Also disabled with no date,
+              which the server refuses with a cryptic "Use YYYY-MM-DD". */}
+          <button onClick={() => Number(amount) !== 0 && paidOn && !add.isPending && add.mutate()}
+            disabled={add.isPending || !paidOn || !(Number(amount) !== 0)}
             className="rounded-lg bg-violet-600 px-3 py-2 text-sm text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-60">Record</button>
         </div>
         <p className="mb-3 text-[11px] text-slate-500">Enter a negative amount to record a refund.</p>
