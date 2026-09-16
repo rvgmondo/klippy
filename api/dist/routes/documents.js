@@ -1009,28 +1009,88 @@ export async function documentRoutes(app) {
         }
         return reply.code(201).send({ ok: true, ...bal });
     });
+    /**
+     * Delete a payment, and put the invoice back if that delete is what settled it.
+     *
+     * THIS USED TO LEAVE A PAID INVOICE PAID WITH NOTHING PAID AGAINST IT. Record a
+     * payment on the wrong invoice, or enter an EFT that later bounced, delete it, and the
+     * invoice kept status 'paid' with the full amount owing. Every place that decides
+     * "is this owed" filters on status 'sent' (Collections, the bulk chase, the reminder
+     * job, Focus, debtor ageing, the digest, hosting suspension), and every place a client
+     * can pay refuses a 'paid' invoice. The debt disappeared from the business and the
+     * client could not have paid it if they tried.
+     *
+     * REOPEN ONLY WHEN THIS DELETE UNSETTLED IT: settled before, owing after. Not merely
+     * "owing after", because live data holds invoices marked paid BY HAND with only a
+     * part payment recorded (the rest written off). Deleting that part payment must not
+     * suddenly chase the client for the full face value. The same rule leaves a paid and
+     * then fully refunded invoice alone, since it was not settled before the delete either.
+     *
+     * When the rule declines to reopen but the invoice is still marked paid with money
+     * owing, the response SAYS SO, so the defect is not merely narrowed into a quieter
+     * version of itself.
+     *
+     * Re-running settlement after reopening closes the race with a payment that lands
+     * between the balance read and the update: if that payment covers the invoice it goes
+     * straight back to paid. That is safe to repeat, because provisioning claims on the
+     * subscription id and starting subscriptions claims on subscriptionsStartedAt.
+     */
     app.delete('/api/v1/payments/:id', async (req, reply) => {
         const { accountId, userId } = authOf(req);
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        // Record what is being removed BEFORE removing it, so deleting money always
-        // leaves a trace of who did it and how much. Payments are legitimately corrected,
-        // so this stays a real delete, but never a silent one.
         const [pay] = await db.select({
             amount: payments.amount, documentId: payments.documentId, method: payments.method,
         }).from(payments).where(tenantWhere(payments, accountId, eq(payments.id, id))).limit(1);
+        if (!pay)
+            return reply.code(404).send({ error: 'Not found.' });
+        const [doc] = await db.select({
+            id: documents.id, type: documents.type, status: documents.status, number: documents.number,
+            total: documents.total, businessId: documents.businessId,
+        }).from(documents).where(tenantWhere(documents, accountId, eq(documents.id, pay.documentId))).limit(1);
+        if (!doc)
+            return reply.code(404).send({ error: 'Not found.' });
+        // The create route checks business access and this one never did, so a member
+        // limited to one business could delete a payment on another business's invoice.
+        if (!(await assertMaybeBusiness(req, reply, doc.businessId)))
+            return;
+        const total = Number(doc.total);
+        const before = await balanceOf(accountId, doc.id, total);
         const res = await db.delete(payments).where(tenantWhere(payments, accountId, eq(payments.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Not found.' });
-        if (pay) {
-            await db.insert(events).values({
-                accountId, businessId: null, name: 'payment.deleted',
-                payload: { paymentId: id, documentId: pay.documentId, amount: pay.amount, method: pay.method },
-                results: [{ handler: 'payments', outcome: `Deleted payment ${pay.amount} on doc ${pay.documentId} by user ${userId}`, ok: true }],
-            }).catch(() => { });
+        const after = await balanceOf(accountId, doc.id, total);
+        let reopened = false;
+        if (doc.type === 'invoice' && doc.status === 'paid'
+            && before.outstanding <= 0.001 && after.outstanding > 0.001) {
+            const flip = await db.update(documents).set({ status: 'sent' })
+                .where(and(tenantWhere(documents, accountId, eq(documents.id, doc.id)), eq(documents.status, 'paid')));
+            reopened = !!flip[0].affectedRows;
+            if (reopened) {
+                const again = await settleIfCovered(accountId, doc.id, total, 'sent');
+                if (again.flipped)
+                    reopened = false;
+            }
         }
-        return { ok: true };
+        const [now] = await db.select({ status: documents.status }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.id, doc.id))).limit(1);
+        const status = now?.status ?? doc.status;
+        const stillPaidWithBalance = status === 'paid' && after.outstanding > 0.001;
+        await db.insert(events).values({
+            accountId, businessId: doc.businessId, name: 'payment.deleted',
+            payload: {
+                paymentId: id, documentId: pay.documentId, amount: pay.amount, method: pay.method,
+                statusBefore: doc.status, statusAfter: status, reopened,
+            },
+            results: [{
+                    handler: 'payments',
+                    outcome: `Deleted payment ${pay.amount} on ${doc.number} by user ${userId}`
+                        + (reopened ? `; ${doc.number} reopened, ${after.outstanding.toFixed(2)} owing` : ''),
+                    ok: true,
+                }],
+        }).catch(() => { });
+        return { ok: true, ...after, status, reopened, stillPaidWithBalance };
     });
     // ---- Email the document to the client -----------------------------------
     app.post('/api/v1/documents/:id/email', async (req, reply) => {

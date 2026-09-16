@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, X } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
 import { Modal } from './Modal';
-import { promptDialog } from './ConfirmDialog';
+import { promptDialog, confirmDialog, notify } from './ConfirmDialog';
 import { money, type DocSummary } from './billingShared';
 import { fieldInlineClass } from './ui';
 
@@ -36,7 +36,44 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
     mutationFn: () => apiPost(`/documents/${doc.id}/payments`, { amount: Number(amount), paidOn, method: method.trim() || null }),
     onSuccess: () => { setAmount(''); setMethod(''); invalidate(); },
   });
-  const del = useMutation({ mutationFn: (id: number) => apiDelete(`/payments/${id}`), onSuccess: invalidate });
+  /**
+   * Deleting a payment is a client-facing action now, so it asks first and reports back.
+   *
+   * It used to be one click with no confirmation, which was survivable only because the
+   * delete also hid the debt. Now that removing the payment which settled an invoice
+   * reopens it, a misclick puts an invoice with a due date well in the past straight back
+   * into the reminder job and the hosting suspension sweep. So the question states that
+   * consequence, and the answer says what actually happened.
+   */
+  const del = useMutation({
+    mutationFn: (id: number) => apiDelete<{
+      reopened: boolean; stillPaidWithBalance: boolean; outstanding: number;
+    }>(`/payments/${id}`),
+    onSuccess: (r) => {
+      invalidate();
+      if (r?.reopened) {
+        notify(`${doc.number} is open again, with ${money(r.outstanding, doc.currency)} owing. It will be chased.`, 'ok');
+      } else if (r?.stillPaidWithBalance) {
+        // The rule declined to reopen it, usually because it was marked paid by hand
+        // after only part was paid. Say so rather than leave a quiet contradiction.
+        notify(`${doc.number} is still marked paid, but ${money(r.outstanding, doc.currency)} is not covered by any payment.`, 'error');
+      } else {
+        notify('Payment removed.', 'ok');
+      }
+    },
+    onError: (e: Error) => notify(e.message, 'error'),
+  });
+  const confirmDelete = async (p: Payment) => {
+    const amount = Number(p.amount);
+    const settles = doc.type === 'invoice' && (data?.outstanding ?? 0) <= 0.005 && amount > 0;
+    const yes = await confirmDialog(
+      settles
+        ? `Remove this ${money(amount, doc.currency)} payment? ${doc.number} will be open again for ${money(amount, doc.currency)}, and reminders will chase it.`
+        : `Remove this ${amount < 0 ? 'refund' : 'payment'} of ${money(Math.abs(amount), doc.currency)}?`,
+      { confirmLabel: 'Remove', danger: true },
+    );
+    if (yes) del.mutate(p.id);
+  };
   // Cancelling or reducing an issued invoice is a credit note, never an edit, so
   // the client's copy and yours still agree.
   const credit = useMutation({
@@ -80,7 +117,7 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
               <span className={`ml-auto num ${Number(p.amount) < 0 ? 'text-rose-300' : 'text-slate-200'}`}>
                 {Number(p.amount) < 0 ? `Refund ${money(Math.abs(Number(p.amount)), doc.currency)}` : money(p.amount, doc.currency)}
               </span>
-              <button onClick={() => del.mutate(p.id)} className="text-slate-500 hover:text-red-400"><Trash2 size={13} /></button>
+              <button onClick={() => confirmDelete(p)} title="Remove this payment" className="text-slate-500 hover:text-red-400"><Trash2 size={13} /></button>
             </div>
           ))}
           {(data?.credits ?? []).map((c) => (
