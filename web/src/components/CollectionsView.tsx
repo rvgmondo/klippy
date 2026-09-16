@@ -7,7 +7,7 @@ import { StatementView } from './StatementView';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { money } from '../lib/money';
 import { Skeleton, SkeletonTile } from './ui';
-import { notify } from './ConfirmDialog';
+import { notify, confirmDialog } from './ConfirmDialog';
 import { Page, PageHeader, PageBody } from './PageHeader';
 
 interface Item {
@@ -82,6 +82,31 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
     onError: (e) => notify(e instanceof Error ? e.message : 'Could not send.', 'error'),
   });
 
+  /**
+   * Chasing emails real clients, so it asks first and says how many.
+   *
+   * "Chase all" sent immediately on one click, to every client with an overdue invoice and
+   * an email address, and by SMS and WhatsApp as well when those are on. A reminder in a
+   * client's inbox cannot be taken back, and a stray click on the most prominent button on
+   * the screen could reach every debtor at once. Chasing ticked invoices asks too, since it
+   * is the same button and the same consequence.
+   */
+  const confirmChase = async () => {
+    const chosen = sel.size ? (data?.items ?? []).filter((i) => sel.has(i.id)) : (data?.items ?? []);
+    const reachable = chosen.filter((i) => i.clientEmail);
+    const clients = new Set(reachable.map((i) => (i.clientEmail ?? '').toLowerCase())).size;
+    if (!reachable.length) {
+      notify('Nothing to send. None of these invoices has an email address.', 'error');
+      return;
+    }
+    const invoices = reachable.length === 1 ? '1 overdue invoice' : `${reachable.length} overdue invoices`;
+    const who = clients === 1 ? '1 client' : `${clients} clients`;
+    const yes = await confirmDialog(
+      `Send payment reminders to ${who} about ${invoices}? They go out now, by email, and by SMS or WhatsApp too if those are switched on.`,
+      { confirmLabel: 'Send reminders' });
+    if (yes) chase.mutate(sel.size ? [...sel] : undefined);
+  };
+
   return (
     <Page>
       <PageHeader view="collections" title="Collections"
@@ -125,7 +150,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                     ? `${sel.size} selected`
                     : 'Tick invoices to chase a few, or chase everything owed in one go.'}
                 </div>
-                <button onClick={() => chase.mutate(sel.size ? [...sel] : undefined)} disabled={chase.isPending}
+                <button onClick={() => void confirmChase()} disabled={chase.isPending}
                   className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-50">
                   <Mail size={14} /> {chase.isPending ? 'Sending' : sel.size ? `Chase selected (${sel.size})` : 'Chase all'}
                 </button>
