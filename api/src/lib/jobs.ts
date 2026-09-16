@@ -5,7 +5,7 @@ import { tasks, users, boards, folders, memberships, subscriptions, documents, p
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
-import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice } from './billing.js';
+import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice, clientBillingFor } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { mrrByCurrency } from './mrr.js';
 import { runHostingSuspensions, liveHostingForFolders, liveArrangementsForFolders } from './hosting.js';
@@ -591,6 +591,27 @@ export const DEFAULT_REMINDER_OFFSETS = [-3, 0, 7];
 const daysBetween = (a: string, b: string) =>
   Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
 
+/**
+ * Where an automated reminder goes: the client's address NOW, not the one on the invoice.
+ *
+ * The invoice keeps the email it was raised with, and it should: what a sent document
+ * said must not change. But where to CHASE is routing, not content. Reading it off the
+ * snapshot meant a client who told you their accounts address had changed kept being
+ * reminded at the dead one, every scheduled run, silently, while the SMS beside it
+ * already went to their current number because phoneForClient looks that up live.
+ * The manual bulk chase was fixed the same way; this is the automated half.
+ *
+ * Falls back to the snapshot when the invoice has no client, or the client has no email
+ * on file, so a one-off invoice typed for somebody with no folder is still chased.
+ */
+export async function reminderEmailFor(doc: {
+  accountId: number; folderId: number | null; businessId: number | null; clientEmail: string | null;
+}): Promise<string | null> {
+  if (!doc.folderId) return doc.clientEmail;
+  const live = await clientBillingFor(doc.accountId, doc.folderId, doc.businessId);
+  return live.email ?? doc.clientEmail;
+}
+
 export async function runInvoiceReminders(): Promise<string> {
   const today = todayStr();
   const rows = await db.select().from(documents).where(and(
@@ -673,11 +694,12 @@ export async function runInvoiceReminders(): Promise<string> {
       };
       try {
         const phone = await phoneForClient(doc.accountId, doc.folderId);
-        if (!doc.clientEmail && !phone) continue;
-        if (doc.clientEmail) {
+        const email = await reminderEmailFor(doc);
+        if (!email && !phone) continue;
+        if (email) {
           await sendBusinessMail({
             accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-            to: doc.clientEmail, subject: `Action needed: invoice ${doc.number} overdue`,
+            to: email, subject: `Action needed: invoice ${doc.number} overdue`,
             text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
           });
         }
@@ -727,11 +749,12 @@ export async function runInvoiceReminders(): Promise<string> {
 
     try {
       const phone = await phoneForClient(doc.accountId, doc.folderId);
-      if (!doc.clientEmail && !phone) continue;
-      if (doc.clientEmail) {
+      const email = await reminderEmailFor(doc);
+      if (!email && !phone) continue;
+      if (email) {
         await sendBusinessMail({
           accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-          to: doc.clientEmail, subject,
+          to: email, subject,
           text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
         });
       }

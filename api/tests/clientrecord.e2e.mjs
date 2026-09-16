@@ -473,6 +473,37 @@ ok(!!CID, 'a client is created', String(CID));
   }
 }
 
+/**
+ * ---- automated reminders chase the client's address NOW ----------------------------
+ *
+ * The invoice keeps the email it was raised with, and should. But where to chase is
+ * routing, not content. The scheduled reminder job read the snapshot, so a client who
+ * changed their accounts address kept being reminded at the dead one every run, while
+ * the SMS beside it already went to their current number.
+ */
+{
+  const { reminderEmailFor } = await import('file:///C:/CC/klippy-v2/api/dist/lib/jobs.js');
+
+  const made = await post('/folders', { name: 'E2E-CR Moved Accounts', businessId: biz.id });
+  const FID = (await made.json()).folder.id;
+  await patch(`/folders/${FID}`, { billingEmail: 'new-accounts@moved.example' });
+
+  const stale = { accountId: 1, folderId: FID, businessId: biz.id, clientEmail: 'old-accounts@moved.example' };
+  const to = await reminderEmailFor(stale);
+  ok(to === 'new-accounts@moved.example',
+    'a reminder goes to the address the client has now, not the one frozen on the invoice', to);
+
+  const oneOff = { accountId: 1, folderId: null, businessId: biz.id, clientEmail: 'walkin@example.com' };
+  ok((await reminderEmailFor(oneOff)) === 'walkin@example.com',
+    'while a one-off invoice with no client is still chased at the address typed on it');
+
+  await patch(`/folders/${FID}`, { billingEmail: null });
+  ok((await reminderEmailFor(stale)) === 'old-accounts@moved.example',
+    'and a client with no email on file falls back to the invoice rather than going unchased');
+
+  await db.query('DELETE FROM folders WHERE id = ?', [FID]);
+}
+
 // ---- the backup carries the company record ------------------------------------------
 {
   const r = await fetch(API + '/account/export', { headers: { cookie } });

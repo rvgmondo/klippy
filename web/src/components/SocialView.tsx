@@ -93,7 +93,18 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
     // A post back in draft still holding a live approval link is one the client sent
     // back with notes. Without this it would drop off every list and be waited on by
     // both sides, which is the exact failure the approval flow exists to prevent.
-    || sentBack(p));
+    || sentBack(p)
+    /**
+     * Signed off, and not yet scheduled. The same failure from the other side.
+     *
+     * The publisher only ever claims `scheduled`, so an `approved` post never goes out
+     * on its own, and it was on no list at all: not here, not on Media asks, and only
+     * on the calendar if somebody went looking on its date. The client said yes, the
+     * agency got one notification that is read once and gone, and the post then sat
+     * forever. Whether approval should schedule it automatically is a product decision
+     * still open; that it must not vanish is not.
+     */
+    || p.status === 'approved');
   const asks = (all.data?.posts ?? []).filter((p) => p.status === 'needs_media' && p.mediaAsk);
 
   if (error) return <ErrorNote error={error} onRetry={() => refetch()} />;
@@ -287,6 +298,11 @@ function QueueList({ posts, onOpen, emptyLabel }: {
                 {sentBack(p) ? (
                   <span className="mt-1 inline-block rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
                     changes asked for
+                  </span>
+                ) : p.status === 'approved' ? (
+                  // Says what to DO, because "approved" reads as finished and it is not.
+                  <span className="mt-1 inline-block rounded-full border border-emerald-500/30 px-2 py-0.5 text-[10px] text-emerald-300">
+                    approved, schedule it
                   </span>
                 ) : (
                   <StatusPill status={p.status} />
