@@ -42,6 +42,7 @@ const MEMBER = 'e2e-da-member@example.com';
 const clean = async () => {
   await db.query('DELETE FROM portal_users WHERE email LIKE ?', ['e2e-da-%']);
   await db.query('DELETE FROM deals WHERE title LIKE ?', [`${TAG}%`]);
+  await db.query('DELETE FROM contacts WHERE name LIKE ?', [`${TAG}%`]);
   await db.query('DELETE FROM documents WHERE client_name LIKE ?', [`${TAG}%`]);
   // Children first, or the parent's cascade does it and the count below lies.
   await db.query('DELETE FROM folders WHERE name LIKE ? AND parent_id IS NOT NULL', [`${TAG}%`]);
@@ -102,6 +103,10 @@ await db.query(
   `INSERT INTO deals (account_id, business_id, title, stage, contact_id) VALUES (?,?,?,?,?)`,
   [acct, biz.id, `${TAG} Ghost Deal`, 'lead', maxC.ghost]);
 
+// (g) a contact and a deal that belong to no business, the way "All businesses" creates them.
+await db.query('INSERT INTO contacts (account_id, business_id, name) VALUES (?, NULL, ?)', [acct, `${TAG} Homeless Contact`]);
+await db.query('INSERT INTO deals (account_id, business_id, title, stage) VALUES (?, NULL, ?, ?)', [acct, `${TAG} Homeless Deal`, 'lead']);
+
 // (c) a document with no client.
 await db.query(
   `INSERT INTO documents (account_id, business_id, type, seq, number, client_name, issue_date, currency, status, subtotal, tax_rate, tax_amount, total)
@@ -152,6 +157,14 @@ ok(snapBefore === snapAfter, 'running the audit changes nothing it reads');
   // number, so a strict compare would fail on perfectly correct data.
   ok(!!f && f.missingContactId === Number(maxC.ghost), '(f) a deal pointing at a contact that does not exist is caught',
     f ? `contact ${f.missingContactId}` : 'missing');
+}
+
+{
+  const g = rowsOf(after, 'g');
+  ok(g.some((r) => r.kind === 'contact' && r.label === `${TAG} Homeless Contact`),
+    '(g) a contact with no business is caught, which one-business mode would otherwise hide');
+  ok(g.some((r) => r.kind === 'deal' && r.label === `${TAG} Homeless Deal`),
+    '(g) and so is a deal with no business');
 }
 
 // ---- no silent cap -----------------------------------------------------------------

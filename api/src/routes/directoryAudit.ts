@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders, documents, subscriptions, portalUsers, expenses, deals, contacts } from '../db/schema.js';
+import { folders, documents, subscriptions, portalUsers, expenses, deals, contacts, calendarEvents, focusItems, hostingAccounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 
@@ -168,6 +168,42 @@ export async function directoryAuditRoutes(app: FastifyInstance) {
       .filter((r) => r.contactId != null && !known.has(r.contactId))
       .map((r) => ({ dealId: r.id, title: r.title, missingContactId: r.contactId }));
 
+    /**
+     * (g) Records that belong to NO business.
+     *
+     * The precondition for treating a one-business workspace as simply that business.
+     * Contacts made while "All businesses" was selected are stored with no business, and
+     * a list filtered by business excludes them, so switching the workspace over without
+     * first assigning them would make them vanish from Contacts. The dev database has
+     * none; whether a real workspace does is what this answers.
+     *
+     * The events audit log is left out on purpose: a workspace-wide event legitimately
+     * has no business.
+     */
+    const [nbContacts, nbDocs, nbDeals, nbFolders, nbEvents, nbFocus, nbHosting] = await Promise.all([
+      db.select({ id: contacts.id, label: contacts.name }).from(contacts)
+        .where(tenantWhere(contacts, accountId, isNull(contacts.businessId))),
+      db.select({ id: documents.id, label: documents.number }).from(documents)
+        .where(tenantWhere(documents, accountId, isNull(documents.businessId))),
+      db.select({ id: deals.id, label: deals.title }).from(deals)
+        .where(tenantWhere(deals, accountId, isNull(deals.businessId))),
+      db.select({ id: folders.id, label: folders.name }).from(folders)
+        .where(tenantWhere(folders, accountId, isNull(folders.businessId), isNull(folders.deletedAt))),
+      db.select({ id: calendarEvents.id, label: calendarEvents.title }).from(calendarEvents)
+        .where(tenantWhere(calendarEvents, accountId, isNull(calendarEvents.businessId))),
+      db.select({ id: focusItems.id, label: focusItems.title }).from(focusItems)
+        .where(tenantWhere(focusItems, accountId, isNull(focusItems.businessId))),
+      db.select({ id: hostingAccounts.id, label: hostingAccounts.domain }).from(hostingAccounts)
+        .where(tenantWhere(hostingAccounts, accountId, isNull(hostingAccounts.businessId))),
+    ]);
+    const tag = (kind: string, rows: { id: number; label: string | null }[]) =>
+      rows.map((r) => ({ kind, id: r.id, label: r.label }));
+    const g = [
+      ...tag('contact', nbContacts), ...tag('document', nbDocs), ...tag('deal', nbDeals),
+      ...tag('client or folder', nbFolders), ...tag('meeting', nbEvents),
+      ...tag('focus item', nbFocus), ...tag('hosting account', nbHosting),
+    ];
+
     const checks: Check[] = [
       capped('a', 'Clients filed as internal work',
         'A top-level Operations folder that has a billing email, an invoice, a repeating invoice or a portal login is almost certainly a real client. Its hours are missing from client reports today.', a),
@@ -183,6 +219,8 @@ export async function directoryAuditRoutes(app: FastifyInstance) {
         'Could be a duplicate, or two genuinely different clients. Never merged automatically.', e),
       capped('f', 'Deals pointing at a contact that no longer exists',
         'These would stop the link between deals and contacts being tightened.', f),
+      capped('g', 'Records that belong to no business',
+        'Usually created while "All businesses" was selected. They disappear from any list filtered to one business, so each needs a business before a one-business workspace is treated as that business.', g),
     ];
 
     return {
