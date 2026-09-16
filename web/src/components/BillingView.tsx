@@ -432,8 +432,30 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
     queryKey: ['businesses'], enabled: isNew,
     queryFn: () => apiGet<{ businesses: { id: number; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null }[] }>('/businesses'),
   });
-  if (isNew && (bizDefaults.data || !businessId) && !ready) {
-    const biz = bizDefaults.data?.businesses.find((b) => b.id === businessId);
+  /**
+   * Which business's defaults this document takes.
+   *
+   * With "All businesses" selected the editor gets no business, and it applied no tax rate
+   * and no due date, so every invoice opened at the hardcoded 15%. That matters most for a
+   * workspace with ONE business, which is the common case, because "All businesses" is
+   * what any fresh browser opens on: a new phone, a private window, the first login after
+   * signup. A business set to 0% because it is not VAT registered still got 15% put in
+   * front of it.
+   *
+   * With exactly one business there is nothing ambiguous about which one is meant, so it is
+   * used. With several and none chosen it stays undecided, which is a separate question.
+   *
+   * This deliberately does NOT switch the whole workspace into that business. Doing that
+   * would re-filter every list by business, and contacts created while "All businesses" was
+   * selected are stored with no business at all, so they would disappear from Contacts.
+   */
+  const onlyBusiness = bizDefaults.data?.businesses.length === 1 ? bizDefaults.data.businesses[0]!.id : undefined;
+  const defaultsBusinessId = businessId ?? onlyBusiness;
+  // Waits for the business list whenever no business was passed in. The old condition ran
+  // immediately in that case, found nothing, and set `ready`, so the defaults could never
+  // be applied once the list arrived a moment later.
+  if (isNew && bizDefaults.data && !ready) {
+    const biz = bizDefaults.data.businesses.find((b) => b.id === defaultsBusinessId);
     if (biz) {
       if (biz.defaultTaxRate != null) setTaxRate(Number(biz.defaultTaxRate));
       // `!= null` and not `> 0`: a business billing on receipt is set to zero days,
@@ -484,7 +506,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
    * anything else: the screen said R and the server saved GBP. Resolved the same way
    * the server resolves it, so the two agree before anything is typed.
    */
-  const bizCurrency = bizDefaults.data?.businesses.find((b) => b.id === businessId)?.currency ?? null;
+  const bizCurrency = bizDefaults.data?.businesses.find((b) => b.id === defaultsBusinessId)?.currency ?? null;
   // A saved draft's currency is fixed on the server and PUT never recomputes it, so once
   // one exists it wins; otherwise picking a client billed elsewhere would show their
   // currency on screen while the stored document kept the original.
