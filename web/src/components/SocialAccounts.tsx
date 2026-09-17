@@ -29,7 +29,11 @@ interface Pending {
   accounts: { network: SocialNetwork; externalId: string; displayName: string; avatarUrl: string | null }[];
 }
 
-export function SocialAccounts({ businessId }: { businessId: number | null }) {
+export function SocialAccounts({ businessId, deciding = false }: {
+  businessId: number | null;
+  /** The business list is still loading, so whether there is one business is not known yet. */
+  deciding?: boolean;
+}) {
   const qc = useQueryClient();
   const [handoff, setHandoff] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -159,7 +163,9 @@ export function SocialAccounts({ businessId }: { businessId: number | null }) {
       {/* ---- what is connected, and what is merely possible ------------------- */}
       <div className="space-y-2">
         {ALL_NETWORKS.map((n) => {
-          const mine = accounts.filter((a) => a.network === n);
+          // A disconnected account is kept so its posts stay pointed at it, but it is not
+          // something to manage here any more. Connecting it again brings it back.
+          const mine = accounts.filter((a) => a.network === n && !a.disconnected);
           const cap = capability.get(n);
           // The API answers this per workspace, so the screen never offers a Connect
           // button that could only come back with "set it up first".
@@ -220,7 +226,7 @@ export function SocialAccounts({ businessId }: { businessId: number | null }) {
         })}
       </div>
 
-      {businessId == null && (
+      {businessId == null && !deciding && (
         <p className="text-[11px] text-slate-500">Pick one business above to connect its accounts.</p>
       )}
 

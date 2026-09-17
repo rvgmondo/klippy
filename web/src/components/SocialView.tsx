@@ -15,6 +15,8 @@ import { iso, hhmm, addDays, monthGrid, weekDays, MONTHS, DOW, sameDay } from '.
 import { NETWORK_META, type SocialPostListItem } from '../lib/socialTypes';
 import { NetworkBadge } from './NetworkBadge';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { useUrlAction } from '../lib/urlAction';
+import { useActingBusiness } from '../lib/useActingBusiness';
 
 /**
  * The social calendar, the queue, and what the client still owes you.
@@ -40,8 +42,19 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
   const [mode, setMode] = useState<'month' | 'week'>(() => (window.innerWidth < 768 ? 'week' : 'month'));
   const [cursor, setCursor] = useState(new Date());
   const [openId, setOpenId] = useState<number | null>(null);
+  // Emails and notifications about one post link to ?post=<id>. Nothing read it, so the
+  // link opened the calendar on this month with no post open, possibly for a different
+  // business. The composer loads the post by id, whatever business is selected.
+  useUrlAction('post', (v) => {
+    const n = Number(v);
+    if (Number.isInteger(n) && n > 0) setOpenId(n);
+  });
 
+  // `bid` filters the lists and stays on the raw selection. `createBid` is who a new post
+  // or a connection is for, which a one-business workspace answers under "All" too.
   const bid = businessId === 'all' ? null : Number(businessId);
+  const acting = useActingBusiness(businessId);
+  const createBid = acting.id;
   const days = mode === 'month' ? monthGrid(cursor) : weekDays(cursor);
   const from = iso(days[0]!);
   const to = iso(days[days.length - 1]!);
@@ -62,7 +75,7 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
 
   const create = useMutation({
     mutationFn: (when: Date | null) => apiPost<{ id: number }>('/social/posts', {
-      businessId: bid,
+      businessId: createBid,
       title: 'New post',
       // A new post lands on the day that was clicked, at nine, because that is what
       // clicking an empty Tuesday means.
@@ -114,13 +127,13 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
       <PageHeader
         view="social" title="Social"
         subtitle="Plan the month, get it signed off, and put it out on time."
-        actions={bid ? (
+        actions={createBid ? (
           <button onClick={() => create.mutate(null)} className={btnPrimary + ' flex items-center gap-1.5'}>
             <Plus size={15} /> New post
           </button>
         ) : undefined} />
       <PageBody>
-        {!bid && (
+        {!createBid && !acting.loading && (
           <p className="mb-4 rounded-xl border border-dashed border-slate-700 p-4 text-center text-sm text-slate-400">
             Pick one business above to plan its posts.
           </p>
@@ -175,7 +188,7 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
                               {day.getDate()}
                             </span>
                             <div className="flex-1" />
-                            {bid && (
+                            {createBid && (
                               <button onClick={() => create.mutate(day)} title="Add a post on this day"
                                 className="text-slate-600 opacity-0 transition hover:text-slate-300 focus:opacity-100 group-hover:opacity-100 [div:hover>&]:opacity-100">
                                 <Plus size={12} />
@@ -201,7 +214,7 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
 
         {tab === 'asks' && <MediaAsks posts={asks} onOpen={setOpenId} />}
 
-        {tab === 'accounts' && <SocialAccounts businessId={bid} />}
+        {tab === 'accounts' && <SocialAccounts businessId={createBid} deciding={acting.loading} />}
       </PageBody>
 
       {/* Not gated on a business being picked. The composer looks the post up by id

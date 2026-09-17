@@ -106,6 +106,8 @@ export interface SocialAccountsResponse {
     displayName: string; avatarUrl: string | null;
     status: 'connected' | 'expired' | 'revoked' | 'error';
     lastError: string | null; tokenExpiresAt: string | null;
+    /** Disconnected in Klippy: kept, with no token, so its posts still name it. */
+    disconnected: boolean;
   }[];
   serverReady: boolean;
   networks: {

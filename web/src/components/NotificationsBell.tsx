@@ -61,8 +61,10 @@ export function NotificationsBell() {
   const go = (url: string | null) => {
     setOpen(false);
     if (!url) return;
-    const v = new URLSearchParams(url.split('?')[1] ?? '').get('v');
-    if (v) setUrlParams({ v });
+    // Every parameter, not just the screen: a notification about one post or one board
+    // carries which one, and dropping it opened the right screen on the wrong thing.
+    const params = Object.fromEntries(new URLSearchParams(url.split('?')[1] ?? ''));
+    if (params.v) setUrlParams(params);
   };
 
   return (

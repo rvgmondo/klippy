@@ -210,7 +210,7 @@ export async function socialApprovalRoutes(app) {
                 body: decision === 'approve'
                     ? `"${post.title}" is signed off and ready to schedule.`
                     : `"${post.title}": ${comment}`,
-                url: '/?v=social',
+                url: `/?v=social&post=${post.id}`,
             });
         }
         return { ok: true, outcome: decision === 'approve' ? 'approved' : 'changes' };

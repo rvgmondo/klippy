@@ -165,16 +165,30 @@ async function publishAutomatically(post: typeof socialPosts.$inferSelect): Prom
   for (const target of targets) {
     const network = target.network as Network;
     const adapter = adapterFor(network);
-    const account = target.socialAccountId
+    let account = target.socialAccountId
       ? (await db.select().from(socialAccounts)
           .where(tenantWhere(socialAccounts, post.accountId, eq(socialAccounts.id, target.socialAccountId))).limit(1))[0]
       : undefined;
+    // Never linked: written before any account was connected, and not saved since. The
+    // same rule saving it would apply: exactly one connected account on that network is
+    // the answer, and several is a question for a person.
+    if (!target.socialAccountId) {
+      const connected = await db.select().from(socialAccounts)
+        .where(tenantWhere(socialAccounts, post.accountId,
+          eq(socialAccounts.businessId, post.businessId), eq(socialAccounts.network, network),
+          eq(socialAccounts.status, 'connected')));
+      if (connected.length === 1) {
+        account = connected[0];
+        await db.update(socialPostTargets).set({ socialAccountId: account!.id })
+          .where(tenantWhere(socialPostTargets, post.accountId, eq(socialPostTargets.id, target.id)));
+      }
+    }
 
     // Nothing to publish through: this one needs a person, and that is a normal
     // outcome rather than an error.
     if (!adapter || !adapter.canPublish || !account || account.status !== 'connected' || !account.accessTokenEnc) {
       anyManual = true;
-      await log(post.accountId, post.id, target.id, 'info', whyNotAutomatic(network));
+      await log(post.accountId, post.id, target.id, 'info', await manualReason(post, target.socialAccountId, account, network));
       continue;
     }
 
@@ -245,6 +259,36 @@ async function publishAutomatically(post: typeof socialPosts.$inferSelect): Prom
   if (anyFailed) await tellSomebodyItFailed(post);
 
   return anyPublished ? 'published' : anyManual ? 'manual' : 'failed';
+}
+
+/**
+ * Why this one is coming to a person rather than going out on its own, in words that
+ * send them to the right fix.
+ *
+ * The generic reason tells someone to add their app details and connect a Page. That is
+ * false, and sends them in circles, when the post has no Page because two are connected
+ * (Klippy will not guess between them), or when the Page it was set to has disconnected.
+ */
+async function manualReason(
+  post: typeof socialPosts.$inferSelect,
+  boundId: number | null,
+  account: typeof socialAccounts.$inferSelect | undefined,
+  network: Network,
+): Promise<string> {
+  const adapter = adapterFor(network);
+  if (!adapter || !adapter.canPublish) return whyNotAutomatic(network);
+  const label = NETWORK_LABEL[network];
+  if (boundId != null && account) {
+    return `This was set to go to ${account.displayName} on ${label}, which needs connecting again, so it has come to you to post by hand. Reconnect it under Accounts.`;
+  }
+  const [row] = await db.select({ n: sql<number>`count(*)` }).from(socialAccounts)
+    .where(tenantWhere(socialAccounts, post.accountId,
+      eq(socialAccounts.businessId, post.businessId), eq(socialAccounts.network, network),
+      eq(socialAccounts.status, 'connected')));
+  if (Number(row?.n ?? 0) > 1) {
+    return `More than one ${label} account is connected to this business, and Klippy will not guess which one this post is for, so it has come to you to post by hand.`;
+  }
+  return whyNotAutomatic(network);
 }
 
 /** The media of one post, in the shape an adapter takes. */

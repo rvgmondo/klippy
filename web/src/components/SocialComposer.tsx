@@ -6,7 +6,7 @@ import { Modal } from './Modal';
 import { fieldClass, btnPrimary, btnSecondary } from './ui';
 import { notify, confirmDialog } from './ConfirmDialog';
 import { iso, hhmm, localIsoWithOffset } from '../lib/dates';
-import type { SocialNetwork, SocialPostDetail, SocialIssue } from '../lib/socialTypes';
+import type { SocialNetwork, SocialPostDetail, SocialIssue, SocialAccountsResponse, SocialTarget } from '../lib/socialTypes';
 import { NETWORK_META, ALL_NETWORKS } from '../lib/socialTypes';
 import { NetworkBadge } from './NetworkBadge';
 
@@ -36,13 +36,48 @@ export function SocialComposer({ postId, onClose }: {
     mediaAsk: string; date: string; time: string;
     networks: SocialNetwork[];
   } | null>(null);
-  const [dirty, setDirty] = useState(false);
+  /**
+   * Edits are counted, and a save records the count it carried.
+   *
+   * A single "dirty" flag lost edits. A save still travelling came back, cleared the flag,
+   * and that cancelled the timer for an edit made in the meantime: the drawer showed the
+   * new date while the server kept the old one. Now a save marks as saved only what it
+   * actually sent, and anything newer still goes.
+   */
+  const [edits, setEdits] = useState(0);
+  const [savedEdits, setSavedEdits] = useState(0);
+  const dirty = edits !== savedEdits;
+  /**
+   * Whether the date or time has been touched since the post was opened.
+   *
+   * The autosave never sent the time, so moving a post to Thursday saved nothing, and the
+   * drawer showed Thursday while the post stayed on Tuesday. It is sent only once touched,
+   * because the fields default to today at 09:00 for a post with no date, and sending that
+   * on every keystroke would quietly give an undated draft a date.
+   */
+  const [whenTouched, setWhenTouched] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['social-post', postId],
     queryFn: () => apiGet<SocialPostDetail>(`/social/posts/${postId}`),
+    retry: false,
+  });
+  // A post that cannot be loaded (deleted, another workspace's, or a link from an old
+  // email) used to leave the drawer on "Loading" forever.
+  useEffect(() => {
+    // Only when it never loaded. A background refetch failing on a post already open must
+    // not close the drawer on somebody mid-sentence.
+    if (!error || data) return;
+    notify(`Could not open that post. ${error instanceof Error ? error.message : ''}`.trim(), 'error');
+    onClose();
+  }, [error, data]);
+
+  // To show which account each network will actually post to.
+  const accounts = useQuery({
+    queryKey: ['social-accounts'],
+    queryFn: () => apiGet<SocialAccountsResponse>('/social/accounts'),
   });
 
   useEffect(() => {
@@ -67,22 +102,68 @@ export function SocialComposer({ postId, onClose }: {
   };
 
   /**
-   * Say so when a change has just killed the client's link.
+   * Say so when a change has just withdrawn the client's link, or taken the post off
+   * the schedule.
    *
-   * The server withdraws a sign-off whenever the words or the pictures change, which
-   * is right, but it happens on an autosave 700ms after somebody fixes a typo. Without
-   * a word here the only sign is a status pill quietly going back to draft, and the
-   * client is left holding a link that no longer opens.
+   * Both happen on an autosave 700ms after somebody fixes a typo. Without a word here the
+   * only sign is a status pill quietly changing, the client is left holding a link that no
+   * longer opens, and a post that was going out on Tuesday simply does not.
    */
-  const sayIfWithdrawn = (r: unknown) => {
-    if ((r as { approvalWithdrawn?: boolean } | null)?.approvalWithdrawn) {
+  const sayWhatChanged = (r: unknown) => {
+    const x = (r ?? {}) as { approvalWithdrawn?: boolean; unscheduled?: boolean };
+    if (x.approvalWithdrawn && x.unscheduled) {
+      notify('That changed what the client approved, so the sign-off and the link were withdrawn and the post came off the schedule. Send it round again, then schedule it.', 'ok');
+    } else if (x.approvalWithdrawn) {
       notify('That changed what the client approved, so the sign-off and the link were withdrawn. Send it round again.', 'ok');
+    } else if (x.unscheduled) {
+      notify('That changed what goes out, so the post came off the schedule. Press Schedule when it is ready.', 'ok');
     }
   };
 
+  /**
+   * The time the fields describe, or null while they do not describe one yet.
+   *
+   * A browser reports a date with one part deleted as empty, and a year being typed as
+   * 0002. Sent as they are, the first cleared the post's date and the second dated it two
+   * thousand years ago.
+   */
+  const whenOf = (d: NonNullable<typeof draft>): string | null => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d.date) || !/^\d{2}:\d{2}/.test(d.time)) return null;
+    if (Number(d.date.slice(0, 4)) < 2000) return null;
+    return localIsoWithOffset(d.date, d.time);
+  };
+  /**
+   * A scheduled post given a time that has already passed.
+   *
+   * The publisher takes anything scheduled at or before now. Changing the date before the
+   * time passes through such moments (tomorrow at eight, moved to tonight at eight, is
+   * briefly this morning at eight), so that time is not sent, the post keeps its old one,
+   * and the drawer says why. The server refuses it too.
+   */
+  const passedWhileScheduled = (d: NonNullable<typeof draft>) => {
+    const when = whenOf(d);
+    return data?.post.status === 'scheduled' && when !== null && new Date(when).getTime() <= Date.now();
+  };
+  const bodyOf = (d: NonNullable<typeof draft>, withWhen: boolean): Record<string, unknown> => {
+    const when = withWhen && !passedWhileScheduled(d) ? whenOf(d) : null;
+    return {
+      title: d.title, caption: d.caption, firstComment: d.firstComment || null,
+      postType: d.postType, deliveryMode: d.deliveryMode,
+      mediaAsk: d.mediaAsk || null, networks: d.networks,
+      ...(when ? { scheduledAt: when } : {}),
+    };
+  };
+
+  // One place reacts to a finished save. The autosave used to add a second handler, so
+  // every notice showed twice.
   const save = useMutation({
-    mutationFn: (body: Record<string, unknown>) => apiPatch(`/social/posts/${postId}`, body),
-    onSuccess: (r) => { setDirty(false); invalidate(); sayIfWithdrawn(r); },
+    mutationFn: (v: { body: Record<string, unknown>; seq: number }) => apiPatch(`/social/posts/${postId}`, v.body),
+    onSuccess: (r, v) => {
+      setSavedEdits((s) => Math.max(s, v.seq));
+      invalidate();
+      check.mutate();
+      sayWhatChanged(r);
+    },
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
@@ -122,13 +203,14 @@ export function SocialComposer({ postId, onClose }: {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Upload failed.');
       return res.json();
     },
-    onSuccess: (r) => { invalidate(); check.mutate(); sayIfWithdrawn(r); },
+    onSuccess: (r) => { invalidate(); check.mutate(); sayWhatChanged(r); },
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
   const removeMedia = useMutation({
     mutationFn: (mediaId: number) => apiDelete(`/social/posts/${postId}/media/${mediaId}`),
-    onSuccess: (r) => { invalidate(); check.mutate(); sayIfWithdrawn(r); },
+    onSuccess: (r) => { invalidate(); check.mutate(); sayWhatChanged(r); },
+    onError: (e: Error) => notify(e.message, 'error'),
   });
 
   // Re-check shortly after typing stops, so issues track what is actually written
@@ -136,14 +218,10 @@ export function SocialComposer({ postId, onClose }: {
   useEffect(() => {
     if (!dirty || !draft) return;
     const t = setTimeout(() => {
-      save.mutate({
-        title: draft.title, caption: draft.caption, firstComment: draft.firstComment || null,
-        postType: draft.postType, deliveryMode: draft.deliveryMode,
-        mediaAsk: draft.mediaAsk || null, networks: draft.networks,
-      }, { onSuccess: (r) => { setDirty(false); invalidate(); check.mutate(); sayIfWithdrawn(r); } });
+      save.mutate({ body: bodyOf(draft, whenTouched), seq: edits });
     }, 700);
     return () => clearTimeout(t);
-  }, [dirty, draft]);
+  }, [dirty, edits, draft, whenTouched]);
 
   const issues = check.data?.issues ?? [];
   const forField = (field: SocialIssue['field']) => issues.filter((i) => i.field === field);
@@ -152,7 +230,7 @@ export function SocialComposer({ postId, onClose }: {
   const media = data?.media ?? [];
   const set = <K extends keyof NonNullable<typeof draft>>(k: K, v: NonNullable<typeof draft>[K]) => {
     setDraft((d) => (d ? { ...d, [k]: v } : d));
-    setDirty(true);
+    setEdits((n) => n + 1);
   };
 
   const copyCaption = async () => {
@@ -203,6 +281,8 @@ export function SocialComposer({ postId, onClose }: {
                   );
                 })}
               </div>
+              <WhereItGoes networks={draft.networks} targets={data.targets} businessId={post.businessId}
+                accounts={accounts.data?.accounts ?? []} />
               <FieldIssues issues={forField('account')} />
             </div>
 
@@ -285,12 +365,17 @@ export function SocialComposer({ postId, onClose }: {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">Date</label>
-                <input type="date" value={draft.date} onChange={(e) => set('date', e.target.value)} className={fieldClass} />
+                <input type="date" value={draft.date} onChange={(e) => { setWhenTouched(true); set('date', e.target.value); }} className={fieldClass} />
               </div>
               <div>
                 <label className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">Time</label>
-                <input type="time" value={draft.time} onChange={(e) => set('time', e.target.value)} className={fieldClass} />
+                <input type="time" value={draft.time} onChange={(e) => { setWhenTouched(true); set('time', e.target.value); }} className={fieldClass} />
               </div>
+              {whenTouched && passedWhileScheduled(draft) && (
+                <p className="text-[11px] text-amber-300 sm:col-span-2">
+                  That time has already passed. The post keeps its old time until you pick one still to come.
+                </p>
+              )}
               <div>
                 <label className="mb-1.5 block text-[11px] uppercase tracking-wide text-slate-500">Type</label>
                 <select value={draft.postType} onChange={(e) => set('postType', e.target.value as never)} className={fieldClass}>
@@ -356,12 +441,9 @@ export function SocialComposer({ postId, onClose }: {
               {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy caption'}
             </button>
             <button
-              onClick={() => save.mutate({
-                title: draft.title, caption: draft.caption, firstComment: draft.firstComment || null,
-                postType: draft.postType, deliveryMode: draft.deliveryMode,
-                mediaAsk: draft.mediaAsk || null, networks: draft.networks,
-                scheduledAt: localIsoWithOffset(draft.date, draft.time),
-              })}
+              // Same rule as the autosave: an undated draft is not given today at nine just
+              // because Save was pressed.
+              onClick={() => save.mutate({ body: bodyOf(draft, whenTouched || !!post.scheduledAt), seq: edits })}
               disabled={save.isPending}
               className={btnSecondary + ' flex items-center gap-1.5'}>
               <Save size={14} /> Save
@@ -396,6 +478,43 @@ export function SocialComposer({ postId, onClose }: {
         </div>
       )}
     </Modal>
+  );
+}
+
+/**
+ * Which account each network will post to, when that is worth saying.
+ *
+ * Silent when it is the obvious answer. Spoken when it is not: the account a post was
+ * set to has since disconnected, or several accounts are connected on one network and
+ * Klippy will not guess between them, so the post will come to a person to put up.
+ */
+function WhereItGoes({ networks, targets, accounts, businessId }: {
+  networks: SocialNetwork[];
+  targets: SocialTarget[];
+  accounts: SocialAccountsResponse['accounts'];
+  businessId: number;
+}) {
+  const lines = networks.flatMap((n) => {
+    const label = NETWORK_META[n].label;
+    const target = targets.find((t) => t.network === n);
+    const bound = target?.socialAccountId != null ? accounts.find((a) => a.id === target.socialAccountId) : undefined;
+    if (bound) {
+      return bound.status === 'connected'
+        ? [{ key: n, warn: false, text: `${label}: posts to ${bound.displayName}` }]
+        : [{ key: n, warn: true, text: `${label}: set to ${bound.displayName}, which needs connecting again under Accounts. Until then it comes to you to post by hand.` }];
+    }
+    const connected = accounts.filter((a) => a.businessId === businessId && a.network === n && a.status === 'connected');
+    return connected.length > 1
+      ? [{ key: n, warn: true, text: `${label}: ${connected.length} accounts are connected and Klippy will not guess which one this is for, so it comes to you to post by hand.` }]
+      : [];
+  });
+  if (!lines.length) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {lines.map((l) => (
+        <p key={l.key} className={`text-[11px] ${l.warn ? 'text-amber-300' : 'text-slate-500'}`}>{l.text}</p>
+      ))}
+    </div>
   );
 }
 

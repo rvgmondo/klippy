@@ -257,9 +257,14 @@ export async function socialConnectRoutes(app: FastifyInstance) {
   /**
    * Disconnect.
    *
-   * The account row goes and its posts DO NOT. A target's link to the account is set
-   * null on delete, so the record that something published last month, with its
-   * permalink, survives unhooking the account it went out through.
+   * The TOKENS go; the row stays, marked revoked. Deleting it used to set every post's
+   * link to it to null, and a post with no account is filled in with whichever one is
+   * connected on its next save. With two Pages connected, disconnecting one silently moved
+   * all of its planned posts to the other, which may be another client's.
+   *
+   * Kept, the posts stay pointed at the Page they were written for and come to a person
+   * with that reason. Connecting the same Page again updates this row, and they pick up
+   * where they left off. Published posts keep their permalinks either way.
    */
   app.delete('/api/v1/social/accounts/:id', { preHandler: app.requireAuth }, async (req, reply) => {
     const { accountId } = authOf(req);
@@ -271,7 +276,10 @@ export async function socialConnectRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: 'Not connected.' });
     if (!(await assertBusinessAccess(req, reply, row.businessId, 'admin'))) return;
 
-    await db.delete(socialAccounts).where(tenantWhere(socialAccounts, accountId, eq(socialAccounts.id, id)));
+    await db.update(socialAccounts).set({
+      status: 'revoked', accessTokenEnc: null, refreshTokenEnc: null, tokenExpiresAt: null,
+      lastError: 'Disconnected in Klippy.', lastCheckedAt: new Date(),
+    }).where(tenantWhere(socialAccounts, accountId, eq(socialAccounts.id, id)));
     return {
       ok: true,
       message: `${NETWORK_LABEL[row.network as Network]} disconnected. Posts that already went out keep their links.`,

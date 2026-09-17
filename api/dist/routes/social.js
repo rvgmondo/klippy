@@ -52,7 +52,16 @@ const APPROVABLE = new Set(['draft', 'needs_media', 'awaiting_approval', 'approv
  */
 const approvalUrl = (token) => `${appUrl()}/?approve=${token}`;
 /**
- * Throw away a sign-off, because what was signed off no longer exists.
+ * Whether a client has signed this post off, as far as its state says.
+ *
+ * NOT `status === 'approved'` on its own. Only the client's answer sets approved WITH an
+ * approvedAt. An edit to a scheduled post used to set 'approved' too, with nobody's
+ * approval behind it, and treating that as a sign-off later logged "changed after it
+ * was signed off" about a post no client had ever seen.
+ */
+const isSignedOff = (post) => !!post.approvedAt || post.status === 'awaiting_approval';
+/**
+ * What goes out has just changed: the words, the networks or the pictures.
  *
  * AN APPROVAL COVERS THE PICTURES AS MUCH AS THE WORDS. The client's page leads with
  * the images and the caption sits under them, so swapping a photo after sign-off
@@ -65,21 +74,63 @@ const approvalUrl = (token) => `${appUrl()}/?approve=${token}`;
  * behind after a staff edit makes their own page tell them they asked for changes they
  * never wrote, and refuse their answer. One meaning per state.
  *
- * Returns whether anything was actually withdrawn, so a route can say so.
+ * A SCHEDULED post comes off the schedule, which is what an edit to one has always
+ * done. What is new is that it says so, lands in draft rather than a made-up 'approved',
+ * and gets checked against its networks before it can go back on. Whether an edited
+ * post should instead stay scheduled is an open product decision; until it is made,
+ * nothing unchecked is published.
+ *
+ * Returns the columns to set (null when nothing needs to change) and what happened, so
+ * the PATCH route can fold it into its own guarded update and a swapped photo ends in
+ * exactly the same state as an edited caption.
  */
-async function withdrawApproval(accountId, post) {
-    const signedOff = !!post.approvedAt || post.status === 'approved' || post.status === 'awaiting_approval';
-    if (!signedOff)
-        return false;
-    await db.update(socialPosts).set({
-        status: 'draft', approvedAt: null, approvedByName: null, approvalToken: null,
-    }).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, post.id)));
-    await db.insert(socialPublishLog).values(withTenant(accountId, {
-        postId: post.id, level: 'warn',
-        message: 'The post changed after it was signed off, so the approval and the link were withdrawn. Send it round again.',
-    }));
-    return true;
+function afterContentChange(post) {
+    const approvalWithdrawn = isSignedOff(post);
+    const unscheduled = post.status === 'scheduled';
+    const unearnedApproval = post.status === 'approved' && !post.approvedAt;
+    if (!approvalWithdrawn && !unscheduled && !unearnedApproval) {
+        return { set: null, approvalWithdrawn: false, unscheduled: false };
+    }
+    return {
+        set: { status: 'draft', approvedAt: null, approvedByName: null, approvalToken: null, lockedAt: null, lockToken: null },
+        approvalWithdrawn, unscheduled,
+    };
 }
+/** Record in the post's own history what the change did. */
+async function logContentChange(accountId, postId, r) {
+    const message = r.approvalWithdrawn && r.unscheduled
+        ? 'The post changed after it was signed off, so the approval and the link were withdrawn and it came off the schedule. Send it round again, then schedule it.'
+        : r.approvalWithdrawn
+            ? 'The post changed after it was signed off, so the approval and the link were withdrawn. Send it round again.'
+            : r.unscheduled
+                ? 'The post changed while it was scheduled, so it came off the schedule. Schedule it again when it is ready.'
+                : null;
+    if (!message)
+        return;
+    await db.insert(socialPublishLog).values(withTenant(accountId, {
+        postId, level: 'warn', message,
+    }));
+}
+/**
+ * For the media routes: apply afterContentChange to the stored post, BEFORE the media
+ * itself is changed.
+ *
+ * Guarded on the status that was read. `lost` means the post moved underneath, most
+ * likely because the publisher claimed it, and the caller must then refuse without
+ * touching the media: a photo added after the claim would go out unchecked.
+ */
+async function contentChanged(accountId, post) {
+    const r = afterContentChange(post);
+    if (!r.set)
+        return { approvalWithdrawn: false, unscheduled: false, lost: false };
+    const res = await db.update(socialPosts).set(r.set)
+        .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, post.id), eq(socialPosts.status, post.status)));
+    if (!res[0].affectedRows)
+        return { approvalWithdrawn: false, unscheduled: false, lost: true };
+    await logContentChange(accountId, post.id, r);
+    return { approvalWithdrawn: r.approvalWithdrawn, unscheduled: r.unscheduled, lost: false };
+}
+const MOVED = 'This post changed while you were working on it, possibly because it is going out now. Close it and open it again.';
 async function timezoneOf(accountId) {
     const [a] = await db.select({ tz: accounts.timezone }).from(accounts)
         .where(eq(accounts.id, accountId)).limit(1);
@@ -125,10 +176,29 @@ async function targetsOf(accountId, postIds) {
  * Rows that already published are LEFT ALONE even if the network is dropped from the
  * list. A permalink is a record that something really went out, and rewriting the
  * target list must not be able to erase it.
+ *
+ * WHICH ACCOUNT A TARGET GOES TO IS SET ONCE, AND NEVER GUESSED.
+ *
+ * Every save used to re-pick the account for every target from an unordered list of the
+ * business's connected accounts, last one wins. The connect screen ticks every Page a
+ * Meta login returns, so a business can easily have two Pages on one network, and one
+ * idle autosave moved a post to the other one, possibly another client's, and said
+ * nothing. Now:
+ *
+ *  - a target already bound to an account keeps it, even if that account has since
+ *    disconnected. The publisher then sends it to a person with the reason, instead of
+ *    posting it somewhere nobody chose.
+ *  - an unbound target is bound only when exactly ONE account is connected on that
+ *    network. With several there is nowhere yet to say which one is meant, so it stays
+ *    unbound, goes to a person, and the publisher says why.
+ *
+ * `bindings` carries accounts over from another post (a duplicate), so a copy goes to
+ * the same Page as the original rather than being picked afresh.
  */
-async function setTargets(accountId, postId, businessId, networks) {
+async function setTargets(accountId, postId, businessId, networks, bindings) {
     const existing = await db.select({
         id: socialPostTargets.id, network: socialPostTargets.network, status: socialPostTargets.status,
+        socialAccountId: socialPostTargets.socialAccountId,
     }).from(socialPostTargets)
         .where(tenantWhere(socialPostTargets, accountId, eq(socialPostTargets.postId, postId)));
     const keep = new Set(networks);
@@ -137,20 +207,27 @@ async function setTargets(accountId, postId, businessId, networks) {
     if (removable.length) {
         await db.delete(socialPostTargets).where(tenantWhere(socialPostTargets, accountId, inArray(socialPostTargets.id, removable.map((r) => r.id))));
     }
-    const have = new Set(existing.map((e) => e.network));
     const connected = await db.select({ id: socialAccounts.id, network: socialAccounts.network })
         .from(socialAccounts)
         .where(tenantWhere(socialAccounts, accountId, eq(socialAccounts.businessId, businessId), eq(socialAccounts.status, 'connected')));
-    const accountFor = new Map(connected.map((c) => [c.network, c.id]));
+    const onlyAccount = (n) => {
+        const list = connected.filter((c) => c.network === n);
+        return list.length === 1 ? list[0].id : null;
+    };
     for (const n of networks) {
-        if (have.has(n)) {
-            // Keep the row, but pick up an account that has been connected since.
-            await db.update(socialPostTargets).set({ socialAccountId: accountFor.get(n) ?? null })
-                .where(tenantWhere(socialPostTargets, accountId, eq(socialPostTargets.postId, postId), eq(socialPostTargets.network, n)));
+        const row = existing.find((e) => e.network === n);
+        if (row) {
+            // Filled in only when it was never set: an account connected since the post was
+            // written, and the only one on that network.
+            const only = row.socialAccountId == null ? onlyAccount(n) : null;
+            if (only != null) {
+                await db.update(socialPostTargets).set({ socialAccountId: only })
+                    .where(tenantWhere(socialPostTargets, accountId, eq(socialPostTargets.id, row.id)));
+            }
             continue;
         }
         await db.insert(socialPostTargets).values(withTenant(accountId, {
-            postId, network: n, socialAccountId: accountFor.get(n) ?? null,
+            postId, network: n, socialAccountId: bindings?.get(n) ?? onlyAccount(n),
         }));
     }
 }
@@ -174,11 +251,14 @@ export async function socialRoutes(app) {
             displayName: socialAccounts.displayName, avatarUrl: socialAccounts.avatarUrl,
             status: socialAccounts.status, lastError: socialAccounts.lastError,
             tokenExpiresAt: socialAccounts.tokenExpiresAt, lastCheckedAt: socialAccounts.lastCheckedAt,
+            // Never the token itself. Disconnecting keeps the row with its tokens wiped, so posts
+            // stay pointed at the Page they were for; the screen needs to tell those rows apart.
+            disconnected: sql `${socialAccounts.accessTokenEnc} is null`,
         }).from(socialAccounts)
             .where(tenantWhere(socialAccounts, accountId, await businessScope(req, socialAccounts.businessId)))
             .orderBy(asc(socialAccounts.network));
         return {
-            accounts: rows,
+            accounts: rows.map((r) => ({ ...r, disconnected: !!Number(r.disconnected) })),
             serverReady: socialTokensAvailable(),
             networks: await Promise.all(NETWORKS.map(async (n) => {
                 const connected = rows.some((r) => r.network === n && r.status === 'connected');
@@ -313,68 +393,116 @@ export async function socialRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
-        const [post] = await db.select().from(socialPosts)
-            .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
-        if (!post)
-            return reply.code(404).send({ error: 'Post not found.' });
-        if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
-            return;
-        // A post the publisher is holding must not change under it, and one already out
-        // cannot be edited back: the words are on somebody's timeline now.
-        if (!EDITABLE.has(post.status)) {
-            return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')} and cannot be edited.` });
-        }
-        const patch = {};
-        for (const k of ['title', 'caption', 'firstComment', 'postType', 'mediaAsk', 'mediaAskDue', 'deliveryMode', 'timezone', 'folderId']) {
-            if (d[k] !== undefined)
-                patch[k] = d[k];
-        }
-        if (d.scheduledAt !== undefined)
-            patch.scheduledAt = d.scheduledAt ? new Date(d.scheduledAt) : null;
-        // Editing a scheduled post drops it back to approved: the thing that was approved
-        // is not the thing that would now go out.
-        if (post.status === 'scheduled' && Object.keys(patch).length)
-            patch.status = 'approved';
         /**
-         * An approval is for the words the client actually read.
+         * Read, decide, and write guarded on the status that was read. On a lost race, read
+         * and decide again, once.
          *
-         * So changing any of those words throws the sign-off away and the post goes back
-         * to draft, to be sent round again. Without this, a client approves one caption,
-         * somebody edits it afterwards, and a post nobody agreed to goes out carrying
-         * their name on the approval.
-         *
-         * The internal title, the media ask, the delivery mode and the time are all left
-         * alone on purpose. None of them changes what is published, and moving a post an
-         * hour later is ordinary work that should not need chasing a client again.
+         * The guard is for the publisher: without it an edit landing just after it claimed
+         * the post could rewrite the caption of a post going out. But the composer's autosave
+         * and its Save button can also overlap, and then the first save rightly moves the
+         * post (scheduled to draft) and the second one's guard fails. Refusing that threw the
+         * second edit away. Deciding again against the fresh row saves it, while a real claim
+         * still fails, because a post being published is not editable.
          */
-        const CLIENT_VISIBLE = ['caption', 'firstComment', 'postType'];
-        // Compared with the empty string folded into null, because the composer autosaves
-        // every 700ms and sends '' for a first comment that was never filled in. Treating
-        // that as a change would throw a real approval away on an idle keystroke.
-        const same = (a, b) => (a ?? '') === (b ?? '');
-        const changedForClient = CLIENT_VISIBLE.some((k) => d[k] !== undefined && !same(d[k], post[k]))
-            // Sorted both sides: picking the same two networks in a different order is not
-            // a change, and treating it as one would throw away a real approval.
-            || (!!d.networks && [...d.networks].sort().join() !== (await targetsOf(accountId, [id])).map((t) => t.network).sort().join());
-        let withdrawn = false;
-        if (changedForClient) {
-            // Done through the shared helper so an edit and a swapped photo end in exactly
-            // the same state, including the token going with it.
-            withdrawn = await withdrawApproval(accountId, post);
-            if (withdrawn) {
-                patch.status = 'draft';
-                patch.approvedAt = null;
-                patch.approvedByName = null;
-                patch.approvalToken = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const [post] = await db.select().from(socialPosts)
+                .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
+            if (!post)
+                return reply.code(404).send({ error: 'Post not found.' });
+            if (attempt === 0 && !(await assertBusinessAccess(req, reply, post.businessId, 'member')))
+                return;
+            // A post the publisher is holding must not change under it, and one already out
+            // cannot be edited back: the words are on somebody's timeline now.
+            if (!EDITABLE.has(post.status)) {
+                return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')} and cannot be edited.` });
             }
+            /**
+             * Only what actually CHANGED goes into the update.
+             *
+             * The composer autosaves the whole form 700ms after any keystroke, so most fields in
+             * any request are the values already stored. Every one of them used to count as an
+             * edit, and any edit to a scheduled post took it off the schedule: moving it to
+             * Thursday, renaming it, or changing nothing at all. The publisher only takes posts
+             * that are scheduled, so the post silently never went out.
+             *
+             * Compared with the empty string folded into null, because the composer sends '' for
+             * a first comment that was never filled in.
+             */
+            const same = (a, b) => (a ?? '') === (b ?? '');
+            const patch = {};
+            for (const k of ['title', 'caption', 'firstComment', 'postType', 'mediaAsk', 'mediaAskDue', 'deliveryMode', 'timezone', 'folderId']) {
+                if (d[k] !== undefined && !same(d[k], post[k]))
+                    patch[k] = d[k];
+            }
+            if (d.scheduledAt !== undefined) {
+                const when = d.scheduledAt ? new Date(d.scheduledAt) : null;
+                if ((when?.getTime() ?? null) !== (post.scheduledAt?.getTime() ?? null))
+                    patch.scheduledAt = when;
+            }
+            /**
+             * What goes out: the words the client reads, and where they go.
+             *
+             * The internal title, the media ask, the delivery mode, the folder and the time are
+             * left out on purpose. None of them changes what is published, and moving a post an
+             * hour later is ordinary work that should neither unschedule it nor need chasing a
+             * client again. The publisher reads the time when it picks the post up, so a moved
+             * post goes out at the new time.
+             */
+            const CLIENT_VISIBLE = ['caption', 'firstComment', 'postType'];
+            const changedForClient = CLIENT_VISIBLE.some((k) => k in patch)
+                // Sorted both sides: picking the same two networks in a different order is not
+                // a change, and treating it as one would throw away a real approval.
+                || (!!d.networks && [...d.networks].sort().join() !== (await targetsOf(accountId, [id])).map((t) => t.network).sort().join());
+            let approvalWithdrawn = false;
+            let unscheduled = false;
+            if (changedForClient) {
+                const r = afterContentChange(post);
+                if (r.set)
+                    Object.assign(patch, r.set);
+                approvalWithdrawn = r.approvalWithdrawn;
+                unscheduled = r.unscheduled;
+            }
+            else if (post.status === 'scheduled' && 'scheduledAt' in patch && patch.scheduledAt === null) {
+                // A scheduled post with no time would vanish: the publisher only takes posts that
+                // are due, the calendar only shows posts with a date, and Needs you does not list
+                // scheduled ones. Clearing the time takes it off the schedule, and says so. What
+                // the client saw is unchanged, so their approval and their link both stand, the
+                // same as unscheduling it by hand.
+                Object.assign(patch, { status: post.approvedAt ? 'approved' : 'draft', lockedAt: null, lockToken: null });
+                unscheduled = true;
+            }
+            /**
+             * A post that STAYS scheduled needs a time still to come.
+             *
+             * The publisher takes anything scheduled at or before now, so a time in the past is
+             * "publish in the next minute". The composer saves the date and the time as they are
+             * typed, and changing the date before the time passes through such a moment: a post
+             * set for tomorrow at eight, moved to tonight at eight by changing the date first,
+             * was briefly this morning at eight, and went out.
+             */
+            const staysScheduled = post.status === 'scheduled' && patch.status === undefined;
+            if (staysScheduled && patch.scheduledAt instanceof Date && patch.scheduledAt.getTime() <= Date.now()) {
+                return reply.code(400).send({
+                    error: 'That time has already passed. A scheduled post keeps its old time until you pick one still to come.',
+                });
+            }
+            if (Object.keys(patch).length) {
+                const res = await db.update(socialPosts).set(patch)
+                    .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id), eq(socialPosts.status, post.status)));
+                // Matched rows, not changed ones (the pool reports found rows), so zero means the
+                // status moved since the read.
+                if (!res[0].affectedRows) {
+                    if (attempt === 0)
+                        continue;
+                    return reply.code(409).send({ error: MOVED });
+                }
+                await logContentChange(accountId, id, { approvalWithdrawn, unscheduled });
+            }
+            if (d.networks)
+                await setTargets(accountId, id, post.businessId, d.networks);
+            return { ok: true, approvalWithdrawn, unscheduled };
         }
-        if (Object.keys(patch).length) {
-            await db.update(socialPosts).set(patch)
-                .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
-        }
-        if (d.networks)
-            await setTargets(accountId, id, post.businessId, d.networks);
-        return { ok: true, approvalWithdrawn: withdrawn };
+        return reply.code(409).send({ error: MOVED });
     });
     /**
      * Delete or cancel.
@@ -428,7 +556,9 @@ export async function socialRoutes(app) {
         const newId = Number(ins[0].insertId);
         const targets = await targetsOf(accountId, [id]);
         if (targets.length) {
-            await setTargets(accountId, newId, post.businessId, targets.map((t) => t.network));
+            // The copy goes where the original goes. Picked afresh, it could land on a
+            // different Page from the one the original was set to.
+            await setTargets(accountId, newId, post.businessId, targets.map((t) => t.network), new Map(targets.map((t) => [t.network, t.socialAccountId])));
         }
         // Media rows point at storage nodes, so a copy shares the same files. New tokens,
         // because a token identifies one row and revoking one copy must not break another.
@@ -449,13 +579,18 @@ export async function socialRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        // The whole row: withdrawApproval below needs the sign-off fields, not just the status.
+        // The whole row: contentChanged below needs the sign-off fields, not just the status.
         const [post] = await db.select().from(socialPosts)
             .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
         if (!post)
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
             return;
+        // Same rule as editing the words. A photo added to a post that already went out used
+        // to knock it back to draft, erasing that it was published.
+        if (!EDITABLE.has(post.status)) {
+            return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')} and its photos cannot be changed.` });
+        }
         const part = await req.file({ limits: { fileSize: MAX_STORAGE_BYTES } });
         if (!part)
             return reply.code(400).send({ error: 'No file uploaded.' });
@@ -468,6 +603,15 @@ export async function socialRoutes(app) {
         if (part.file.truncated) {
             await storage().delete(key);
             return reply.code(400).send({ error: 'That file is larger than the 50MB limit.' });
+        }
+        // A picture the client never saw must not go out under their sign-off, and a
+        // scheduled post whose pictures changed has not been checked against its networks.
+        // Done before the photo is attached: if the publisher has claimed the post since it
+        // was read, the photo is not added at all, rather than going out unchecked.
+        const changed = await contentChanged(accountId, post);
+        if (changed.lost) {
+            await storage().delete(key);
+            return reply.code(409).send({ error: MOVED });
         }
         const node = await db.insert(storageNodes).values(withTenant(accountId, {
             parentId: null, kind: 'file', name: part.filename.slice(0, 255),
@@ -495,12 +639,11 @@ export async function socialRoutes(app) {
         // Media arriving is what un-blocks a post that was waiting for it.
         if (post.status === 'needs_media') {
             await db.update(socialPosts).set({ status: 'draft' })
-                .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
+                .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id), eq(socialPosts.status, 'needs_media')));
         }
-        // A picture the client never saw must not go out under their sign-off.
-        const withdrawn = await withdrawApproval(accountId, post);
         return reply.code(201).send({
-            id: Number(ins[0].insertId), media: await mediaOf(accountId, id), approvalWithdrawn: withdrawn,
+            id: Number(ins[0].insertId), media: await mediaOf(accountId, id),
+            approvalWithdrawn: changed.approvalWithdrawn, unscheduled: changed.unscheduled,
         });
     });
     app.delete('/api/v1/social/posts/:id/media/:mediaId', async (req, reply) => {
@@ -515,11 +658,24 @@ export async function socialRoutes(app) {
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
             return;
+        if (!EDITABLE.has(post.status)) {
+            return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')} and its photos cannot be changed.` });
+        }
+        // Nothing to remove is not a change, and must not unschedule anything.
+        const [photo] = await db.select({ id: socialPostMedia.id }).from(socialPostMedia)
+            .where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.id, p.data.mediaId), eq(socialPostMedia.postId, p.data.id))).limit(1);
+        if (!photo)
+            return reply.code(404).send({ error: 'That photo is not on this post.' });
+        const changed = await contentChanged(accountId, post);
+        if (changed.lost)
+            return reply.code(409).send({ error: MOVED });
         // The link row goes; the file stays. It may be in the client's Files tree, and
         // removing a photo from one post must never delete it from under another.
         await db.delete(socialPostMedia).where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.id, p.data.mediaId), eq(socialPostMedia.postId, p.data.id)));
-        const withdrawn = await withdrawApproval(accountId, post);
-        return { ok: true, media: await mediaOf(accountId, p.data.id), approvalWithdrawn: withdrawn };
+        return {
+            ok: true, media: await mediaOf(accountId, p.data.id),
+            approvalWithdrawn: changed.approvalWithdrawn, unscheduled: changed.unscheduled,
+        };
     });
     app.post('/api/v1/social/posts/:id/reorder-media', async (req, reply) => {
         const { accountId } = authOf(req);
@@ -535,16 +691,24 @@ export async function socialRoutes(app) {
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
             return;
+        if (!EDITABLE.has(post.status)) {
+            return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')} and its photos cannot be changed.` });
+        }
         // Order matters on Instagram: a carousel is cropped to the aspect ratio of its
         // FIRST image, so which one leads changes how every other one looks. Which is
         // exactly why a reorder throws the sign-off away too.
+        const changed = await contentChanged(accountId, post);
+        if (changed.lost)
+            return reply.code(409).send({ error: MOVED });
         let position = 0;
         for (const mediaId of parsed.data.order) {
             await db.update(socialPostMedia).set({ position: position++ })
                 .where(tenantWhere(socialPostMedia, accountId, eq(socialPostMedia.id, mediaId), eq(socialPostMedia.postId, id)));
         }
-        const withdrawn = await withdrawApproval(accountId, post);
-        return { ok: true, media: await mediaOf(accountId, id), approvalWithdrawn: withdrawn };
+        return {
+            ok: true, media: await mediaOf(accountId, id),
+            approvalWithdrawn: changed.approvalWithdrawn, unscheduled: changed.unscheduled,
+        };
     });
     // ---- Scheduling ----------------------------------------------------------------
     /**
@@ -701,8 +865,9 @@ export async function socialRoutes(app) {
         const id = intId(req);
         if (!id)
             return reply.code(400).send({ error: 'Bad id.' });
-        const [post] = await db.select({ businessId: socialPosts.businessId, status: socialPosts.status })
-            .from(socialPosts).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
+        const [post] = await db.select({
+            businessId: socialPosts.businessId, status: socialPosts.status, approvedAt: socialPosts.approvedAt,
+        }).from(socialPosts).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id))).limit(1);
         if (!post)
             return reply.code(404).send({ error: 'Post not found.' });
         if (!(await assertBusinessAccess(req, reply, post.businessId, 'member')))
@@ -710,8 +875,18 @@ export async function socialRoutes(app) {
         if (post.status === 'publishing') {
             return reply.code(409).send({ error: 'This is going out right now and cannot be pulled back.' });
         }
-        await db.update(socialPosts).set({ status: 'approved', lockedAt: null, lockToken: null })
-            .where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id)));
+        // Only a scheduled post can come off the schedule. This used to rewrite a published,
+        // cancelled or failed post to approved as well, erasing what had happened to it.
+        if (post.status !== 'scheduled') {
+            return reply.code(409).send({ error: `This post is ${post.status.replace('_', ' ')}, not scheduled.` });
+        }
+        // Approved only if a client actually approved it.
+        const res = await db.update(socialPosts).set({
+            status: post.approvedAt ? 'approved' : 'draft', lockedAt: null, lockToken: null,
+        }).where(tenantWhere(socialPosts, accountId, eq(socialPosts.id, id), eq(socialPosts.status, 'scheduled')));
+        if (!res[0].affectedRows) {
+            return reply.code(409).send({ error: 'This is going out right now and cannot be pulled back.' });
+        }
         return { ok: true };
     });
     /**

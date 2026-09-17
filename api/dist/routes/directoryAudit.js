@@ -1,6 +1,6 @@
-import { isNotNull, isNull } from 'drizzle-orm';
+import { eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders, documents, subscriptions, portalUsers, expenses, deals, contacts, calendarEvents, focusItems, hostingAccounts } from '../db/schema.js';
+import { folders, documents, subscriptions, portalUsers, expenses, deals, contacts, calendarEvents, focusItems, hostingAccounts, socialAccounts, socialPosts, socialPostTargets } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 /**
@@ -178,6 +178,39 @@ export async function directoryAuditRoutes(app) {
             ...tag('client or folder', nbFolders), ...tag('meeting', nbEvents),
             ...tag('focus item', nbFocus), ...tag('hosting account', nbHosting),
         ];
+        /**
+         * (h) Social posts on a business with more than one account connected on one network.
+         *
+         * Until 2026-09 every save re-picked which account a post went to, last one wins, so a
+         * post in this state may have been moved from the Page it was written for to another,
+         * possibly another client's. Saves no longer move them, but nothing can tell a moved
+         * post from one that was right all along. Listed for a person to check, never fixed.
+         */
+        const connectedAccounts = await db.select({
+            id: socialAccounts.id, businessId: socialAccounts.businessId, network: socialAccounts.network,
+            displayName: socialAccounts.displayName,
+        }).from(socialAccounts).where(tenantWhere(socialAccounts, accountId, eq(socialAccounts.status, 'connected')));
+        const perBizNetwork = new Map();
+        for (const a of connectedAccounts) {
+            const key = `${a.businessId}|${a.network}`;
+            perBizNetwork.set(key, [...(perBizNetwork.get(key) ?? []), a]);
+        }
+        const crowded = [...perBizNetwork.entries()].filter(([, list]) => list.length > 1);
+        const crowdedBiz = [...new Set(crowded.map(([k]) => Number(k.split('|')[0])))];
+        const openTargets = crowdedBiz.length ? await db.select({
+            postId: socialPosts.id, title: socialPosts.title, status: socialPosts.status, businessId: socialPosts.businessId,
+            scheduledAt: socialPosts.scheduledAt, network: socialPostTargets.network, socialAccountId: socialPostTargets.socialAccountId,
+        }).from(socialPostTargets)
+            .innerJoin(socialPosts, eq(socialPosts.id, socialPostTargets.postId))
+            .where(tenantWhere(socialPostTargets, accountId, eq(socialPosts.accountId, accountId), inArray(socialPosts.businessId, crowdedBiz), inArray(socialPosts.status, ['draft', 'needs_media', 'awaiting_approval', 'approved', 'scheduled', 'failed', 'needs_manual']))) : [];
+        const h = openTargets
+            .filter((t) => (perBizNetwork.get(`${t.businessId}|${t.network}`)?.length ?? 0) > 1)
+            .map((t) => ({
+            postId: t.postId, title: t.title, status: t.status, businessId: t.businessId, network: t.network,
+            scheduledAt: t.scheduledAt,
+            goesTo: connectedAccounts.find((a) => a.id === t.socialAccountId)?.displayName ?? null,
+            connected: perBizNetwork.get(`${t.businessId}|${t.network}`).map((a) => a.displayName),
+        }));
         const checks = [
             capped('a', 'Clients filed as internal work', 'A top-level Operations folder that has a billing email, an invoice, a repeating invoice or a portal login is almost certainly a real client. Its hours are missing from client reports today.', a),
             capped('b', 'Billing or company details on a subfolder', 'These belong to the top-level client. Decide which values are right before customers become their own record, or they will be lost.', b),
@@ -187,6 +220,7 @@ export async function directoryAuditRoutes(app) {
             capped('e', 'Two clients with the same name in one business', 'Could be a duplicate, or two genuinely different clients. Never merged automatically.', e),
             capped('f', 'Deals pointing at a contact that no longer exists', 'These would stop the link between deals and contacts being tightened.', f),
             capped('g', 'Records that belong to no business', 'Usually created while "All businesses" was selected. They disappear from any list filtered to one business, so each needs a business before a one-business workspace is treated as that business.', g),
+            capped('h', 'Social posts on a business with several accounts on one network', 'Saving a post used to switch it to whichever of those accounts came last. Check each one is going to the Page it was written for.', h),
         ];
         return {
             generatedAt: new Date().toISOString(),

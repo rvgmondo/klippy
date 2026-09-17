@@ -91,6 +91,10 @@ export async function runSocialTokenCheck() {
     let ok = 0;
     let broken = 0;
     for (const row of rows) {
+        // Disconnected on purpose: there is no token to check, and marking it "error" every
+        // night would only overwrite the reason it is off.
+        if (!row.accessTokenEnc)
+            continue;
         try {
             const res = await checkAccount(row);
             if (res.ok)
