@@ -6,6 +6,7 @@ import { fieldClass, btnPrimary, btnSecondary } from './ui';
 import { notify, confirmDialog } from './ConfirmDialog';
 import { money as fmt } from '../lib/money';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { useActingBusiness } from '../lib/useActingBusiness';
 
 /**
  * The costs that repeat.
@@ -33,7 +34,9 @@ export function StandingCosts({ businessId, currency }: { businessId: BusinessSe
   const qc = useQueryClient();
   const money = (v: string | number) => fmt(v, currency);
   const [adding, setAdding] = useState(false);
-  const bid = businessId === 'all' ? null : Number(businessId);
+  // Who a new cost is for. Under "All businesses" in a one-business workspace, that business.
+  const acting = useActingBusiness(businessId);
+  const bid = acting.id;
   const [draft, setDraft] = useState({
     description: '', category: '', amount: '', intervalMonths: '1', startedOn: iso(new Date()),
   });
@@ -85,18 +88,20 @@ export function StandingCosts({ businessId, currency }: { businessId: BusinessSe
           </span>
         )}
         <div className="flex-1" />
-        {bid && !adding && (
+        {bid ? !adding && (
           <button onClick={() => setAdding(true)} className={btnSecondary + ' flex items-center gap-1.5'}>
             <Plus size={14} /> Add one
           </button>
+        ) : !acting.loading && (
+          // Said whether or not any costs are listed. It used to appear only on an empty
+          // list, so once any business had one, the button was simply gone.
+          <span className="text-[11px] text-slate-500">Pick one business above to add one.</span>
         )}
       </div>
 
-      {rows.length === 0 && !adding && (
+      {rows.length === 0 && !adding && bid && (
         <p className="text-xs text-slate-500">
-          {bid
-            ? 'Rent, salaries, software, insurance. Record one here and it gets logged every month on its own, so your spending stays right without you retyping it.'
-            : 'Pick one business above to set up the costs that repeat.'}
+          Rent, salaries, software, insurance. Record one here and it gets logged every month on its own, so your spending stays right without you retyping it.
         </p>
       )}
 

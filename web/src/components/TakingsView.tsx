@@ -7,6 +7,8 @@ import { ErrorNote } from './ErrorNote';
 import { notify } from './ConfirmDialog';
 import { money } from '../lib/money';
 import type { BusinessSelection } from './BusinessSwitcher';
+import { Page, PageHeader, PageBody } from './PageHeader';
+import { useActingBusiness } from '../lib/useActingBusiness';
 
 /**
  * Money taken over a counter, and what it actually cost to take.
@@ -97,12 +99,24 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
     onError: (e: Error) => notify(e.message, 'error'),
   });
 
-  const bid = businessId === 'all' ? null : Number(businessId);
+  // Who a sale or a card machine is for. A one-business workspace answers that under
+  // "All businesses" too; the figures above still follow the raw selection.
+  const acting = useActingBusiness(businessId);
+  const bid = acting.id;
   const conn = conns.data?.connections.find((c) => c.businessId === bid) ?? null;
 
   if (sales.error) return <ErrorNote error={sales.error} onRetry={() => sales.refetch()} />;
 
+  /**
+   * In a Page, like every other screen. It was mounted bare inside a container that
+   * does not scroll, so a long sales list pushed the card machine panel and the
+   * "pick one business" line out of reach, and the Money area's tabs were missing here.
+   */
   return (
+    <Page>
+    <PageHeader view="takings" title="Takings"
+      subtitle="Money taken over the counter, what the card provider kept, and what reached the bank." />
+    <PageBody>
     <div className="space-y-5">
       {/* ---- what it added up to ------------------------------------------- */}
       {sales.isLoading ? (
@@ -113,9 +127,12 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
         <div className="rounded-2xl border border-dashed border-slate-700 p-6 text-center">
           <CreditCard className="mx-auto mb-2 text-slate-600" size={22} />
           <p className="text-sm text-slate-300">No takings in this period.</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Connect a card machine below, or add a counter sale by hand.
-          </p>
+          {/* Promises only what is on screen: neither exists without a business. */}
+          {bid && (
+            <p className="mt-1 text-xs text-slate-500">
+              Connect a card machine below, or add a counter sale by hand.
+            </p>
+          )}
         </div>
       ) : (
         sales.data!.totals.map((t) => (
@@ -142,10 +159,15 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className={fieldInlineClass} />
         </div>
         <div className="flex-1" />
-        {bid && (
+        {bid ? (
           <button onClick={() => setAdding((v) => !v)} className={btnSecondary + ' flex items-center gap-1.5'}>
             <Plus size={15} /> Add a sale
           </button>
+        ) : !acting.loading && (
+          // Where the missing button would be, not under a sales list that can be long.
+          <p className="text-[11px] text-slate-500">
+            Pick one business above to connect a card machine or add a sale by hand.
+          </p>
         )}
       </div>
 
@@ -279,12 +301,9 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
         </div>
       )}
 
-      {businessId === 'all' && (
-        <p className="text-[11px] text-slate-500">
-          Pick one business above to connect a card machine or add a sale by hand.
-        </p>
-      )}
     </div>
+    </PageBody>
+    </Page>
   );
 }
 

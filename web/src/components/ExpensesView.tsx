@@ -10,6 +10,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
+import { useActingBusiness } from '../lib/useActingBusiness';
 import { useUrlAction } from '../lib/urlAction';
 import { Page, PageHeader, PageBody } from './PageHeader';
 
@@ -19,7 +20,10 @@ export function ExpensesView({ businessId }: { businessId: BusinessSelection }) 
   const qc = useQueryClient();
   // What this business bills in. Both of these screens used to print a rand sign
   // regardless of the setting, so a dollar business saw its own prices mislabelled.
-  const cur = useCurrency(businessId);
+  // A one-business workspace under "All businesses" is that business, so its costs are
+  // labelled in its currency rather than the workspace fallback.
+  const acting = useActingBusiness(businessId);
+  const cur = useCurrency(acting.id ?? businessId);
   const money = (v: string | number) => fmt(v, cur);
   const [editing, setEditing] = useState<Expense | 'new' | null>(null);
   useUrlAction('new', () => setEditing('new'));

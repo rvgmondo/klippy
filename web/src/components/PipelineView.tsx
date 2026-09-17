@@ -16,6 +16,7 @@ import { moneyRound } from '../lib/money';
 import { useUrlAction } from '../lib/urlAction';
 import { CanvasPage, PageHeader } from './PageHeader';
 import { LeadFormModal } from './LeadFormModal';
+import { useActingBusiness } from '../lib/useActingBusiness';
 import { useCurrency } from '../lib/useCurrency';
 
 
@@ -94,13 +95,25 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
 
   const s = data?.summary;
 
+  /**
+   * Each business has its own lead form. The button used to vanish under "All businesses"
+   * with nothing said, while the empty state went on telling people to put their lead
+   * form on their website. Now a one-business workspace just gets it, and with several
+   * the button stays and says which choice is missing.
+   */
+  const acting = useActingBusiness(businessId);
+  const openLeadForm = () => {
+    if (acting.id) setShowLeadForm(true);
+    else notify('Each business has its own lead form. Pick one business above to get its form.');
+  };
+
   return (
     <CanvasPage>
       <PageHeader view="pipeline" title="Pipeline" subtitle="Turn leads into clients."
         actions={(
           <>
-            {typeof businessId === 'number' && (
-              <button onClick={() => setShowLeadForm(true)}
+            {!acting.loading && (
+              <button onClick={openLeadForm}
                 title="A public form whose submissions land here as leads"
                 className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-3 text-sm text-slate-300 hover:bg-slate-800 sm:min-h-9">
                 Lead form
@@ -199,8 +212,8 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
               className="rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500">
               New deal
             </button>
-            {typeof businessId === 'number' && (
-              <button onClick={() => setShowLeadForm(true)}
+            {!acting.loading && (
+              <button onClick={openLeadForm}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800">
                 Get your lead form
               </button>
@@ -221,8 +234,8 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
       )}
 
       {adding && <DealEditor businessId={newBusinessId} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); invalidate(); }} />}
-      {showLeadForm && typeof businessId === 'number' && (
-        <LeadFormModal businessId={businessId} onClose={() => setShowLeadForm(false)} />
+      {showLeadForm && acting.id && (
+        <LeadFormModal businessId={acting.id} onClose={() => setShowLeadForm(false)} />
       )}
       {editing && <DealEditor deal={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); invalidate(); }} />}
     </CanvasPage>
