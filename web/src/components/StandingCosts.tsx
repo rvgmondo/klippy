@@ -34,7 +34,11 @@ export function StandingCosts({ businessId, currency }: { businessId: BusinessSe
   const qc = useQueryClient();
   const money = (v: string | number) => fmt(v, currency);
   const [adding, setAdding] = useState(false);
-  // Who a new cost is for. Under "All businesses" in a one-business workspace, that business.
+  // Two different questions. `listBid` is what to SHOW, and stays on the raw selection, so
+  // "All businesses" lists them all from the first paint. `bid` is who a new cost would be
+  // for, which is null until the business list has arrived; using it to filter the list
+  // meant every business's costs, and their total, flashed up on a cold load.
+  const listBid = businessId === 'all' ? null : Number(businessId);
   const acting = useActingBusiness(businessId);
   const bid = acting.id;
   const [draft, setDraft] = useState({
@@ -45,7 +49,7 @@ export function StandingCosts({ businessId, currency }: { businessId: BusinessSe
     queryKey: ['recurring-expenses'],
     queryFn: () => apiGet<{ recurring: Recurring[] }>('/recurring-expenses'),
   });
-  const rows = (data?.recurring ?? []).filter((r) => bid == null || r.businessId === bid);
+  const rows = (data?.recurring ?? []).filter((r) => listBid == null || r.businessId === listBid);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['recurring-expenses'] });

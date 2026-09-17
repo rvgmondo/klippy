@@ -14,7 +14,7 @@ import { formatMoney } from '../lib/currency.js';
 import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken, signPayToken } from '../lib/secretbox.js';
 import { credsFor, settingsFor, gatewayModeFor } from '../lib/paymentSettings.js';
 import { notifyAdmins } from '../lib/notify.js';
-import { assertBusinessAccess } from '../lib/access.js';
+import { assertBusinessAccess, accessibleBusinessIds, businessRole } from '../lib/access.js';
 import { isDuplicateKey } from '../lib/tenant.js';
 import {
   buildCheckout, verifyItnSignature, validateItnWithServer, signature,
@@ -237,10 +237,20 @@ export async function paymentRoutes(app: FastifyInstance) {
   app.get('/api/v1/payfast/mode', { preHandler: app.requireAuth }, async (req, reply) => {
     const { accountId } = authOf(req);
     const raw = (req.query as { businessId?: string }).businessId;
-    if (raw === undefined || raw === '') return gatewayModeFor(accountId);
+    if (raw === undefined || raw === '') {
+      // Only the businesses this person can see. Answering across the whole workspace
+      // would show a member a Pay online button, or hide a test-mode warning, because of
+      // a business that is nothing to do with them.
+      const allowed = await accessibleBusinessIds(req);
+      if (allowed && allowed.size === 0) return { live: false, test: false, testLabel: null, testScope: null };
+      return gatewayModeFor(accountId, allowed ? [...allowed] : undefined);
+    }
     const id = Number(raw);
     if (!Number.isInteger(id) || id <= 0) return reply.code(400).send({ error: 'Bad business id.' });
-    if (!(await assertBusinessAccess(req, reply, id))) return;
+    // Any role, viewers included. "Your invoices are going out with a test pay link" is
+    // not an admin matter, and the person who cannot see the warning is the one most
+    // likely to be caught by it.
+    if (!(await businessRole(req, id))) return reply.code(404).send({ error: 'Business not found.' });
     return gatewayModeFor(accountId, [id]);
   });
 
@@ -374,8 +384,9 @@ export async function paymentRoutes(app: FastifyInstance) {
           ? `background:#0f172a;color:#fff;font-weight:600;`
           : `border:1px solid #cbd5e1;color:#0f172a;`)
         + `">${label}<span style="float:right">${formatMoney(amount, doc.currency)}</span></a>`;
-      return reply.type('text/html').send(
+      return reply.type('text/html').header('cache-control', 'no-store').header('referrer-policy', 'no-referrer').send(
         `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+        + `<meta name="robots" content="noindex, nofollow">`
         + `<meta name="color-scheme" content="light"><title>Pay invoice ${esc(doc.number)}</title>`
         + `<body style="margin:0;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a">`
         + `<div style="max-width:420px;margin:10vh auto;padding:0 24px">`
@@ -446,14 +457,17 @@ export async function paymentRoutes(app: FastifyInstance) {
     }
 
     if (q.r === 'paid') {
-      // Not yet recorded. Usually the notice is a few seconds behind the browser. No
-      // "pay again" button here: offering one before the notice lands is how a client
-      // pays twice.
+      // Still owing. Either PayFast's notice is a few seconds behind the browser, or this
+      // was a deposit and the rest is still open. Both are said from the records: what has
+      // been recorded so far, and what is left. No "pay again" button, because offering
+      // one before the notice lands is how a client pays twice.
       return clientPage(reply, { title: 'Thank you', brand, lines: [
-        `Your payment for invoice ${doc.number} is being confirmed. It can take a few minutes to show.`,
+        bal.paid > 0.001
+          ? `${formatMoney(bal.paid, doc.currency)} is recorded against invoice ${doc.number}, and ${formatMoney(bal.outstanding, doc.currency)} is still open on it.`
+          : `Your payment for invoice ${doc.number} is being confirmed. It can take a few minutes to show.`,
         doc.clientEmail
-          ? 'You will get a receipt by email once it has come through, so there is no need to pay again.'
-          : 'There is no need to pay again.',
+          ? 'A payment just made can take a few minutes to appear, and a receipt is emailed to you, so there is no need to pay again.'
+          : 'A payment just made can take a few minutes to appear, so there is no need to pay again.',
       ] });
     }
 

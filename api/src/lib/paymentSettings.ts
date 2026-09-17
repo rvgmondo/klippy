@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings, businesses } from '../db/schema.js';
+import { paymentSettings, businesses, accounts } from '../db/schema.js';
 import { decryptSecret } from './secretbox.js';
 import { payfastSupports } from './currency.js';
 import type { PayfastCreds } from './payfast.js';
@@ -79,23 +79,64 @@ export async function credsFor(
  * Whether clients can pay online for real, in test mode only, or not at all, across the
  * given businesses (every business in the workspace when none are named).
  *
- * Resolved through settingsFor for each business, so it answers with the gateway that
- * would actually be USED. Reading payment_settings rows directly counted rows that are
- * not in effect: a deleted business's row, or a workspace row that a business's own
- * switched-off row overrides.
+ * Resolved the way settingsFor resolves one business (its own row wins, otherwise the
+ * workspace row), but in memory from one read of each table: this runs on every Home and
+ * every Billing, and a query per business was 1 + 2N of them.
  *
- * `test` matters because Sandbox is on by default and the setup screen says to leave it
- * on for a trial run. An owner who never switches it off sends every client a Pay online
- * button that opens PayFast's TEST checkout, and a payment made there is recorded as
- * real and marks the invoice paid, with no money moved.
+ * "Usable" is the same test credsFor applies before taking a payment, because a step that
+ * ticks while the pay link refuses to open is worse than no step: enabled, a merchant id,
+ * a key that still decrypts under the current PAYMENTS_SECRET, and a currency PayFast can
+ * settle.
+ *
+ * `test` matters because Sandbox is on by default and the setup screen says to leave it on
+ * for a trial run. An owner who never switches it off sends every client a Pay online
+ * button that opens PayFast's TEST checkout, and a payment made there is recorded as real
+ * and marks the invoice paid, with no money moved. `testLabel` and `testScope` say which
+ * business is in test mode and whether the gateway is its own or the workspace one, so the
+ * setup card can point at the screen that can actually fix it.
  */
-export async function gatewayModeFor(
-  accountId: number, businessIds?: number[],
-): Promise<{ live: boolean; test: boolean }> {
-  const ids = businessIds ?? (await db.select({ id: businesses.id }).from(businesses)
-    .where(eq(businesses.accountId, accountId))).map((b) => b.id);
-  // A workspace with no business yet still has the workspace gateway.
-  const rows = await Promise.all((ids.length ? ids : [null]).map((id) => settingsFor(accountId, id)));
-  const usable = rows.filter((r): r is Row => !!r?.enabled && !!r.merchantId && !!r.merchantKeyEnc);
-  return { live: usable.some((r) => !r.sandbox), test: usable.some((r) => r.sandbox) };
+export interface GatewayMode {
+  live: boolean;
+  test: boolean;
+  testLabel: string | null;
+  testScope: 'own' | 'workspace' | null;
+}
+
+export async function gatewayModeFor(accountId: number, businessIds?: number[]): Promise<GatewayMode> {
+  const [rows, bizRows, [acct]] = await Promise.all([
+    db.select().from(paymentSettings).where(eq(paymentSettings.accountId, accountId)),
+    db.select({ id: businesses.id, name: businesses.name, currency: businesses.currency })
+      .from(businesses).where(eq(businesses.accountId, accountId)),
+    db.select({ currency: accounts.currency }).from(accounts).where(eq(accounts.id, accountId)).limit(1),
+  ]);
+  const workspaceRow = rows.find((r) => r.businessId === 0) ?? null;
+  const wanted = businessIds ? bizRows.filter((b) => businessIds.includes(b.id)) : bizRows;
+  // A workspace with no business of its own still has the workspace gateway.
+  const targets = wanted.length
+    ? wanted
+    : (businessIds ? [] : [{ id: 0, name: null, currency: null }]);
+
+  const usable = (row: Row | null, currency: string | null | undefined): boolean => {
+    if (!row?.enabled || !row.merchantId || !row.merchantKeyEnc) return false;
+    if (!payfastSupports(currency ?? acct?.currency)) return false;
+    try { decryptSecret(row.merchantKeyEnc); } catch { return false; }
+    return true;
+  };
+
+  const out: GatewayMode = { live: false, test: false, testLabel: null, testScope: null };
+  for (const b of targets) {
+    const own = b.id ? rows.find((r) => r.businessId === b.id) ?? null : null;
+    const row = own ?? workspaceRow;
+    if (!usable(row, b.currency)) continue;
+    if (row!.sandbox) {
+      out.test = true;
+      if (!out.testScope) {
+        out.testLabel = b.name;
+        out.testScope = own ? 'own' : 'workspace';
+      }
+    } else {
+      out.live = true;
+    }
+  }
+  return out;
 }

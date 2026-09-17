@@ -71,9 +71,13 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
   });
 
   const paid = new URLSearchParams(window.location.search).get('paid');
-  // Back from PayFast without paying. Said plainly, so the client is not left wondering
-  // whether the money went.
-  const cancelled = new URLSearchParams(window.location.search).get('cancelled');
+  // Back from PayFast without paying. Shown only while that invoice is still open on this
+  // page, because the address bar is not evidence: a client who paid and pressed Back
+  // carries ?cancelled= with them, and must not be told their payment did not go through.
+  const cancelledParam = new URLSearchParams(window.location.search).get('cancelled');
+  const cancelled = cancelledParam
+    && docs.some((d) => d.number === cancelledParam && d.outstanding > 0.001)
+    ? cancelledParam : null;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -108,7 +112,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         )}
         {!paid && cancelled && (
           <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
-            The payment for {cancelled} was not completed. It is still listed below if you want to try again.
+            {cancelled} is still open. If you have just paid it, give it a few minutes to show.
           </div>
         )}
 

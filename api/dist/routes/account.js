@@ -284,8 +284,12 @@ export async function accountRoutes(app) {
                 {
                     key: 'payments', done: gateway.live,
                     // Said instead of the usual hint, which would tell someone whose gateway is
-                    // already switched on to go and switch it on.
-                    ...(!gateway.live && gateway.test ? { note: 'sandbox' } : {}),
+                    // already switched on to go and switch it on. It names the business and whether
+                    // the gateway is its own, because switching Sandbox off on the workspace one
+                    // changes nothing when a business has its own row: that row wins.
+                    ...(!gateway.live && gateway.test
+                        ? { note: 'sandbox', noteLabel: gateway.testLabel, noteScope: gateway.testScope }
+                        : {}),
                 },
             ],
         };

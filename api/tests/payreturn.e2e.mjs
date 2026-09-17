@@ -39,10 +39,18 @@ const cookieOf = (r) => (r.headers.getSetCookie?.() ?? [r.headers.get('set-cooki
   .filter(Boolean).map((c) => c.split(';')[0]).join('; ');
 
 const TAG = 'E2E-PR';
+const MEMBER = 'e2e-pr-member@example.com';
 const clean = async () => {
+  await db.query('DELETE m FROM memberships m JOIN users u ON u.id = m.user_id WHERE u.email = ?', [MEMBER]);
+  await db.query('DELETE bm FROM business_members bm JOIN users u ON u.id = bm.user_id WHERE u.email = ?', [MEMBER]);
+  await db.query('DELETE FROM users WHERE email = ?', [MEMBER]);
   await db.query('DELETE p FROM payments p JOIN documents d ON d.id = p.document_id WHERE d.client_name LIKE ?', [`${TAG}%`]);
   await db.query('DELETE FROM document_lines WHERE document_id IN (SELECT id FROM (SELECT id FROM documents WHERE client_name LIKE ?) x)', [`${TAG}%`]);
   await db.query('DELETE FROM documents WHERE client_name LIKE ?', [`${TAG}%`]);
+  // Including the row left behind by the deleted-business check at the end of this file:
+  // nothing deletes a business's payment settings with it, which is the point of that check.
+  await db.query(
+    'DELETE FROM payment_settings WHERE account_id = 1 AND business_id <> 0 AND business_id NOT IN (SELECT id FROM businesses)');
   const [bizzes] = await db.query('SELECT id FROM businesses WHERE account_id = 1 AND name LIKE ?', [`${TAG}%`]);
   for (const b of bizzes) {
     await db.query('DELETE FROM payment_settings WHERE account_id = 1 AND business_id = ?', [b.id]);
@@ -61,6 +69,7 @@ if (!cookie) { await db.end(); process.exit(1); }
 const H = { 'content-type': 'application/json', cookie };
 const get = (p) => fetch(API + p, { headers: { cookie } });
 const post = (p, b) => fetch(API + p, { method: 'POST', headers: H, body: JSON.stringify(b ?? {}) });
+const put = (p, b) => fetch(API + p, { method: 'PUT', headers: H, body: JSON.stringify(b ?? {}) });
 const patch = (p, b) => fetch(API + p, { method: 'PATCH', headers: H, body: JSON.stringify(b ?? {}) });
 
 const [[liveElsewhere]] = await db.query(
@@ -205,6 +214,65 @@ let cancelPath = '';
   await patch(`/businesses/${bizId}/payfast`, { enabled: false });
   const off = await stepOf();
   ok(off?.done === false, 'a switched-off gateway does not count either', JSON.stringify(off));
+  await patch(`/businesses/${bizId}/payfast`, { enabled: true });
+}
+
+// ---- what the step ticks for has to match what the pay link will actually do ----------
+{
+  // PayFast settles rand only, and the pay link refuses anything else. A live gateway on
+  // a business that bills in dollars must not finish setup.
+  await patch(`/businesses/${bizId}`, { currency: 'USD' });
+  const step = await stepOf();
+  const mode = await (await get(`/payfast/mode?businessId=${bizId}`)).json();
+  ok(step?.done === false && mode.live === false,
+    'a live gateway on a business that bills in a currency PayFast cannot settle does not count as online payments',
+    `${JSON.stringify(step)} ${JSON.stringify(mode)}`);
+  await patch(`/businesses/${bizId}`, { currency: '' });
+  ok((await stepOf())?.done === true, 'and it counts again in rand');
+}
+
+// ---- who the answer is for ------------------------------------------------------------
+{
+  await patch(`/businesses/${bizId}/payfast`, { sandbox: true });
+  const note = await stepOf();
+  ok(note?.noteLabel === `${TAG} Biz` && note?.noteScope === 'own',
+    'the test-mode note names the business and says the gateway is its own, so it points at the screen that can switch it off',
+    JSON.stringify(note));
+
+  const mk = await post('/users', { email: MEMBER, name: 'Pay Member', password: 'memberpass123', role: 'member' });
+  ok(mk.ok, 'a member is added', String(mk.status));
+  const [[m]] = await db.query('SELECT id FROM users WHERE email = ?', [MEMBER]);
+  // Access to the OTHER business only: the one with no gateway at all.
+  const [[otherBiz]] = await db.query('SELECT id FROM businesses WHERE account_id = 1 AND id <> ? ORDER BY position LIMIT 1', [bizId]);
+  ok((await put(`/businesses/${otherBiz.id}/members/${m.id}`, { role: 'member' })).ok, 'and given one business');
+  const memberCookie = cookieOf(await fetch(API + '/auth/login', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: MEMBER, password: 'memberpass123' }),
+  }));
+  const asMember = await (await fetch(API + '/payfast/mode', { headers: { cookie: memberCookie } })).json();
+  ok(asMember.test === false && asMember.live === false,
+    'a member sees the answer for their own businesses, not a warning about one they cannot open', JSON.stringify(asMember));
+  const owner = await (await get('/payfast/mode')).json();
+  ok(owner.test === true, 'while the owner, who can see both, is warned', JSON.stringify(owner));
+
+  // A viewer on the business must be told too: they send invoices out of it.
+  await put(`/businesses/${bizId}/members/${m.id}`, { role: 'viewer' });
+  const asViewer = await fetch(API + `/payfast/mode?businessId=${bizId}`, { headers: { cookie: memberCookie } });
+  const viewerBody = await asViewer.json();
+  ok(asViewer.status === 200 && viewerBody.test === true,
+    'and so is a viewer on that business, rather than being refused', `${asViewer.status} ${JSON.stringify(viewerBody)}`);
+}
+
+// ---- a deleted business leaves its gateway row behind ------------------------------------
+{
+  await patch(`/businesses/${bizId}/payfast`, { sandbox: false });
+  ok((await stepOf())?.done === true, 'the live gateway ticks the step');
+  const del = await fetch(API + `/businesses/${bizId}`, { method: 'DELETE', headers: { cookie } });
+  ok(del.ok, 'the business is deleted', String(del.status));
+  const [[left]] = await db.query('SELECT COUNT(*) n FROM payment_settings WHERE account_id = 1 AND business_id = ?', [bizId]);
+  ok(Number(left.n) === 1, 'its payment settings row stays behind, since nothing deletes it');
+  ok((await stepOf())?.done === false,
+    'and it stops counting, because the step asks about businesses that exist', JSON.stringify(await stepOf()));
 }
 
 await clean();

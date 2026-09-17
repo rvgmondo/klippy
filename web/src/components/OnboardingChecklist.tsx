@@ -4,7 +4,13 @@ import { CheckCircle2, Circle, ChevronRight, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { setUrlParams } from '../lib/urlAction';
 
-interface Step { key: string; done: boolean; note?: 'sandbox' }
+interface Step {
+  key: string; done: boolean;
+  note?: 'sandbox';
+  /** Which business is in test mode, and whether the gateway is its own. */
+  noteLabel?: string | null;
+  noteScope?: 'own' | 'workspace' | null;
+}
 
 /**
  * The first-run checklist.
@@ -94,7 +100,9 @@ export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string
                   // The usual hint says to switch payments on, which is wrong for someone
                   // whose gateway is already on in test mode.
                   <span className="block text-[11px] text-amber-300">
-                    PayFast is on in test mode, so clients cannot pay real money yet. Switch Sandbox off once a test payment has worked.
+                    PayFast is on in test mode{s.noteLabel ? ` for ${s.noteLabel}` : ''}, so clients cannot pay real money
+                    yet. Switch Sandbox off {s.noteScope === 'own' ? "under that business's own Payments" : 'under Settings, Payments'} once a
+                    test payment has worked.
                   </span>
                 ) : (
                   <span className="block text-[11px] text-slate-500">{m.hint}</span>

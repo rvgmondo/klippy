@@ -105,18 +105,23 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
   const bid = acting.id;
   const conn = conns.data?.connections.find((c) => c.businessId === bid) ?? null;
 
-  if (sales.error) return <ErrorNote error={sales.error} onRetry={() => sales.refetch()} />;
+  const frame = (children: React.ReactNode) => (
+    <Page>
+      <PageHeader view="takings" title="Takings"
+        subtitle="Money taken over the counter, what the card provider kept, and what reached the bank." />
+      <PageBody>{children}</PageBody>
+    </Page>
+  );
+
+  // Inside the frame, so a failed load keeps the Money tabs and can be scrolled.
+  if (sales.error) return frame(<ErrorNote error={sales.error} onRetry={() => sales.refetch()} />);
 
   /**
    * In a Page, like every other screen. It was mounted bare inside a container that
    * does not scroll, so a long sales list pushed the card machine panel and the
    * "pick one business" line out of reach, and the Money area's tabs were missing here.
    */
-  return (
-    <Page>
-    <PageHeader view="takings" title="Takings"
-      subtitle="Money taken over the counter, what the card provider kept, and what reached the bank." />
-    <PageBody>
+  return frame(
     <div className="space-y-5">
       {/* ---- what it added up to ------------------------------------------- */}
       {sales.isLoading ? (
@@ -302,8 +307,6 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
       )}
 
     </div>
-    </PageBody>
-    </Page>
   );
 }
 
