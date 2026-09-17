@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings, documents, payments, events, subscriptions } from '../db/schema.js';
+import { paymentSettings, documents, payments, events, subscriptions, businesses, accounts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -10,8 +10,8 @@ import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { balanceOf } from '../lib/balances.js';
 import { settleIfCovered } from '../lib/settle.js';
 import { formatMoney } from '../lib/currency.js';
-import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken } from '../lib/secretbox.js';
-import { credsFor, settingsFor } from '../lib/paymentSettings.js';
+import { encryptSecret, decryptSecret, secretsAvailable, verifyPayToken, signPayToken } from '../lib/secretbox.js';
+import { credsFor, settingsFor, gatewayModeFor } from '../lib/paymentSettings.js';
 import { notifyAdmins } from '../lib/notify.js';
 import { assertBusinessAccess } from '../lib/access.js';
 import { isDuplicateKey } from '../lib/tenant.js';
@@ -35,6 +35,61 @@ async function shouldTokenize(doc) {
 /** The pay pages are hand-built HTML, so anything from the database is escaped. */
 const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;')
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/**
+ * A plain page a CLIENT reads: the pay link's messages, and the page PayFast sends them
+ * back to.
+ *
+ * Every string passed in is text and is escaped here. A business name and an invoice
+ * prefix are typed by a tenant, and this page is served on the app's own origin, where a
+ * staff session cookie would be sent along. The one link is built by the caller from
+ * values it controls, and is escaped too.
+ */
+function clientPage(reply, p) {
+    return reply.type('text/html')
+        .header('cache-control', 'no-store')
+        .header('referrer-policy', 'no-referrer')
+        .send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+        + `<meta name="robots" content="noindex, nofollow">`
+        // Light, and said so. With no background of its own, a browser in dark mode drew
+        // this dark heading on a near-black page.
+        + `<meta name="color-scheme" content="light">`
+        + `<title>${esc(p.title)}</title>`
+        + `<body style="margin:0;background:#f8fafc">`
+        + `<div style="font-family:system-ui,sans-serif;max-width:420px;margin:0 auto;padding:15vh 24px 0;text-align:center;color:#0f172a">`
+        + (p.brand ? `<div style="font-size:13px;color:#64748b;margin-bottom:6px">${esc(p.brand)}</div>` : '')
+        + `<h1 style="font-size:20px;margin:0 0 10px">${esc(p.title)}</h1>`
+        + p.lines.map((l) => `<p style="color:#64748b;margin:0 0 8px">${esc(l)}</p>`).join('')
+        + (p.link
+            ? `<a href="${esc(p.link.href)}" style="display:inline-block;margin-top:14px;padding:12px 20px;border-radius:10px;background:#0f172a;color:#fff;text-decoration:none;font-weight:600">${esc(p.link.label)}</a>`
+            : '')
+        + `</div></body>`);
+}
+/** The name a client knows the business by. Never Klippy's: this is their supplier's page. */
+async function clientFacingBrand(accountId, businessId) {
+    const [business] = businessId
+        ? await db.select({ brandName: businesses.brandName, name: businesses.name }).from(businesses)
+            .where(and(eq(businesses.accountId, accountId), eq(businesses.id, businessId))).limit(1)
+        : [undefined];
+    const [account] = await db.select({ brandName: accounts.brandName, name: accounts.name })
+        .from(accounts).where(eq(accounts.id, accountId)).limit(1);
+    return business?.brandName || business?.name || account?.brandName || account?.name || null;
+}
+/**
+ * Where PayFast sends the browser back to once the client has paid or given up.
+ *
+ * Both checkout paths that are not the portal used to return to the site root. For
+ * anyone not signed in to Klippy, and a client never is, that is Klippy's own marketing
+ * page: no thank-you, no business name and no way back to the invoice.
+ *
+ * Null only when PAYMENTS_SECRET is missing, in which case no pay link exists either.
+ */
+function returnUrlsFor(docId) {
+    const token = signPayToken(docId);
+    if (!token)
+        return null;
+    const at = `${appUrl()}/api/v1/pay/${docId}/return?t=${encodeURIComponent(token)}`;
+    return { returnUrl: `${at}&r=paid`, cancelUrl: `${at}&r=cancelled` };
+}
 export async function paymentRoutes(app) {
     // PayFast posts the ITN as application/x-www-form-urlencoded, which Fastify does
     // not parse by default. Capture the RAW body (needed verbatim for the server-side
@@ -163,6 +218,23 @@ export async function paymentRoutes(app) {
         const { accountId } = authOf(req);
         return readSettings(accountId, 0);
     });
+    /**
+     * Whether invoices go out with a real pay link, a TEST one, or none: for one business,
+     * or across the workspace. Anyone who sends invoices needs to know that, so this is not
+     * admin-only, and it says nothing about the keys themselves.
+     */
+    app.get('/api/v1/payfast/mode', { preHandler: app.requireAuth }, async (req, reply) => {
+        const { accountId } = authOf(req);
+        const raw = req.query.businessId;
+        if (raw === undefined || raw === '')
+            return gatewayModeFor(accountId);
+        const id = Number(raw);
+        if (!Number.isInteger(id) || id <= 0)
+            return reply.code(400).send({ error: 'Bad business id.' });
+        if (!(await assertBusinessAccess(req, reply, id)))
+            return;
+        return gatewayModeFor(accountId, [id]);
+    });
     app.patch('/api/v1/account/payfast', { preHandler: app.requireAuth }, async (req, reply) => {
         const { accountId, role } = authOf(req);
         if (role === 'member')
@@ -237,12 +309,13 @@ export async function paymentRoutes(app) {
         if (owed <= 0.001)
             return reply.code(400).send({ error: 'Nothing is outstanding on this invoice.' });
         const base = appUrl();
+        // Staff use this to test the checkout, so it returns to the same page a client sees.
+        const back = returnUrlsFor(doc.id) ?? { returnUrl: `${base}/?v=billing`, cancelUrl: `${base}/?v=billing` };
         const checkout = buildCheckout(creds, {
             amount: owed,
             itemName: `Invoice ${doc.number}`,
             mPaymentId: `doc-${doc.id}`,
-            returnUrl: `${base}/?paid=${doc.number}`,
-            cancelUrl: `${base}/?cancelled=${doc.number}`,
+            ...back,
             notifyUrl: `${base}/api/v1/payfast/notify`,
             buyerEmail: doc.clientEmail,
             tokenize: await shouldTokenize(doc),
@@ -254,10 +327,8 @@ export async function paymentRoutes(app) {
     // tiny page that immediately posts the signed fields to PayFast's checkout. Any
     // failure shows a plain message rather than an error, since a client sees this.
     app.get('/api/v1/pay/:id', async (req, reply) => {
-        const page = (title, msg) => reply.type('text/html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
-            + `<title>${title}</title>`
-            + `<div style="font-family:system-ui,sans-serif;max-width:420px;margin:15vh auto;padding:0 24px;text-align:center;color:#0f172a">`
-            + `<h1 style="font-size:20px;margin-bottom:8px">${title}</h1><p style="color:#64748b">${msg}</p></div>`);
+        // Escaped: the invoice number carries a prefix the business typed.
+        const page = (title, msg) => clientPage(reply, { title, lines: [msg] });
         const id = Number(req.params.id);
         const token = req.query.t ?? '';
         if (!id || !verifyPayToken(id, token))
@@ -298,7 +369,7 @@ export async function paymentRoutes(app) {
                     : `border:1px solid #cbd5e1;color:#0f172a;`)
                 + `">${label}<span style="float:right">${formatMoney(amount, doc.currency)}</span></a>`;
             return reply.type('text/html').send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
-                + `<title>Pay invoice ${esc(doc.number)}</title>`
+                + `<meta name="color-scheme" content="light"><title>Pay invoice ${esc(doc.number)}</title>`
                 + `<body style="margin:0;font-family:system-ui,sans-serif;background:#f8fafc;color:#0f172a">`
                 + `<div style="max-width:420px;margin:10vh auto;padding:0 24px">`
                 + `<h1 style="font-size:20px;margin-bottom:4px">Invoice ${esc(doc.number)}</h1>`
@@ -312,17 +383,76 @@ export async function paymentRoutes(app) {
         const base = appUrl();
         const { url, fields } = buildCheckout(creds, {
             amount, itemName: `Invoice ${doc.number}${choice === 'deposit' ? ' (deposit)' : ''}`, mPaymentId: `doc-${doc.id}`,
-            returnUrl: `${base}/?paid=${doc.number}`, cancelUrl: `${base}/?cancelled=${doc.number}`,
+            // The token verified above is the one these carry, so it cannot be null here.
+            ...returnUrlsFor(doc.id),
             notifyUrl: `${base}/api/v1/payfast/notify`, buyerEmail: doc.clientEmail,
             tokenize: await shouldTokenize(doc),
         });
         // Auto-submitting form: the client lands here and is taken straight to PayFast.
+        // Fully escaped: an ampersand left raw in a value (the return URL has two) can be
+        // read as the start of an entity, and the browser would post a different string
+        // from the one that was signed.
         const inputs = Object.entries(fields)
-            .map(([k, v]) => `<input type="hidden" name="${k}" value="${String(v).replace(/"/g, '&quot;')}">`).join('');
-        return reply.type('text/html').send(`<!doctype html><meta charset="utf-8"><title>Redirecting to PayFast</title>`
-            + `<div style="font-family:system-ui,sans-serif;text-align:center;margin-top:20vh;color:#334155">Taking you to PayFast to pay invoice ${doc.number}...</div>`
+            .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(String(v))}">`).join('');
+        return reply.type('text/html').header('cache-control', 'no-store').send(`<!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light"><title>Redirecting to PayFast</title>`
+            + `<body style="margin:0;background:#f8fafc">`
+            + `<div style="font-family:system-ui,sans-serif;text-align:center;padding-top:20vh;color:#334155">Taking you to PayFast to pay invoice ${esc(doc.number)}.</div>`
             + `<form id="pf" action="${url}" method="post">${inputs}</form>`
             + `<script>document.getElementById('pf').submit()</script>`);
+    });
+    /**
+     * The page a client lands on back from PayFast (PUBLIC, same signed token as the pay
+     * link).
+     *
+     * The browser coming back proves nothing about the payment. PayFast's server notice is
+     * what records it, and it can arrive before or after this page loads. So `r` only
+     * picks the wording, and it is not signed: anyone holding the link can change it.
+     * Whatever this page says about the invoice's standing comes from the recorded
+     * payments, never from `r`.
+     */
+    app.get('/api/v1/pay/:id/return', async (req, reply) => {
+        const id = Number(req.params.id);
+        const q = req.query;
+        const token = q.t ?? '';
+        if (!id || !verifyPayToken(id, token)) {
+            return clientPage(reply, { title: 'Link not valid', lines: ['This payment link is invalid or has expired.'] });
+        }
+        const [doc] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
+        if (!doc || doc.type !== 'invoice') {
+            return clientPage(reply, { title: 'Not found', lines: ['We could not find that invoice.'] });
+        }
+        const brand = await clientFacingBrand(doc.accountId, doc.businessId);
+        if (doc.status === 'void') {
+            return clientPage(reply, { title: 'Invoice cancelled', brand, lines: [
+                    `Invoice ${doc.number} has been cancelled.`,
+                    `If you have just paid it, please get in touch with ${brand ?? 'the business that sent it'}.`,
+                ] });
+        }
+        const bal = await balanceOf(doc.accountId, doc.id, Number(doc.total));
+        if (doc.status === 'paid' || bal.outstanding <= 0.001) {
+            return clientPage(reply, { title: 'Thank you', brand, lines: [`Invoice ${doc.number} is paid.`] });
+        }
+        if (q.r === 'paid') {
+            // Not yet recorded. Usually the notice is a few seconds behind the browser. No
+            // "pay again" button here: offering one before the notice lands is how a client
+            // pays twice.
+            return clientPage(reply, { title: 'Thank you', brand, lines: [
+                    `Your payment for invoice ${doc.number} is being confirmed. It can take a few minutes to show.`,
+                    doc.clientEmail
+                        ? 'You will get a receipt by email once it has come through, so there is no need to pay again.'
+                        : 'There is no need to pay again.',
+                ] });
+        }
+        // Cancelled, or anything else. "Nothing was charged" is not something Klippy can
+        // know, so say only what the records show.
+        return clientPage(reply, {
+            title: 'Payment not completed', brand,
+            lines: [
+                `Invoice ${doc.number} is still open, with ${formatMoney(bal.outstanding, doc.currency)} to pay.`,
+                'You can try again, or pay by transfer using the bank details on the invoice.',
+            ],
+            link: { href: `/api/v1/pay/${doc.id}?t=${encodeURIComponent(token)}`, label: 'Try again' },
+        });
     });
     /**
      * What PayFast has actually sent us, most recent first.

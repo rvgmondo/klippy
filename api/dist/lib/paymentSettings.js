@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { paymentSettings } from '../db/schema.js';
+import { paymentSettings, businesses } from '../db/schema.js';
 import { decryptSecret } from './secretbox.js';
 import { payfastSupports } from './currency.js';
 export async function settingsFor(accountId, businessId) {
@@ -56,5 +56,27 @@ export async function credsFor(accountId, businessId, currency) {
     catch {
         return null;
     }
+}
+/**
+ * Whether clients can pay online for real, in test mode only, or not at all, across the
+ * given businesses (every business in the workspace when none are named).
+ *
+ * Resolved through settingsFor for each business, so it answers with the gateway that
+ * would actually be USED. Reading payment_settings rows directly counted rows that are
+ * not in effect: a deleted business's row, or a workspace row that a business's own
+ * switched-off row overrides.
+ *
+ * `test` matters because Sandbox is on by default and the setup screen says to leave it
+ * on for a trial run. An owner who never switches it off sends every client a Pay online
+ * button that opens PayFast's TEST checkout, and a payment made there is recorded as
+ * real and marks the invoice paid, with no money moved.
+ */
+export async function gatewayModeFor(accountId, businessIds) {
+    const ids = businessIds ?? (await db.select({ id: businesses.id }).from(businesses)
+        .where(eq(businesses.accountId, accountId))).map((b) => b.id);
+    // A workspace with no business yet still has the workspace gateway.
+    const rows = await Promise.all((ids.length ? ids : [null]).map((id) => settingsFor(accountId, id)));
+    const usable = rows.filter((r) => !!r?.enabled && !!r.merchantId && !!r.merchantKeyEnc);
+    return { live: usable.some((r) => !r.sandbox), test: usable.some((r) => r.sandbox) };
 }
 //# sourceMappingURL=paymentSettings.js.map

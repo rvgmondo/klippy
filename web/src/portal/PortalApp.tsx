@@ -71,6 +71,9 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
   });
 
   const paid = new URLSearchParams(window.location.search).get('paid');
+  // Back from PayFast without paying. Said plainly, so the client is not left wondering
+  // whether the money went.
+  const cancelled = new URLSearchParams(window.location.search).get('cancelled');
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
@@ -101,6 +104,11 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         {paid && (
           <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
             Thank you. Your payment for {paid} is being confirmed and this page will update shortly.
+          </div>
+        )}
+        {!paid && cancelled && (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
+            The payment for {cancelled} was not completed. It is still listed below if you want to try again.
           </div>
         )}
 

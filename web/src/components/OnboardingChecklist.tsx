@@ -4,7 +4,7 @@ import { CheckCircle2, Circle, ChevronRight, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { setUrlParams } from '../lib/urlAction';
 
-interface Step { key: string; done: boolean }
+interface Step { key: string; done: boolean; note?: 'sandbox' }
 
 /**
  * The first-run checklist.
@@ -90,7 +90,15 @@ export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string
               <Circle size={16} className="shrink-0 text-slate-600" />
               <span className="min-w-0 flex-1">
                 <span className="block text-sm text-slate-200">{m.label}</span>
-                <span className="block text-[11px] text-slate-500">{m.hint}</span>
+                {s.note === 'sandbox' ? (
+                  // The usual hint says to switch payments on, which is wrong for someone
+                  // whose gateway is already on in test mode.
+                  <span className="block text-[11px] text-amber-300">
+                    PayFast is on in test mode, so clients cannot pay real money yet. Switch Sandbox off once a test payment has worked.
+                  </span>
+                ) : (
+                  <span className="block text-[11px] text-slate-500">{m.hint}</span>
+                )}
               </span>
               <ChevronRight size={14} className="shrink-0 text-slate-600 group-hover:text-slate-300" />
             </button>

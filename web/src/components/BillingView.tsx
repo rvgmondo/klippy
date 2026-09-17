@@ -70,9 +70,16 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const docs = data?.documents ?? [];
   const invalidate = () => qc.invalidateQueries({ queryKey: ['documents'] });
 
-  // Only offer "Pay online" when PayFast is actually switched on.
-  const payfast = useQuery({ queryKey: ['payfast'], queryFn: () => apiGet<{ configured: { enabled: boolean } }>('/account/payfast') });
-  const payfastOn = payfast.data?.configured.enabled ?? false;
+  // Only offer "Pay online" when PayFast is actually switched on for what is on screen.
+  // This used to read only the workspace gateway, so a business with a PayFast account of
+  // its own never got the button. Keyed under 'payfast' so saving payment settings
+  // refreshes it.
+  const payfast = useQuery({
+    queryKey: ['payfast', 'mode', businessId],
+    queryFn: () => apiGet<{ live: boolean; test: boolean }>(
+      `/payfast/mode${businessId === 'all' ? '' : `?businessId=${businessId}`}`),
+  });
+  const payfastOn = !!(payfast.data?.live || payfast.data?.test);
 
   // Open PayFast's checkout for an invoice by posting the signed fields there.
   async function payOnline(id: number) {
@@ -161,6 +168,18 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
         </div>
       </PageHeader>
       <PageBody>
+
+        {/* Sandbox is the default and the setup screen advises leaving it on for a trial,
+            so an owner can easily forget it. Until then every client gets a pay link to
+            PayFast's test checkout, and a test payment there is recorded as real. */}
+        {payfast.data?.test && (
+          <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+            PayFast is in test mode{businessId === 'all' ? ' for at least one business' : ''}. The Pay online
+            button on invoices and reminders opens a test checkout, and a test payment there marks the
+            invoice paid with no money moved. Switch Sandbox off under Settings, Payments once your test
+            payment has worked.
+          </p>
+        )}
 
         {isLoading && <Skeleton className="h-56" />}
         {!isLoading && (<>

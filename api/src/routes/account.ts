@@ -12,6 +12,7 @@ import { CURRENCIES, isKnownCurrency } from '../lib/currency.js';
 import { publicAccount } from '../lib/publicAccount.js';
 import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings, boards, boardColumns, tasks, timeEntries, contacts, documents, documentLines, payments, subscriptions, expenses } from '../db/schema.js';
 import { sampleNames } from '../lib/templates.js';
+import { gatewayModeFor } from '../lib/paymentSettings.js';
 import { inArray, isNull, or } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
 
@@ -269,7 +270,7 @@ export async function accountRoutes(app: FastifyInstance) {
   app.get('/api/v1/onboarding', async (req) => {
     const { accountId } = authOf(req);
     const exists = async (q: Promise<unknown[]>) => (await q).length > 0;
-    const [client, brand, offering, deal, invoice, pay] = await Promise.all([
+    const [client, brand, offering, deal, invoice, gateway] = await Promise.all([
       exists(db.select({ id: folders.id }).from(folders)
         .where(tenantWhere(folders, accountId, isNull(folders.parentId), eq(folders.pillar, 'delivery'), isNull(folders.deletedAt))).limit(1)),
       exists(db.select({ id: businesses.id }).from(businesses)
@@ -280,8 +281,11 @@ export async function accountRoutes(app: FastifyInstance) {
         .where(tenantWhere(deals, accountId)).limit(1)),
       exists(db.select({ id: documents.id }).from(documents)
         .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), ne(documents.status, 'draft'))).limit(1)),
-      exists(db.select({ id: paymentSettings.id }).from(paymentSettings)
-        .where(and(eq(paymentSettings.accountId, accountId), eq(paymentSettings.enabled, true))).limit(1)),
+      // Done only when a client could pay real money. It used to tick for any enabled
+      // row, and Sandbox is on by default, so the usual first move (keys in, Enable
+      // ticked, Sandbox left on as the screen advises) finished setup while every
+      // invoice was going out with a link to PayFast's test checkout.
+      gatewayModeFor(accountId),
     ]);
     return {
       steps: [
@@ -290,7 +294,12 @@ export async function accountRoutes(app: FastifyInstance) {
         { key: 'offering', done: offering },
         { key: 'deal', done: deal },
         { key: 'invoice', done: invoice },
-        { key: 'payments', done: pay },
+        {
+          key: 'payments', done: gateway.live,
+          // Said instead of the usual hint, which would tell someone whose gateway is
+          // already switched on to go and switch it on.
+          ...(!gateway.live && gateway.test ? { note: 'sandbox' } : {}),
+        },
       ],
     };
   });
