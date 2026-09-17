@@ -1,9 +1,9 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import './index.css';
 import { AuthProvider } from './lib/auth';
-import { ConfirmHost } from './components/ConfirmDialog';
+import { ConfirmHost, notify } from './components/ConfirmDialog';
 
 /**
  * The staff app and the client portal are two applications sharing one deploy.
@@ -36,8 +36,30 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { OfflineBanner } from './components/OfflineBanner';
 import { ThemeSync, applyAppearance, readCachedAppearance } from './lib/theme';
 
+/**
+ * Nothing that failed goes unsaid.
+ *
+ * The single worst pattern in this app, found again and again: a button is pressed, the
+ * request is refused, and the screen does nothing at all. People then reasonably believe
+ * an invoice was voided, a payment was recorded, a repeating invoice was cancelled. The
+ * server explains every refusal; it simply never reached anyone.
+ *
+ * Handlers were added one at a time to the places that hurt most, but there are about
+ * ninety mutations in here and every new one starts silent. So this is the floor: any
+ * mutation that does not say its own piece says the server's. A mutation with its own
+ * onError is left alone, since it has already chosen its words.
+ *
+ * Deliberately not for QUERIES. A screen that cannot load shows that in place, and a
+ * background refetch failing on a slow train is not worth a toast.
+ */
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) => {
+      if (mutation.options.onError) return;
+      notify(error instanceof Error && error.message ? error.message : 'That did not go through.', 'error');
+    },
+  }),
 });
 
 // The client portal is a different application that happens to share a bundle. It

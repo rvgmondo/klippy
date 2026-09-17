@@ -54,6 +54,9 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
 
   const pay = useMutation({
     mutationFn: (id: number) => apiPost<{ url: string; fields: Record<string, string> }>(`/portal/documents/${id}/pay`),
+    // Shown next to the Pay button itself (payError below), so the app-wide net must not
+    // say the same thing again in a corner.
+    onError: () => { /* rendered inline */ },
     onSuccess: (checkout) => {
       // PayFast takes a form POST, not a redirect, so the fields are submitted from
       // a throwaway form rather than pushed into a query string.
@@ -560,6 +563,8 @@ function Details({ me, accent }: { me: PortalMe; accent: React.CSSProperties }) 
 
   const setPw = useMutation({
     mutationFn: (v: string | null) => apiPost('/portal/password', { password: v }),
+    // Shown under the password field. Same reason as pay above.
+    onError: () => { /* rendered inline */ },
     onSuccess: () => {
       setPassword('');
       setSaved('Password updated.');
