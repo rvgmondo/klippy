@@ -8,7 +8,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
-import { resolveBusinessId } from '../lib/business.js';
+import { businessForNew } from '../lib/business.js';
 import { mrrByCurrency } from '../lib/mrr.js';
 import { liveHostingForSubscriptions } from '../lib/hosting.js';
 
@@ -58,8 +58,9 @@ export async function offeringRoutes(app: FastifyInstance) {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
-    const businessId = await resolveBusinessId(accountId, d.businessId);
-    if (!businessId) return reply.code(400).send({ error: 'No business found for this account.' });
+    const which = await businessForNew(accountId, d.businessId, null);
+    if ('error' in which) return reply.code(400).send({ error: which.error });
+    const businessId = which.id;
     const position = await nextPosition(offerings, sql`account_id = ${accountId} AND business_id = ${businessId}`);
     const ins = await db.insert(offerings).values(withTenant(accountId, {
       businessId, name: d.name, description: d.description ?? null, price: money(d.price),

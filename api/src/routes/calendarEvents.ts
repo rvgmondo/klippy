@@ -7,7 +7,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
-import { resolveBusinessId } from '../lib/business.js';
+import { businessForNew } from '../lib/business.js';
 
 /**
  * Meetings, calls and events.
@@ -84,7 +84,9 @@ export async function calendarEventRoutes(app: FastifyInstance) {
     if (d.endAt && !endAt) return reply.code(400).send({ error: 'End time is not a valid date.' });
     if (endAt && endAt < startAt) return reply.code(400).send({ error: 'It cannot end before it starts.' });
 
-    const businessId = await resolveBusinessId(accountId, d.businessId);
+    const which = await businessForNew(accountId, d.businessId, d.folderId ?? null);
+    if ('error' in which) return reply.code(400).send({ error: which.error });
+    const businessId = which.id;
     if (!(await assertMaybeBusiness(req, reply, businessId))) return;
 
     const ins = await db.insert(calendarEvents).values(withTenant(accountId, {

@@ -29,7 +29,7 @@ export async function resolveBusinessId(accountId, businessId) {
  * client's own business, else the only business there is. With several and nothing
  * to go on it refuses, and the editor asks.
  */
-export async function businessForDocument(accountId, businessId, folderId) {
+export async function businessForDocument(accountId, businessId, folderId, ask = 'Which business is this from? Pick one, so it goes out with the right letterhead, numbering and bank details.') {
     if (businessId) {
         const [biz] = await db.select({ id: businesses.id }).from(businesses)
             .where(tenantWhere(businesses, accountId, eq(businesses.id, businessId))).limit(1);
@@ -48,6 +48,8 @@ export async function businessForDocument(accountId, businessId, folderId) {
         return { id: all[0].id };
     if (!all.length)
         return { error: 'There is no business to send this from yet. Add one in Settings first.' };
-    return { error: 'Which business is this from? Pick one, so it goes out with the right letterhead, numbering and bank details.' };
+    return { error: ask };
 }
+/** The same rule for everything else that belongs to one business's books. */
+export const businessForNew = (accountId, businessId, folderId) => businessForDocument(accountId, businessId, folderId, 'Which business is this for? Pick one, so it lands in the right books.');
 //# sourceMappingURL=business.js.map

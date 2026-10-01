@@ -32,6 +32,7 @@ export async function resolveBusinessId(accountId: number, businessId?: number |
  */
 export async function businessForDocument(
   accountId: number, businessId: number | null | undefined, folderId: number | null | undefined,
+  ask = 'Which business is this from? Pick one, so it goes out with the right letterhead, numbering and bank details.',
 ): Promise<{ id: number } | { error: string }> {
   if (businessId) {
     const [biz] = await db.select({ id: businesses.id }).from(businesses)
@@ -47,5 +48,11 @@ export async function businessForDocument(
     .where(tenantWhere(businesses, accountId)).orderBy(asc(businesses.position)).limit(2);
   if (all.length === 1) return { id: all[0]!.id };
   if (!all.length) return { error: 'There is no business to send this from yet. Add one in Settings first.' };
-  return { error: 'Which business is this from? Pick one, so it goes out with the right letterhead, numbering and bank details.' };
+  return { error: ask };
 }
+
+/** The same rule for everything else that belongs to one business's books. */
+export const businessForNew = (
+  accountId: number, businessId: number | null | undefined, folderId: number | null | undefined,
+) => businessForDocument(accountId, businessId, folderId,
+  'Which business is this for? Pick one, so it lands in the right books.');

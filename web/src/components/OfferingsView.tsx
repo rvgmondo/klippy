@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Pause, Play, XCircle } from 'lucide-react';
@@ -561,6 +562,7 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
   onSaved: () => void;
 }) {
   const isNew = !offering;
+  const from = useFromBusiness(businessId);
   const [name, setName] = useState(offering?.name ?? '');
   const [description, setDescription] = useState(offering?.description ?? '');
   const [price, setPrice] = useState(offering?.price ?? '0');
@@ -586,8 +588,9 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
         provisioning, whmPackage: whmPackage.trim() || null,
         stockQty: stockQty.trim() ? Number(stockQty) : null,
         reorderPoint: reorderPoint.trim() ? Number(reorderPoint) : null,
-        ...(isNew ? { businessId } : {}),
+        ...(isNew && from.id ? { businessId: from.id } : {}),
       };
+      if (isNew && from.missing) throw new Error(PICK_BUSINESS);
       return isNew ? apiPost('/offerings', body) : apiPatch(`/offerings/${offering!.id}`, body);
     },
     onSuccess: onSaved,
@@ -604,9 +607,10 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
       <form onSubmit={(e) => { e.preventDefault(); if (name.trim()) save.mutate(); }}
         className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950 p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New offering' : 'Edit offering'}</h2>
+          <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New price list item' : 'Edit price list item'}</h2>
           <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
+        {isNew && from.element && <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/40 p-3">{from.element}</div>}
 
         <label className="mb-1 block text-xs text-slate-400">Name</label>
         <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Website Audit"

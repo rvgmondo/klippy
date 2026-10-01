@@ -7,7 +7,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId, nextPosition } from '../lib/http.js';
-import { resolveBusinessId } from '../lib/business.js';
+import { businessForNew } from '../lib/business.js';
 import { emit } from '../lib/events.js';
 const STAGES = ['lead', 'contacted', 'proposal', 'won', 'lost'];
 const stage = z.enum(STAGES);
@@ -104,7 +104,10 @@ export async function dealRoutes(app) {
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
         const st = d.stage ?? 'lead';
-        const businessId = await resolveBusinessId(accountId, d.businessId);
+        const which = await businessForNew(accountId, d.businessId, null);
+        if ('error' in which)
+            return reply.code(400).send({ error: which.error });
+        const businessId = which.id;
         // A member may only file a deal into a business they can actually work in. Every
         // other deal handler gates on assertMaybeBusiness; create is where it was missing,
         // so a member could inject deals (and fire the won-deal handoff) into another

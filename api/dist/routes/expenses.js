@@ -7,7 +7,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
 import { intId } from '../lib/http.js';
-import { resolveBusinessId } from '../lib/business.js';
+import { businessForNew } from '../lib/business.js';
 import { generateFor } from '../lib/recurringExpenses.js';
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD');
 const createSchema = z.object({
@@ -50,9 +50,10 @@ export async function expenseRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
-        const businessId = await resolveBusinessId(accountId, d.businessId);
-        if (!businessId)
-            return reply.code(400).send({ error: 'No business found for this account.' });
+        const which = await businessForNew(accountId, d.businessId, d.folderId ?? null);
+        if ('error' in which)
+            return reply.code(400).send({ error: which.error });
+        const businessId = which.id;
         const ins = await db.insert(expenses).values(withTenant(accountId, {
             businessId, folderId: d.folderId ?? null, description: d.description, category: d.category ?? null,
             amount: money(d.amount), vatAmount: d.vatAmount != null ? money(d.vatAmount) : null,
@@ -134,9 +135,10 @@ export async function expenseRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
-        const businessId = await resolveBusinessId(accountId, d.businessId);
-        if (!businessId)
-            return reply.code(400).send({ error: 'No business found for this account.' });
+        const which = await businessForNew(accountId, d.businessId, null);
+        if ('error' in which)
+            return reply.code(400).send({ error: which.error });
+        const businessId = which.id;
         if (!(await assertBusinessAccess(req, reply, businessId, 'member')))
             return;
         if (d.endsOn && d.endsOn < d.startedOn) {

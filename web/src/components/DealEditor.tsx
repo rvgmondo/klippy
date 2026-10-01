@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -9,6 +10,7 @@ import { fieldClass } from './ui';
 
 export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal; businessId?: number; onClose: () => void; onSaved: () => void }) {
   const isNew = !deal;
+  const from = useFromBusiness(businessId);
   const [title, setTitle] = useState(deal?.title ?? '');
   const [company, setCompany] = useState(deal?.company ?? '');
   const [contactName, setContactName] = useState(deal?.contactName ?? '');
@@ -60,8 +62,9 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
         value: Number(value) || 0, notes: notes.trim() || null,
         contactId, source: source.trim() || null,
         nextFollowUpAt: followUp || null, followUpNote: followUpNote.trim() || null,
-        ...(isNew && businessId ? { businessId } : {}),
+        ...(isNew && from.id ? { businessId: from.id } : {}),
       };
+      if (isNew && from.missing) throw new Error(PICK_BUSINESS);
       return isNew ? apiPost('/deals', body) : apiPatch(`/deals/${deal!.id}`, body);
     },
     onSuccess: onSaved,
@@ -85,6 +88,7 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New deal' : 'Edit deal'}</h2>
           <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
+        {isNew && from.element && <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/40 p-3">{from.element}</div>}
         {/* Labels, not placeholder-only fields: a placeholder vanishes the moment
             you type, and a half-filled form becomes a guessing game (WCAG 3.3.2). */}
         <div className="space-y-2.5">

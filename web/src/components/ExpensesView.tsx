@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { StandingCosts } from './StandingCosts';
 import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -132,6 +133,7 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
   const [incurredOn, setIncurredOn] = useState(expense?.incurredOn ?? todayStr());
   const [folderId, setFolderId] = useState<string>(expense?.folderId != null ? String(expense.folderId) : '');
   const [error, setError] = useState<string | null>(null);
+  const from = useFromBusiness(businessId, folderId ? Number(folderId) : null);
 
   const save = useMutation({
     mutationFn: () => {
@@ -140,8 +142,9 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
         vatAmount: vat.trim() ? Number(vat) : null,
         category: category.trim() || null, incurredOn,
         folderId: folderId ? Number(folderId) : null,
-        ...(isNew ? { businessId } : {}),
+        ...(isNew && from.id ? { businessId: from.id } : {}),
       };
+      if (isNew && from.missing) throw new Error(PICK_BUSINESS);
       return isNew ? apiPost('/expenses', body) : apiPatch(`/expenses/${expense!.id}`, body);
     },
     onSuccess: onSaved,
@@ -156,6 +159,7 @@ function ExpenseEditor({ expense, businessId, clientFolders, onClose, onSaved }:
           <h2 className="text-lg font-semibold text-slate-100">{isNew ? 'New expense' : 'Edit expense'}</h2>
           <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
+        {isNew && from.element && <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/40 p-3">{from.element}</div>}
 
         <label className="mb-1 block text-xs text-slate-400">Description</label>
         <input autoFocus value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Adobe subscription"

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog } from './ConfirmDialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Trash2 } from 'lucide-react';
@@ -58,6 +59,7 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
   const [attendees, setAttendees] = useState(existing?.attendees ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [folderId, setFolderId] = useState<string>(existing?.folderId ? String(existing.folderId) : '');
+  const from = useFromBusiness(businessId === 'all' ? undefined : businessId, folderId ? Number(folderId) : null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,8 +90,9 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
         location: location.trim() || null, attendees: attendees.trim() || null,
         description: description.trim() || null,
         folderId: folderId ? Number(folderId) : null,
-        ...(isNew && businessId !== 'all' ? { businessId } : {}),
+        ...(isNew && from.id ? { businessId: from.id } : {}),
       };
+      if (isNew && from.missing) throw new Error(PICK_BUSINESS);
       return isNew ? apiPost('/calendar-events', body) : apiPatch(`/calendar-events/${existing!.id}`, body);
     },
     onSuccess: done,
@@ -113,6 +116,7 @@ export function MeetingModal({ existing, defaultDate, businessId, onClose }: {
           <button type="button" onClick={onClose}
             className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
         </div>
+        {isNew && from.element && <div className="mb-4 rounded-lg border border-slate-800 bg-slate-900/40 p-3">{from.element}</div>}
 
         <label className={label}>What is it</label>
         <input autoFocus className={`${field} mb-3`} value={title} onChange={(e) => setTitle(e.target.value)}
