@@ -46,7 +46,9 @@ export function ClientPicker({ businessId, value, onChange }: {
   });
   // Top-level folders are the clients; subfolders are projects inside one.
   const clients = (data?.folders ?? [])
-    .filter((f) => !f.parentId && !f.isArchived && (!businessId || f.businessId === businessId))
+    // Internal work (Admin, Finance and the like) is not somebody you can invoice.
+    .filter((f) => !f.parentId && !f.isArchived && f.pillar !== 'operations'
+      && (!businessId || f.businessId === businessId))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const create = useMutation({

@@ -20,8 +20,8 @@ const account = { id: 1, name: 'Mondo Group', slug: 'mondo', plan: 'pro', folder
 const user = { id: 1, name: 'Ruben Test', email: 'owner@example.test', role: 'owner', accountId: 1, theme: 'dark' };
 const MODS = ['today', 'calendar', 'reports', 'files', 'pipeline', 'offerings', 'social', 'billing', 'collections', 'cashflow', 'expenses'];
 const businesses = [
-  { id: 1, accountId: 1, name: 'Mondobase', type: 'services', secondaryTypes: [], color: '#c6f432', currency: 'ZAR', defaultDueDays: 14, modules: MODS, position: 0, remindersEnabled: true },
-  { id: 2, accountId: 1, name: 'Mondo Hosting', type: 'code', secondaryTypes: [], color: '#38bdf8', currency: 'ZAR', defaultDueDays: 7, modules: ['today', 'billing', 'collections', 'cashflow', 'files'], position: 1, remindersEnabled: true },
+  { id: 1, accountId: 1, name: 'Mondobase', type: 'services', secondaryTypes: [], color: '#c6f432', currency: 'ZAR', defaultDueDays: 14, defaultTaxRate: '15.00', modules: MODS, position: 0, remindersEnabled: true },
+  { id: 2, accountId: 1, name: 'Mondo Hosting', type: 'code', secondaryTypes: [], color: '#38bdf8', currency: 'ZAR', defaultDueDays: 7, defaultTaxRate: null, modules: ['today', 'billing', 'collections', 'cashflow', 'files'], position: 1, remindersEnabled: true },
 ];
 const f = (id, businessId, name, color, extra = {}) => ({ id, accountId: 1, businessId, parentId: null, name, color, notes: null, pillar: 'delivery', position: id, ...extra });
 const folders = [
@@ -152,6 +152,8 @@ function route(method, path, q, body) {
     if (path.startsWith('/api/v1/branding') || path.startsWith('/api/v1/account')) return { account };
     if (path.startsWith('/api/v1/tasks/') && path.endsWith('/detail')) return [404, { error: 'Mock has no task detail.' }];
   }
+  if (method === 'PATCH' && m(/^\/api\/v1\/businesses\/(\d+)$/)) { const b = businesses.find((x) => x.id === Number(path.split('/')[4])); if (b && body.defaultTaxRate !== undefined) b.defaultTaxRate = body.defaultTaxRate === null ? null : String(body.defaultTaxRate); return { business: b }; }
+  if (method === 'POST' && path === '/api/v1/documents') { if (!body.businessId) return [400, { error: 'Which business is this from?' }]; const n = { id: nextId++, type: body.type, number: `NEW-${nextId}`, status: 'draft', folderId: body.folderId, businessId: body.businessId, issueDate: today, dueDate: body.dueDate, total: '0', currency: 'ZAR' }; docs.push(n); return [201, { document: n }]; }
   if (method === 'POST' && path === '/api/v1/auth/logout') { signedIn = false; return { ok: true }; }
   if (method === 'POST' && path === '/api/v1/auth/signup') {
     signedIn = true;

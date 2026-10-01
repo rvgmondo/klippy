@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Pencil, Clock, DollarSign, MoreHorizontal, Trash2 } from 'lucide-react';
@@ -17,7 +17,7 @@ import { PrintView } from './InvoicePrintView';
 import { PaymentsModal } from './PaymentsModal';
 import { Page, PageHeader, PageBody } from './PageHeader';
 import type { BusinessSelection } from './BusinessSwitcher';
-import { fieldClass } from './ui';
+import { fieldClass, fieldInlineClass, btnSecondary } from './ui';
 import {
   money, STATUS_COLOR, type TreeFolder, type DocType, type Status, type DocSummary,
   type Line, type DiscountType, type DepositType, type FullDoc,
@@ -447,7 +447,11 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
   const [clientCurrency, setClientCurrency] = useState<string | null>(null);
   const [issueDate, setIssueDate] = useState(todayStr());
   const [dueDate, setDueDate] = useState('');
-  const [taxRate, setTaxRate] = useState(15);
+  // Starts at 0 and is set by the business this comes from. It used to start at 15,
+  // so a business never told its VAT status charged VAT whether registered or not.
+  const [taxRate, setTaxRate] = useState(0);
+  // A rate typed by hand is never overwritten by the business default afterwards.
+  const [taxTouched, setTaxTouched] = useState(false);
   const [discountType, setDiscountType] = useState<DiscountType>('none');
   const [discountValue, setDiscountValue] = useState(0);
   // What the client pays up front. Stated on the document and offered as its own
@@ -508,8 +512,17 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
   // so the common case needs no adjusting. Falls back to nothing when no business.
   const bizDefaults = useQuery({
     queryKey: ['businesses'], enabled: isNew,
-    queryFn: () => apiGet<{ businesses: { id: number; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null }[] }>('/businesses'),
+    queryFn: () => apiGet<{ businesses: { id: number; name: string; color: string; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null }[] }>('/businesses'),
   });
+  const bizList = bizDefaults.data?.businesses ?? [];
+  /**
+   * Which business this document comes from: the one being shown, else the client's
+   * own business, else the only one. With several and no client yet it stays empty
+   * and the form asks, because guessing put invoices on the wrong letterhead.
+   */
+  const [fromBiz, setFromBiz] = useState<number | null>(businessId ?? null);
+  const [fromWhy, setFromWhy] = useState('');
+  const qc = useQueryClient();
   /**
    * Which business's defaults this document takes.
    *
@@ -527,26 +540,62 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
    * would re-filter every list by business, and contacts created while "All businesses" was
    * selected are stored with no business at all, so they would disappear from Contacts.
    */
-  const onlyBusiness = bizDefaults.data?.businesses.length === 1 ? bizDefaults.data.businesses[0]!.id : undefined;
-  const defaultsBusinessId = businessId ?? onlyBusiness;
+  const onlyBusiness = bizList.length === 1 ? bizList[0]!.id : undefined;
+  const defaultsBusinessId = fromBiz ?? onlyBusiness;
+  const fromRow = bizList.find((b) => b.id === defaultsBusinessId);
+  // Nobody has ever said whether this business is VAT registered.
+  const vatUnknown = isNew && !!fromRow && fromRow.defaultTaxRate == null;
   // Waits for the business list whenever no business was passed in. The old condition ran
   // immediately in that case, found nothing, and set `ready`, so the defaults could never
   // be applied once the list arrived a moment later.
-  if (isNew && bizDefaults.data && !ready) {
-    const biz = bizDefaults.data.businesses.find((b) => b.id === defaultsBusinessId);
-    if (biz) {
-      if (biz.defaultTaxRate != null) setTaxRate(Number(biz.defaultTaxRate));
-      // `!= null` and not `> 0`: a business billing on receipt is set to zero days,
-      // and `> 0` reads that as "unset" and leaves the date blank instead.
-      // Only when nothing has set one already, so a client picked before this query
-      // resolved keeps their own term rather than being overwritten by the default.
-      if (type === 'invoice' && biz.defaultDueDays != null && !dueDate) {
-        const due = new Date(`${issueDate}T00:00:00`);
-        due.setDate(due.getDate() + biz.defaultDueDays);
-        setDueDate(iso(due));
-      }
+  // Apply the business's tax rate and terms whenever the business is decided or
+  // changes, for a new document only, and never over a rate typed by hand.
+  const appliedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!isNew || !fromRow || appliedFor.current === fromRow.id) return;
+    appliedFor.current = fromRow.id;
+    if (!taxTouched && fromRow.defaultTaxRate != null) setTaxRate(Number(fromRow.defaultTaxRate));
+    // `!= null` and not `> 0`: a business billing on receipt is set to zero days.
+    // Only when nothing has set one already, so a client's own terms win.
+    if (type === 'invoice' && fromRow.defaultDueDays != null && !dueDate) {
+      const due = new Date(`${issueDate}T00:00:00`);
+      due.setDate(due.getDate() + fromRow.defaultDueDays);
+      setDueDate(iso(due));
     }
-    setReady(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, fromRow?.id]);
+
+  /** Answer the VAT question once, for this business, and remember it. */
+  async function answerVat(registered: boolean) {
+    if (!fromRow) return;
+    const rate = registered ? 15 : 0;
+    setTaxRate(rate); setTaxTouched(false);
+    try {
+      await apiPatch(`/businesses/${fromRow.id}`, { defaultTaxRate: rate });
+      qc.invalidateQueries({ queryKey: ['businesses'] });
+      notify(registered
+        ? `${fromRow.name} adds 15% VAT from now on. Put your VAT number in Settings so invoices say Tax invoice.`
+        : `${fromRow.name} adds no VAT from now on. Change it in Settings if you register.`);
+    } catch {
+      // Somebody without admin rights cannot change the business, but can still bill.
+      notify('Used for this document. Ask an admin to set it in Settings so you are not asked again.', 'error');
+    }
+  }
+
+  // A client handed in by a link, or picked before the business list arrived, still
+  // decides the business once the list is here.
+  useEffect(() => {
+    if (!isNew || businessId || fromBiz || !folderId || !bizList.length) return;
+    fromClient(folderId, clientName);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isNew, folderId, bizList.length, foldersQ.data]);
+
+  /** Point the document at the business a client belongs to, and say why. */
+  function fromClient(clientFolderId: number | null, name: string) {
+    if (!clientFolderId || businessId) return;
+    const f = foldersQ.data?.folders.find((x) => x.id === clientFolderId);
+    const b = bizList.find((x) => x.id === f?.businessId);
+    if (b) { setFromBiz(b.id); setFromWhy(`because ${name} is a ${b.name} client`); }
   }
 
   // Hydrate from the existing document once.
@@ -596,6 +645,12 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
       // Update what this editor already made, rather than making another.
       const targetId = savedDoc?.id ?? (isNew ? null : id);
       const creating = targetId === null;
+      if (creating && bizList.length > 1 && !defaultsBusinessId) {
+        throw new Error('Pick which business this is from first. It decides the letterhead, numbering and bank details.');
+      }
+      if (creating && vatUnknown) {
+        throw new Error(`Say whether ${fromRow?.name ?? 'this business'} is registered for VAT first, so the right amount goes on it.`);
+      }
       const body = {
         type, folderId, clientName: clientName.trim(), clientEmail: clientEmail.trim() || null,
         clientAddress: clientAddress.trim() || null, clientVatNumber: clientVat.trim() || null,
@@ -604,7 +659,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
         depositType, depositValue: Number(depositValue) || 0, notes: notes.trim() || null,
         // Only on create. PUT does not take a business, and restamping tracked time onto a
         // retry would link the same hours twice.
-        ...(creating && businessId ? { businessId } : {}),
+        ...(creating && defaultsBusinessId ? { businessId: defaultsBusinessId } : {}),
         ...(creating && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
           description: l.description.trim(),
@@ -705,6 +760,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
             folderId, name: clientName, email: clientEmail, address: clientAddress, vatNumber: clientVat,
           }} onChange={(v) => {
             setFolderId(v.folderId); setClientName(v.name);
+            fromClient(v.folderId, v.name);
             // Only overwrite details that came with the client, so a name typed by
             // hand on a one-off is not wiped by choosing nothing.
             if (v.folderId) {
@@ -722,6 +778,32 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
           }} />
           <input className={field} placeholder="Client email (optional)" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
         </div>
+        {isNew && !savedDoc && bizList.length > 1 && (
+          <div className="mt-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+            <label className="flex flex-wrap items-center gap-2 text-sm text-slate-300">
+              <span className="text-slate-400">From</span>
+              <select className={`${fieldInlineClass} min-w-[12rem]`} value={fromBiz ?? ''}
+                onChange={(e) => { setFromBiz(e.target.value ? Number(e.target.value) : null); setFromWhy(''); }}>
+                <option value="">Pick a business</option>
+                {bizList.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+              {fromBiz && fromWhy && <span className="text-xs text-slate-500">{fromWhy}</span>}
+            </label>
+            {!fromBiz && (
+              <p className="mt-1.5 text-xs text-amber-300">Pick one, or pick the client first and it fills itself in. It decides the letterhead, the numbering and the bank details.</p>
+            )}
+          </div>
+        )}
+        {vatUnknown && (
+          <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3">
+            <p className="text-sm font-medium text-slate-100">Is {fromRow!.name} registered for VAT?</p>
+            <p className="mt-0.5 text-xs text-slate-400">Asked once. Your answer is saved for {fromRow!.name}, so every invoice after this one gets it right.</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => answerVat(false)} className={`${btnSecondary} min-h-10`}>No, no VAT</button>
+              <button type="button" onClick={() => answerVat(true)} className={`${btnSecondary} min-h-10`}>Yes, add 15% VAT</button>
+            </div>
+          </div>
+        )}
         <textarea className={field + ' mt-3'} placeholder="Client address (optional)" value={clientAddress} onChange={(e) => setClientAddress(e.target.value)} />
         <input className={field + ' mt-3'} placeholder="Client VAT number (optional, for tax invoices)" value={clientVat} onChange={(e) => setClientVat(e.target.value)} />
 
@@ -741,7 +823,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <div><label className="mb-1 block text-[11px] text-slate-500">Issue date</label><input type="date" className={field} value={issueDate} onChange={(e) => setIssueDate(e.target.value)} /></div>
           <div><label className="mb-1 block text-[11px] text-slate-500">{type === 'quote' ? 'Valid until' : 'Due date'}</label><input type="date" className={field} value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
-          <div><label className="mb-1 block text-[11px] text-slate-500">Tax %</label><input type="number" className={field} value={taxRate} onChange={(e) => setTaxRate(Number(e.target.value))} /></div>
+          <div><label className="mb-1 block text-[11px] text-slate-500">Tax %</label><input type="number" className={field} value={taxRate} onChange={(e) => { setTaxRate(Number(e.target.value)); setTaxTouched(true); }} /></div>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
