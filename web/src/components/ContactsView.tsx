@@ -51,7 +51,7 @@ export function ContactsView({ businessId }: { businessId: BusinessSelection }) 
 
   return (
     <Page>
-      <PageHeader view="contacts" title="Contacts"
+      <PageHeader view="contacts" title="People"
         subtitle="The people behind your deals and clients, kept once."
         actions={(
           <>

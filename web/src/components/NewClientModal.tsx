@@ -58,6 +58,8 @@ export function NewClientModal({ businessId, businessName, pillar, label, onClos
     },
     onSuccess: (folder) => {
       qc.invalidateQueries({ queryKey: ['folders'] });
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      qc.invalidateQueries({ queryKey: ['client'] });
       onCreated(folder);
     },
     onError: (e) => setErr(e instanceof Error ? e.message : 'Could not add that client.'),

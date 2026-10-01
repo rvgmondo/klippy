@@ -107,7 +107,7 @@ export function TakingsView({ businessId }: { businessId: BusinessSelection }) {
 
   const frame = (children: React.ReactNode) => (
     <Page>
-      <PageHeader view="takings" title="Takings"
+      <PageHeader view="takings" title="Counter sales"
         subtitle="Money taken over the counter, what the card provider kept, and what reached the bank." />
       <PageBody>{children}</PageBody>
     </Page>

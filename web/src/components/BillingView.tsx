@@ -58,6 +58,23 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     setTab(v);
     setEditing('new');
   });
+  // A client page or a search result can ask for one document by id. The tab has
+  // to match its type before the editor opens, or a quote would open as an invoice.
+  useUrlAction('open', (v) => {
+    const id = Number(v);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const given = takeUrlParam('doctype');
+    const show = (t: string) => {
+      // A credit note has no editor of its own here; its PDF is the whole of it.
+      if (t === 'credit_note') { window.open(`/api/v1/documents/${id}/pdf`, '_blank', 'noopener'); return; }
+      setTab(t === 'quote' ? 'quote' : 'invoice');
+      setEditing(id);
+    };
+    if (given) { show(given); return; }
+    apiGet<{ document: { type: string } }>(`/documents/${id}`)
+      .then((r) => show(r.document?.type ?? 'invoice'))
+      .catch((e: Error) => notify(e.message || 'That document could not be opened.', 'error'));
+  });
   const [printing, setPrinting] = useState<number | null>(null);
   const [paying, setPaying] = useState<DocSummary | null>(null);
   const bizParam = businessId === 'all' ? '' : `&businessId=${businessId}`;
@@ -150,7 +167,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
 
   return (
     <Page>
-      <PageHeader view="billing" title="Billing"
+      <PageHeader view="billing" title="Quotes and invoices"
         subtitle="Quotes, invoices and what has been paid."
         actions={(
           <button onClick={() => setEditing('new')}

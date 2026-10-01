@@ -20,6 +20,7 @@ import { ContactsView } from '../components/ContactsView';
 import { DashboardView } from '../components/DashboardView';
 import { TakingsView } from '../components/TakingsView';
 import { SocialView } from '../components/SocialView';
+import { ClientsView } from '../components/ClientsView';
 import { FocusTimer } from '../components/FocusTimer';
 import { TimerChip } from '../components/TimerChip';
 import { NotificationsBell } from '../components/NotificationsBell';
@@ -30,7 +31,7 @@ import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
 import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
+type View = 'home' | 'clients' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
 
 
 function loadBusiness(): BusinessSelection {
@@ -40,7 +41,7 @@ function loadBusiness(): BusinessSelection {
   return Number.isFinite(n) && n > 0 ? n : 'all';
 }
 
-const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings', 'social',
+const ALL_VIEWS: View[] = ['home', 'clients', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings', 'social',
   'offerings', 'expenses', 'reports', 'billing', 'collections', 'cashflow', 'settings'];
 
 /**
@@ -50,7 +51,7 @@ const ALL_VIEWS: View[] = ['home', 'today', 'pipeline', 'contacts', 'board', 'ca
  * board in the query string and reads it back, without pulling in a router: enough
  * to make deep links, the back button, and push navigation work.
  */
-interface UrlState { view: View; businessId: BusinessSelection; boardId: number | null }
+interface UrlState { view: View; businessId: BusinessSelection; boardId: number | null; clientId: number | null }
 
 function readUrlState(): UrlState {
   const q = new URLSearchParams(window.location.search);
@@ -61,7 +62,9 @@ function readUrlState(): UrlState {
     : (b && /^\d+$/.test(b) ? Number(b) : loadBusiness());
   const bd = q.get('board');
   const boardId = bd && /^\d+$/.test(bd) ? Number(bd) : null;
-  return { view, businessId, boardId };
+  const cl = q.get('client');
+  const clientId = view === 'clients' && cl && /^\d+$/.test(cl) ? Number(cl) : null;
+  return { view, businessId, boardId, clientId };
 }
 
 function writeUrlState(st: UrlState, replace: boolean): void {
@@ -70,6 +73,8 @@ function writeUrlState(st: UrlState, replace: boolean): void {
   q.set('b', String(st.businessId));
   if (st.view === 'board' && st.boardId != null) q.set('board', String(st.boardId));
   else q.delete('board');
+  if (st.view === 'clients' && st.clientId != null) q.set('client', String(st.clientId));
+  else q.delete('client');
   const url = `${window.location.pathname}?${q.toString()}`;
   if (replace) window.history.replaceState(null, '', url);
   else window.history.pushState(null, '', url);
@@ -80,6 +85,7 @@ export function Workspace() {
   const initial = readUrlState();
   const [boardId, setBoardId] = useState<number | null>(initial.boardId);
   const [view, setView] = useState<View>(initial.view);
+  const [clientId, setClientId] = useState<number | null>(initial.clientId);
   const [showTimer, setShowTimer] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -111,6 +117,7 @@ export function Workspace() {
       const next = readUrlState();
       setView(next.view);
       if (next.boardId != null) setBoardId(next.boardId);
+      setClientId(next.clientId);
     };
     window.addEventListener('klippy:params', sync);
     return () => window.removeEventListener('klippy:params', sync);
@@ -148,9 +155,9 @@ export function Workspace() {
   // a history entry); later changes push, so Back returns to the previous view.
   const firstSync = useRef(true);
   useEffect(() => {
-    writeUrlState({ view, businessId, boardId }, firstSync.current);
+    writeUrlState({ view, businessId, boardId, clientId }, firstSync.current);
     firstSync.current = false;
-  }, [view, businessId, boardId]);
+  }, [view, businessId, boardId, clientId]);
 
   // Back/forward (and the Android back gesture) restore the view from the URL
   // instead of exiting the app.
@@ -160,6 +167,7 @@ export function Workspace() {
       setView(st.view);
       setBusinessId(st.businessId);
       setBoardId(st.boardId);
+      setClientId(st.clientId);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -191,7 +199,7 @@ export function Workspace() {
           selectedBoardId={boardId}
           businessId={businessId}
           view={view}
-          onNavigate={(v) => { setView(v as View); setNavOpen(false); }}
+          onNavigate={(v) => { setView(v as View); if (v === 'clients') setClientId(null); setNavOpen(false); }}
           onBusinessChange={selectBusiness}
           onSelectBoard={(id) => { setBoardId(id); setView('board'); setNavOpen(false); }}
         />
@@ -257,6 +265,10 @@ export function Workspace() {
 
         <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[calc(52px+env(safe-area-inset-bottom))] lg:pb-safe">
           {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
+          {view === 'clients' && (
+            <ClientsView businessId={businessId} clientId={clientId}
+              onOpen={(id) => setClientId(id)} onBack={() => setClientId(null)} />
+          )}
           {view === 'today' && <TodayView businessId={businessId} onNavigate={(v) => setView(v as View)} />}
           {view === 'pipeline' && <PipelineView businessId={businessId} onOpenClient={openClient} />}
           {view === 'contacts' && <ContactsView businessId={businessId} />}
@@ -276,7 +288,8 @@ export function Workspace() {
       </div>
 
       <MobileTabBar view={view} businessId={businessId}
-        onNavigate={(v) => setView(v as View)} onOpenMore={() => setNavOpen(true)} />
+        onNavigate={(v) => { setView(v as View); if (v === 'clients') setClientId(null); }}
+        onOpenMore={() => setNavOpen(true)} />
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)}
         onNavigate={(v) => setView(v as View)}

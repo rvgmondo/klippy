@@ -42,23 +42,26 @@ export const AREAS: {
   key: string; label: string; icon: LucideIcon; blurb: string;
   defaultView: string; views: string[]; modules: string[];
 }[] = [
-  { key: 'home', label: 'Home', icon: Home, blurb: 'The one overview', defaultView: 'home', views: ['home'], modules: [] },
+  { key: 'home', label: 'Home', icon: Home, blurb: 'What needs you', defaultView: 'home', views: ['home'], modules: [] },
+  // Clients are a door of their own. They used to live only inside the Work tree,
+  // so the question "what is going on with Acme" had no home.
+  { key: 'clients', label: 'Clients', icon: Users, blurb: 'Everyone you work for', defaultView: 'clients', views: ['clients', 'contacts'], modules: [] },
   {
     key: 'work', label: 'Work', icon: Briefcase, blurb: 'Do the work',
-    defaultView: 'today', views: ['today', 'board', 'calendar', 'reports', 'files'],
-    modules: ['today', 'calendar', 'reports', 'files'],
+    defaultView: 'today', views: ['today', 'board', 'calendar', 'social', 'files'],
+    modules: ['today', 'calendar', 'social', 'files'],
   },
   {
-    key: 'sales', label: 'Sales', icon: Target, blurb: 'Bring work in',
-    defaultView: 'pipeline', views: ['pipeline', 'offerings', 'contacts', 'social'],
-    modules: ['pipeline', 'offerings', 'social'],
+    key: 'sales', label: 'Sales', icon: Target, blurb: 'Win new work',
+    defaultView: 'pipeline', views: ['pipeline', 'offerings'],
+    modules: ['pipeline', 'offerings'],
   },
   {
-    key: 'money', label: 'Money', icon: Wallet, blurb: 'Handle the money',
-    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses', 'takings'],
-    modules: ['billing', 'collections', 'cashflow', 'expenses', 'takings'],
+    key: 'money', label: 'Money', icon: Wallet, blurb: 'Get paid',
+    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses', 'takings', 'reports'],
+    modules: ['billing', 'collections', 'cashflow', 'expenses', 'takings', 'reports'],
   },
-  { key: 'admin', label: 'Admin', icon: Settings, blurb: 'Run the machine', defaultView: 'settings', views: ['settings'], modules: [] },
+  { key: 'settings', label: 'Settings', icon: Settings, blurb: 'Your businesses and how Klippy works for them', defaultView: 'settings', views: ['settings'], modules: [] },
 ];
 
 export function areaOf(view: string) {
@@ -147,8 +150,9 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
       icon: MODULE_ICON[k] ?? Home,
       hint: hintOf(k),
     }));
-  if (area.key === 'sales') {
-    items.push({ key: 'contacts', label: 'Contacts', icon: Users, hint: 'The people behind your deals and clients.' });
+  if (area.key === 'clients') {
+    items.push({ key: 'clients', label: account?.folderLabelPlural || 'Clients', icon: Users, hint: 'Everyone you work for.' });
+    items.push({ key: 'contacts', label: 'People', icon: Users, hint: 'The people behind your deals and clients.' });
   }
 
   return (
@@ -178,7 +182,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
                   ? 'bg-[var(--accent-quiet)] text-violet-300'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>
               <Icon size={18} className="shrink-0" />
-              {a.label}
+              {a.key === 'clients' ? (account?.folderLabelPlural || a.label) : a.label}
             </button>
           );
         })}
@@ -206,6 +210,24 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
             reach behind it. */}
         <div className="border-b border-slate-800 px-2 py-2 lg:hidden">
           <BusinessSwitcher value={businessId} onChange={onBusinessChange} full />
+        </div>
+
+        {/* On a phone the bottom bar carries four doors; the other two live here. */}
+        <div className="shrink-0 border-b border-slate-800 px-2 py-2 lg:hidden">
+          <div className="grid grid-cols-3 gap-1">
+            {AREAS.filter((a) => a.key === 'sales' || a.key === 'settings').map((a) => {
+              const Icon = a.icon;
+              const on = a.key === area.key;
+              return (
+                <button key={a.key} onClick={() => onNavigate(a.defaultView)}
+                  className={`flex min-h-11 items-center gap-2 rounded-lg px-2.5 text-sm ${on
+                    ? 'bg-[var(--accent-quiet)] font-medium text-violet-300'
+                    : 'text-slate-300 hover:bg-slate-800/60'}`}>
+                  <Icon size={16} /> {a.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {items.length > 0 && (
@@ -253,7 +275,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   );
 }
 
-// One business's slice of the sidebar: its Delivery and Operations sections.
+// One business's slice of the sidebar: its clients, then its internal work.
 function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSingular, folderLabelPlural, selectedBoardId, onSelectBoard }: {
   business: Business; all: TFolder[]; showHeader: boolean; defaultOpen?: boolean;
   folderLabelSingular?: string; folderLabelPlural?: string;
@@ -310,7 +332,7 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
 
       {open && (
         <>
-          <SectionHeader label={`Delivery / ${folderLabelPlural ?? 'Clients'}`} onAdd={() => addTop('delivery')} />
+          <SectionHeader label={folderLabelPlural ?? 'Clients'} onAdd={() => addTop('delivery')} />
           {deliveryRoots.length === 0 && (
             <p className="px-2 py-2 text-center text-[11px] text-slate-500">No {folderLabelPlural?.toLowerCase() ?? 'clients'} yet.</p>
           )}
@@ -318,7 +340,7 @@ function BusinessBlock({ business, all, showHeader, defaultOpen, folderLabelSing
             selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
 
           <div className="mt-3">
-            <SectionHeader label="Operations / Internal" onAdd={() => addTop('operations')} />
+            <SectionHeader label="Internal work" onAdd={() => addTop('operations')} />
             {opsRoots.length === 0 && (
               <p className="px-2 py-2 text-center text-[11px] text-slate-500">Admin, hiring, finance...</p>
             )}

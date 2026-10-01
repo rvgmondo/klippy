@@ -38,7 +38,7 @@ export function CashflowView({ businessId }: { businessId: BusinessSelection }) 
 
   return (
     <Page>
-      <PageHeader view="cashflow" title="Cash flow"
+      <PageHeader view="cashflow" title="Coming in"
         subtitle="What should arrive over the next eight weeks, from invoices already out and subscriptions still to bill." />
       <PageBody className="space-y-6">
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}

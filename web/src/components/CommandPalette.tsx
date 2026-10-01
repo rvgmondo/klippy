@@ -7,7 +7,7 @@ import {
   Plus, Building2, SquareKanban, FileText, Search, type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
-import { setUrlParams } from '../lib/urlAction';
+import { setUrlParams, navigateTo } from '../lib/urlAction';
 import type { Business } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 
@@ -77,15 +77,23 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
     const matches = (label: string) => !term || label.toLowerCase().includes(term);
 
     const goto: [string, string, LucideIcon][] = [
-      ['home', 'Home', Home], ['today', 'Today', CalendarCheck], ['calendar', 'Calendar', CalendarDays],
-      ['reports', 'Reports', BarChart3], ['files', 'Files', HardDrive],
-      ['pipeline', 'Pipeline', Target], ['offerings', 'Offerings', Package], ['contacts', 'Contacts', Users],
-      ['billing', 'Billing', Receipt], ['collections', 'Collections', AlertTriangle],
-      ['cashflow', 'Cash flow', TrendingUp], ['expenses', 'Expenses', Wallet],
+      ['home', 'Home', Home], ['clients', 'Clients', Users], ['today', 'Today', CalendarCheck],
+      ['calendar', 'Calendar', CalendarDays], ['reports', 'Reports', BarChart3], ['files', 'Files', HardDrive],
+      ['pipeline', 'Deals', Target], ['offerings', 'Price list', Package], ['contacts', 'People', Users],
+      ['billing', 'Quotes and invoices', Receipt], ['collections', 'Owed to you', AlertTriangle],
+      ['cashflow', 'Coming in', TrendingUp], ['expenses', 'Expenses', Wallet],
       ['settings', 'Settings', Settings],
     ];
+    // Screens answer to the names they used to have, so nobody is stranded by the rename.
+    const WAS: Record<string, string> = {
+      pipeline: 'Pipeline', offerings: 'Offerings', contacts: 'Contacts', billing: 'Billing',
+      collections: 'Collections', cashflow: 'Cash flow', settings: 'Admin', social: 'Social',
+    };
     for (const [view, label, icon] of goto) {
-      if (matches(label)) all.push({ key: `go-${view}`, group: 'Go to', label, icon, run: () => go(view) });
+      const was = WAS[view];
+      if (matches(label) || (was && term && matches(was))) {
+        all.push({ key: `go-${view}`, group: 'Go to', label, sub: was && term && !matches(label) ? `Used to be ${was}` : undefined, icon, run: () => go(view) });
+      }
     }
 
     const creates: [string, string, LucideIcon, string, Record<string, string>][] = [
@@ -93,8 +101,8 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
       ['billing', 'New quote', FileText, 'Money', { new: 'quote' }],
       ['pipeline', 'New deal', Target, 'Sales', { new: 'deal' }],
       ['expenses', 'New expense', Wallet, 'Money', { new: 'expense' }],
-      ['offerings', 'New offering', Package, 'Sales', { new: 'offering' }],
-      ['offerings', 'Start subscription', Plus, 'Sales', { sub: '1' }],
+      ['offerings', 'New price list item', Package, 'Sales', { new: 'offering' }],
+      ['offerings', 'Start a repeating invoice', Plus, 'Sales', { sub: '1' }],
     ];
     for (const [view, label, icon, sub, params] of creates) {
       if (matches(label)) all.push({ key: `new-${label}`, group: 'Create', label, sub, icon, run: () => go(view, params) });
@@ -111,28 +119,28 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
     const r = debounced.length >= 2 ? results.data : undefined;
     if (r) {
       for (const c of r.clients) all.push({
-        key: `client-${c.id}`, group: 'Clients', label: c.name, sub: c.boardId ? 'Open their board' : 'No board yet', icon: Users,
-        run: () => { if (c.boardId) { onSelectBoard(c.boardId); onClose(); } else go('board'); },
+        key: `client-${c.id}`, group: 'Clients', label: c.name, sub: 'What they owe, their work, how to reach them', icon: Users,
+        run: () => { navigateTo('clients', { client: String(c.id) }); onClose(); },
       });
       for (const t of r.tasks) all.push({
-        key: `task-${t.id}`, group: 'Cards', label: t.title,
+        key: `task-${t.id}`, group: 'Tasks', label: t.title,
         sub: [t.folderName, t.boardName].filter(Boolean).join(' / '), icon: SquareKanban,
         run: () => { onSelectBoard(t.boardId); onClose(); },
       });
       for (const d of r.documents) all.push({
-        key: `doc-${d.id}`, group: 'Documents', label: d.number, sub: `${d.clientName} (${d.status})`, icon: Receipt,
-        run: () => go('billing'),
+        key: `doc-${d.id}`, group: 'Quotes and invoices', label: d.number, sub: `${d.clientName} (${d.status})`, icon: Receipt,
+        run: () => { navigateTo('billing', { open: String(d.id) }); onClose(); },
       });
       for (const d of r.deals) all.push({
         key: `deal-${d.id}`, group: 'Deals', label: d.title, sub: d.company ?? d.stage, icon: Target,
         run: () => go('pipeline'),
       });
       for (const c of r.contacts) all.push({
-        key: `contact-${c.id}`, group: 'Contacts', label: c.name, sub: c.company ?? undefined, icon: Users,
+        key: `contact-${c.id}`, group: 'People', label: c.name, sub: c.company ?? undefined, icon: Users,
         run: () => go('contacts'),
       });
       for (const o of r.offerings) all.push({
-        key: `off-${o.id}`, group: 'Offerings', label: o.name, sub: o.recurring ? 'recurring' : undefined, icon: Package,
+        key: `off-${o.id}`, group: 'Price list', label: o.name, sub: o.recurring ? 'recurring' : undefined, icon: Package,
         run: () => go('offerings'),
       });
     }

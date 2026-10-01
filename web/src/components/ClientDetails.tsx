@@ -156,6 +156,8 @@ export function ClientDetails({ folder, onClose }: { folder: Folder; onClose: ()
     onSuccess: () => {
       setDirty(false);
       qc.invalidateQueries({ queryKey: ['folders'] });
+      qc.invalidateQueries({ queryKey: ['clients'] });
+      qc.invalidateQueries({ queryKey: ['client'] });
       qc.invalidateQueries({ queryKey: ['contacts'] });
       notify('Saved.', 'ok');
     },

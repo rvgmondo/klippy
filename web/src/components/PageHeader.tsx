@@ -53,7 +53,7 @@ export function PageHeader({ view, title, subtitle, actions, children }: {
     .map((k) => ({ key: k, label: labelOf(k) }));
   // Contacts is not a module (the people behind deals are always there), so it
   // rides along with Sales exactly as it does in the rail.
-  if (area.key === 'sales') tabs.push({ key: 'contacts', label: 'Contacts' });
+  if (area.key === 'clients') tabs.push({ key: 'clients', label: 'Clients' }, { key: 'contacts', label: 'People' });
 
   return (
     <div className="sticky top-0 z-20 shrink-0 border-b border-slate-800 bg-slate-950/85 px-4 pt-4 backdrop-blur sm:px-6">

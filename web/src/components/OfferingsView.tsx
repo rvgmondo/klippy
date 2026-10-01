@@ -108,7 +108,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
 
   return (
     <Page>
-      <PageHeader view="offerings" title="Offerings"
+      <PageHeader view="offerings" title="Price list"
         subtitle="What this business actually sells. Rename, price and stock these however fits."
         actions={(
           <button onClick={() => setEditing('new')}

@@ -46,12 +46,12 @@ export interface ModuleDef {
 
 export const MODULES: ModuleDef[] = [
   // Acquisition
-  { key: 'pipeline', label: 'Pipeline', primitive: 'acquisition', hint: 'Leads and deals on their way to becoming work.' },
-  { key: 'offerings', label: 'Offerings', primitive: 'acquisition', hint: 'What this business sells, and its recurring plans.' },
+  { key: 'pipeline', label: 'Deals', primitive: 'acquisition', hint: 'Jobs you are trying to win, from first chat to signed.' },
+  { key: 'offerings', label: 'Price list', primitive: 'acquisition', hint: 'What this business sells, at what price, and what repeats every month.' },
   // Filed under acquisition because that is what posting is FOR, even when an agency
   // does it on a client's behalf. Off by default everywhere: a business that does not
   // run social accounts should not carry an empty calendar around.
-  { key: 'social', label: 'Social', primitive: 'acquisition', hint: 'Plan, approve and schedule posts, then see what they did.' },
+  { key: 'social', label: 'Posts', primitive: 'acquisition', hint: 'Plan, approve and schedule posts, then see what they did.' },
 
   // Fulfillment
   { key: 'today', label: 'Today', primitive: 'fulfillment', core: true, hint: 'The day planned against the time you actually have.' },
@@ -60,13 +60,13 @@ export const MODULES: ModuleDef[] = [
   { key: 'reports', label: 'Reports', primitive: 'fulfillment', defaultFor: ['services', 'code'], hint: 'Time turned into money, and estimate against actual.' },
 
   // Finance
-  { key: 'billing', label: 'Billing', primitive: 'finance', core: true, hint: 'Quotes, invoices and payments.' },
-  { key: 'collections', label: 'Collections', primitive: 'finance', hint: 'Who is overdue and who has been flagged.' },
-  { key: 'cashflow', label: 'Cash flow', primitive: 'finance', hint: 'What money should arrive over the next eight weeks.' },
+  { key: 'billing', label: 'Quotes and invoices', primitive: 'finance', core: true, hint: 'Everything you have quoted and billed, and what is paid.' },
+  { key: 'collections', label: 'Owed to you', primitive: 'finance', hint: 'Who is late paying you, and chasing them.' },
+  { key: 'cashflow', label: 'Coming in', primitive: 'finance', hint: 'What money should arrive over the next eight weeks.' },
   { key: 'expenses', label: 'Expenses', primitive: 'finance', hint: 'What the business spends, against what it earns.' },
   // A shop takes most of its money over a counter; an agency takes none of it that
   // way, so this is off unless the business actually sells to walk-ins.
-  { key: 'takings', label: 'Takings', primitive: 'finance', defaultFor: ['products'], hint: 'Card machine and counter sales, and what the fees cost you.' },
+  { key: 'takings', label: 'Counter sales', primitive: 'finance', defaultFor: ['products'], hint: 'Card machine and counter sales, and what the fees cost you.' },
 
   // Admin
   { key: 'files', label: 'Files', primitive: 'admin', hint: 'Contracts and assets, kept next to the work.' },

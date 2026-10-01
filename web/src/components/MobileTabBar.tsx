@@ -1,21 +1,19 @@
-import { Home, Briefcase, Target, Wallet, Settings, type LucideIcon } from 'lucide-react';
+import { Home, Briefcase, Users, Wallet, Menu, type LucideIcon } from 'lucide-react';
 import { areaOf } from './Sidebar';
 import type { BusinessSelection } from './BusinessSwitcher';
 
 /**
- * Phone navigation: the same five words as the desktop rail, so the phone is the
- * same product, not a re-mapping of it. Tapping an area lands on its default
- * screen; tapping the area you are already in opens the drawer, which carries the
- * area's second-level items and the boards tree.
+ * Phone navigation: the four doors used every day, plus Menu for the rest. The
+ * drawer behind Menu carries Sales, Settings, the area's own screens and the
+ * boards tree.
  *
  * Hidden from lg upward, where the rail does this job.
  */
 const TABS: { key: string; label: string; icon: LucideIcon; view: string }[] = [
   { key: 'home', label: 'Home', icon: Home, view: 'home' },
+  { key: 'clients', label: 'Clients', icon: Users, view: 'clients' },
   { key: 'work', label: 'Work', icon: Briefcase, view: 'today' },
-  { key: 'sales', label: 'Sales', icon: Target, view: 'pipeline' },
   { key: 'money', label: 'Money', icon: Wallet, view: 'billing' },
-  { key: 'admin', label: 'Admin', icon: Settings, view: 'settings' },
 ];
 
 export function MobileTabBar({ view, onNavigate, onOpenMore }: {
@@ -31,7 +29,7 @@ export function MobileTabBar({ view, onNavigate, onOpenMore }: {
         const Icon = t.icon;
         const on = active === t.key;
         return (
-          <button key={t.key} onClick={() => (on ? onOpenMore() : onNavigate(t.view))}
+          <button key={t.key} onClick={() => onNavigate(t.view)}
             className={`flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${
               on ? 'text-[var(--accent)]' : 'text-slate-500 hover:text-slate-300'}`}>
             <Icon size={19} />
@@ -39,6 +37,14 @@ export function MobileTabBar({ view, onNavigate, onOpenMore }: {
           </button>
         );
       })}
+      {/* Sales, Settings and everything inside an area live behind Menu, so the four
+          doors used every day stay one thumb away. */}
+      <button onClick={onOpenMore}
+        className={`flex min-h-[52px] flex-1 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${
+          active === 'sales' || active === 'settings' ? 'text-[var(--accent)]' : 'text-slate-500 hover:text-slate-300'}`}>
+        <Menu size={19} />
+        Menu
+      </button>
     </nav>
   );
 }

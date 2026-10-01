@@ -109,7 +109,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
 
   return (
     <Page>
-      <PageHeader view="collections" title="Collections"
+      <PageHeader view="collections" title="Owed to you"
         subtitle="Overdue invoices, and who has been flagged for non-payment." />
       <PageBody className="space-y-5">
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}

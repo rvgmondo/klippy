@@ -109,7 +109,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
 
   return (
     <CanvasPage>
-      <PageHeader view="pipeline" title="Pipeline" subtitle="Turn leads into clients."
+      <PageHeader view="pipeline" title="Deals" subtitle="A deal is a job you are trying to win."
         actions={(
           <>
             {!acting.loading && (
