@@ -9,7 +9,7 @@ import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { balanceOf, balancesFor } from '../lib/balances.js';
 import { intId } from '../lib/http.js';
-import { resolveBusinessId } from '../lib/business.js';
+import { businessForDocument } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
@@ -521,7 +521,10 @@ export async function documentRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
-        const businessId = await resolveBusinessId(accountId, d.businessId);
+        const which = await businessForDocument(accountId, d.businessId, d.folderId);
+        if ('error' in which)
+            return reply.code(400).send({ error: which.error });
+        const businessId = which.id;
         /**
          * The business decides what it bills in, unless this client is billed in
          * something else. Settled before the totals, because rounding depends on it, and
