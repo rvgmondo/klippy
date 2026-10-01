@@ -122,15 +122,17 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
                 the headline onto an extra line and pushed the whole page down
                 41px: 0.033 of layout shift on a phone. The break is explicit
                 anyway, so the cap was doing nothing but inviting the reflow. */}
+            {/* The big idea, broad enough to grow into. The line under it is the
+                first thing it does for you, so it never reads like every other
+                all-in-one app. */}
             <h1 className="mk-display">
-              The work, the time,<br />the invoice.
+              The one place your<br /><span className="mk-accent">business runs from.</span>
             </h1>
-            <p className="mk-display mk-accent mt-1">One place.</p>
 
             <p className="mk-lead mk-muted mt-8 max-w-[34rem]">
-              Klippy is the operating system for a business you run yourself. Track the work, run the
-              timer on it, and turn those hours into an invoice that chases itself while you get on
-              with the next thing.
+              Quotes, invoices, clients, jobs and your day, all together. Klippy chases what
+              you&apos;re owed and shows you what needs you each morning, and it grows with you as
+              you add more.
             </p>
 
             <div className="mt-10 flex flex-wrap items-center gap-3">
