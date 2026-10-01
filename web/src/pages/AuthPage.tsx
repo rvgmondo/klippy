@@ -105,10 +105,10 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
         </div>
 
         <form onSubmit={submit} className="space-y-3">
-          {(mode === 'login' || mode === 'signup' || mode === 'forgot' || mode === 'invite') && (
+          {(mode === 'login' || mode === 'forgot' || mode === 'invite') && (
             <input className={input} type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           )}
-          {(mode === 'login' || mode === 'signup' || mode === 'reset' || mode === 'invite') && (
+          {(mode === 'login' || mode === 'reset' || mode === 'invite') && (
             <input className={input} type="password" placeholder={mode === 'reset' ? 'New password' : 'Password'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={(e) => setPassword(e.target.value)} required />
           )}
@@ -125,7 +125,6 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
             {busy ? 'Please wait...'
               : mode === 'login' ? 'Sign in'
               : mode === 'twofactor' ? 'Verify'
-              : mode === 'signup' ? 'Create workspace'
               : mode === 'forgot' ? 'Send reset link'
               : mode === 'invite' ? 'Accept and join'
               : 'Update password'}
@@ -138,9 +137,6 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
               <p><button className="text-violet-400 hover:text-violet-300" onClick={() => { setMode('forgot'); setError(null); setNotice(null); }}>Forgot password?</button></p>
               <p>New to Klippy? <button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('signup'); setError(null); setNotice(null); }}>Create an account</button></p>
             </>
-          )}
-          {mode === 'signup' && (
-            <p>Already have one? <button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('login'); setError(null); setNotice(null); }}>Sign in</button></p>
           )}
           {mode === 'twofactor' && (
             <p><button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('login'); setTicket(''); setCode(''); setError(null); }}>Back to sign in</button></p>
