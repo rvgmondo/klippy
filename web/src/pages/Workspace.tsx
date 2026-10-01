@@ -17,7 +17,7 @@ import { OfferingsView } from '../components/OfferingsView';
 import { ExpensesView } from '../components/ExpensesView';
 import { PipelineView } from '../components/PipelineView';
 import { ContactsView } from '../components/ContactsView';
-import { DashboardView } from '../components/DashboardView';
+import { HomeView } from '../components/HomeView';
 import { TakingsView } from '../components/TakingsView';
 import { SocialView } from '../components/SocialView';
 import { ClientsView } from '../components/ClientsView';
@@ -264,7 +264,7 @@ export function Workspace() {
         </header>
 
         <main className="min-h-0 flex-1 overflow-hidden pr-safe pb-[calc(52px+env(safe-area-inset-bottom))] lg:pb-safe">
-          {view === 'home' && <DashboardView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
+          {view === 'home' && <HomeView businessId={businessId} onNavigate={(v) => setView(v as View)} onPickBusiness={selectBusiness} />}
           {view === 'clients' && (
             <ClientsView businessId={businessId} clientId={clientId}
               onOpen={(id) => setClientId(id)} onBack={() => setClientId(null)} />

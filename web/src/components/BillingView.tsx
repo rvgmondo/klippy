@@ -9,6 +9,7 @@ import { ClientPicker } from './ClientPicker';
 import { iso } from '../lib/dates';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
+import { DocActionSheet, type DocAction, type DocRef } from './DocActionSheet';
 import { EmptyState, Skeleton } from './ui';
 import { Modal } from './Modal';
 import { Menu } from './Menu';
@@ -77,6 +78,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   });
   const [printing, setPrinting] = useState<number | null>(null);
   const [paying, setPaying] = useState<DocSummary | null>(null);
+  const [acting, setActing] = useState<{ doc: DocRef; action: DocAction } | null>(null);
   const bizParam = businessId === 'all' ? '' : `&businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
@@ -125,6 +127,32 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     }
   };
   const todayStr = new Date().toISOString().slice(0, 10);
+
+  /**
+   * The one thing this document needs next, as a button that does it.
+   * A draft is sent, a late invoice is chased, a waiting one is marked paid, an
+   * open quote gets a reminder. Everything else stays in the menu.
+   */
+  const nextStep = (d: DocSummary, big = false) => {
+    const ref: DocRef = { id: d.id, number: d.number, clientName: d.clientName, amount: Number(d.total), currency: d.currency, type: d.type };
+    const cls = `rounded-lg px-3 text-xs font-medium ${big ? 'min-h-10' : 'min-h-8'}`;
+    const primary = `${cls} bg-[var(--accent)] text-[var(--accent-ink)] hover:opacity-90`;
+    const quiet = `${cls} border border-slate-700 text-slate-200 hover:bg-slate-800`;
+    if (d.status === 'draft') return <button onClick={() => setActing({ doc: ref, action: 'send' })} className={primary}>Send</button>;
+    if (d.type === 'invoice' && d.status === 'sent') {
+      const late = !!d.dueDate && d.dueDate < todayStr;
+      return (
+        <>
+          {late && <button onClick={() => setActing({ doc: ref, action: 'chase' })} className={quiet}>Chase</button>}
+          <button onClick={() => setPaying(d)} className={primary}>Paid</button>
+        </>
+      );
+    }
+    if (d.type === 'quote' && d.status === 'sent' && !(d.dueDate && d.dueDate < todayStr)) {
+      return <button onClick={() => setActing({ doc: ref, action: 'remind' })} className={quiet}>Remind</button>;
+    }
+    return null;
+  };
   // The signed public link a client can accept the quote on, no account needed.
   const copyQuoteLink = async (id: number) => {
     try {
@@ -255,6 +283,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                         accessibility failure and a fat-finger trap on a phone. The
                         two everyday actions stay one tap; the rest live in a menu. */}
                     <div className="flex items-center justify-end gap-1">
+                      {nextStep(d)}
                       <button onClick={() => setEditing(d.id)} title="Edit"
                         className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Pencil size={14} /></button>
                       {d.type === 'invoice' && (
@@ -319,6 +348,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                 </span>
               </button>
               <div className="mt-2 flex items-center justify-end gap-1">
+                {nextStep(d, true)}
                 <button onClick={() => setEditing(d.id)} title="Edit" className="tap text-slate-400 hover:bg-slate-800 hover:text-slate-200"><Pencil size={16} /></button>
                 {d.type === 'invoice' && (
                   <button onClick={() => setPaying(d)} title="Payments" className="tap text-slate-400 hover:bg-slate-800 hover:text-green-300"><DollarSign size={16} /></button>
@@ -351,6 +381,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
       {editing && <Editor key={`${String(editing)}:${tab}`} id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onChanged={invalidate} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
+      {acting && <DocActionSheet doc={acting.doc} action={acting.action} onClose={() => { setActing(null); invalidate(); }} />}
     </Page>
   );
 }

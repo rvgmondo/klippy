@@ -9,6 +9,7 @@ import './lib/handoff.js';
 import { authRoutes } from './routes/auth.js';
 import { folderRoutes } from './routes/folders.js';
 import { clientRoutes } from './routes/clients.js';
+import { homeRoutes } from './routes/home.js';
 import { boardRoutes } from './routes/boards.js';
 import { columnRoutes } from './routes/columns.js';
 import { taskRoutes } from './routes/tasks.js';
@@ -169,6 +170,7 @@ export function buildServer() {
   app.register(authRoutes);
   app.register(folderRoutes);
   app.register(clientRoutes);
+  app.register(homeRoutes);
   app.register(boardRoutes);
   app.register(columnRoutes);
   app.register(taskRoutes);

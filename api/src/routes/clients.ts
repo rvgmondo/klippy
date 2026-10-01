@@ -38,6 +38,8 @@ function subtree(rootId: number, all: { id: number; parentId: number | null }[])
 }
 
 export async function clientRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', app.requireAuth);
+
   app.get('/api/v1/clients', async (req) => {
     const { accountId } = authOf(req);
     const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);

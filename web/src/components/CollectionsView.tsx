@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { PaymentsModal } from './PaymentsModal';
+import { navigateTo } from '../lib/urlAction';
+import type { DocSummary } from './billingShared';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, AlertTriangle, FileText, MessageCircle } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
@@ -36,6 +39,7 @@ interface Collections {
 export function CollectionsView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
   const [statementFor, setStatementFor] = useState<number | null>(null);
+  const [paying, setPaying] = useState<DocSummary | null>(null);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data, error, isLoading, refetch } = useQuery({
     queryKey: ['collections', businessId],
@@ -196,7 +200,9 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                           </div>
                         </td>
                         <td className="px-3 py-2.5">
-                          <div className="text-slate-200">{i.clientName}</div>
+                          {i.folderId
+                            ? <button onClick={() => navigateTo('clients', { client: String(i.folderId) })} className="text-left text-slate-200 hover:text-[var(--accent)] hover:underline">{i.clientName}</button>
+                            : <div className="text-slate-200">{i.clientName}</div>}
                           {i.clientEmail && <div className="text-[11px] text-slate-500">{i.clientEmail}</div>}
                         </td>
                         <td className="px-3 py-2.5 text-right num text-slate-100">
@@ -232,6 +238,11 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                                 <Mail size={12} /> Chase
                               </button>
                             )}
+                            <button onClick={() => setPaying({ id: i.id, type: 'invoice', number: i.number, clientName: i.clientName, issueDate: '', dueDate: i.dueDate, status: 'sent', currency: i.currency, total: String(i.total) } as DocSummary)}
+                              title="Record money that came in against this invoice"
+                              className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-2 py-1 text-[11px] font-medium text-[var(--accent-ink)] hover:opacity-90">
+                              Paid
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -292,6 +303,10 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                           <Mail size={13} /> Chase
                         </button>
                       )}
+                      <button onClick={() => setPaying({ id: i.id, type: 'invoice', number: i.number, clientName: i.clientName, issueDate: '', dueDate: i.dueDate, status: 'sent', currency: i.currency, total: String(i.total) } as DocSummary)}
+                        className="inline-flex min-h-10 items-center rounded-lg bg-[var(--accent)] px-3 text-xs font-medium text-[var(--accent-ink)] hover:opacity-90">
+                        Paid
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -308,6 +323,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
         )}
       </PageBody>
       {statementFor && <StatementView folderId={statementFor} onClose={() => setStatementFor(null)} />}
+      {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); for (const k of ['collections', 'documents', 'home', 'client', 'clients']) qc.invalidateQueries({ queryKey: [k] }); }} />}
     </Page>
   );
 }
