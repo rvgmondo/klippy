@@ -49,6 +49,7 @@ interface HomeData {
     cameInToday: { docId: number; number: string; clientName: string; amount: number; currency: string; method: string }[];
   };
   items: Item[];
+  didForYou?: { afterReminder: PerCur; afterReminderCount: number; autoInvoices: number; cardSelf: PerCur };
   counts: { overdue: number; today: number; week: number };
   perBusiness: { id: number; count: number }[];
 }
@@ -262,6 +263,8 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
           </p>
         )}
 
+        {data?.didForYou && <DidForYou d={data.didForYou} />}
+
         {error && <p className="text-sm text-red-400">Home could not load. {error instanceof Error ? error.message : ''}</p>}
 
         {mode === 'squares' ? (
@@ -342,6 +345,27 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); refresh(); }} />}
       {task && <CardDetail taskId={task.id} boardId={task.boardId} onClose={() => setTask(null)} />}
     </div>
+  );
+}
+
+/**
+ * What Klippy did for you this month, in plain money.
+ *
+ * The app never used to say what it was worth. This line does, and only with
+ * things that actually happened: money paid after a reminder went out, invoices
+ * the schedule raised by itself, card payments that recorded themselves. Parts
+ * that are zero are left out, and the line hides when there is nothing to say.
+ */
+function DidForYou({ d }: { d: NonNullable<HomeData['didForYou']> }) {
+  const bits: string[] = [];
+  if (d.autoInvoices > 0) bits.push(`Sent ${d.autoInvoices} repeating ${d.autoInvoices === 1 ? 'invoice' : 'invoices'} by itself.`);
+  if (hasAny(d.afterReminder)) bits.push(`${perCur(d.afterReminder)} came in on ${d.afterReminderCount} ${d.afterReminderCount === 1 ? 'invoice' : 'invoices'} after a reminder.`);
+  if (hasAny(d.cardSelf)) bits.push(`${perCur(d.cardSelf)} was paid by card and recorded itself.`);
+  if (!bits.length) return null;
+  return (
+    <p className="rounded-lg border border-[var(--accent-quiet)] bg-[var(--accent-quiet)]/40 px-3 py-2 text-sm text-slate-300">
+      <span className="font-medium text-slate-100">This month Klippy: </span>{bits.join(' ')}
+    </p>
   );
 }
 

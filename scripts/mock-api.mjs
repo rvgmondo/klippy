@@ -116,6 +116,7 @@ function home(bid) {
     today,
     figures: { owed: owedM, overdue: overdueM, comingIn: coming, moneyIn: { ZAR: 2300 }, byMethod: [{ method: 'Card', currency: 'ZAR', amount: 2300 }], cameInToday: [{ docId: 47, number: 'INV-0047', clientName: 'Kloof Street Dental', amount: 2300, currency: 'ZAR', method: 'Card' }] },
     items,
+    didForYou: { afterReminder: { ZAR: 6900 }, afterReminderCount: 2, autoInvoices: 3, cardSelf: { ZAR: 2300 } },
     counts: { overdue: items.filter((i) => i.group === 'overdue').length, today: items.filter((i) => i.group === 'today').length, week: items.filter((i) => i.group === 'week').length },
     perBusiness: businesses.map((b) => ({ id: b.id, count: items.filter((i) => i.businessId == null || i.businessId === b.id).length })),
   };

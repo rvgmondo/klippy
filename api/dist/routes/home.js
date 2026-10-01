@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, gte, inArray, isNull, lte, ne } from 'drizzle-orm';
+import { eq, gte, inArray, isNotNull, isNull, lte, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, payments, tasks, boards, folders, calendarEvents, deals, socialPosts, businesses, } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -116,16 +116,19 @@ export async function homeRoutes(app) {
         // ---- Money in ------------------------------------------------------------------
         const pays = await db.select({
             amount: payments.amount, paidOn: payments.paidOn, method: payments.method,
-            documentId: payments.documentId,
+            documentId: payments.documentId, pfPaymentId: payments.pfPaymentId,
         }).from(payments)
             .where(tenantWhere(payments, accountId, gte(payments.paidOn, monthStart)));
         const payDocIds = [...new Set(pays.map((p) => p.documentId))];
         const payDocs = payDocIds.length ? await db.select({
             id: documents.id, number: documents.number, clientName: documents.clientName,
-            currency: documents.currency, businessId: documents.businessId,
+            currency: documents.currency, businessId: documents.businessId, lastReminderOn: documents.lastReminderOn,
         }).from(documents).where(tenantWhere(documents, accountId, inArray(documents.id, payDocIds))) : [];
         const payDoc = new Map(payDocs.map((d) => [d.id, d]));
         const moneyIn = {};
+        const afterReminder = {};
+        const remindedDocs = new Set();
+        const cardSelf = {};
         const byMethod = [];
         const cameInToday = [];
         for (const p of pays) {
@@ -140,10 +143,23 @@ export async function homeRoutes(app) {
                 row.amount = round(row.amount + amt);
             else
                 byMethod.push({ method, currency: d.currency, amount: round(amt) });
+            // What Klippy did: money that arrived after a reminder went out (lastReminderOn
+            // stops moving once an invoice is paid, so a reminder on or before the payment
+            // date is the one that preceded it), and card payments that recorded themselves.
+            if (d.lastReminderOn && d.lastReminderOn <= p.paidOn && amt > 0) {
+                add(afterReminder, d.currency, amt);
+                remindedDocs.add(d.id);
+            }
+            if (p.pfPaymentId && amt > 0)
+                add(cardSelf, d.currency, amt);
             if (p.paidOn === today) {
                 cameInToday.push({ docId: d.id, number: d.number, clientName: d.clientName, amount: round(amt), currency: d.currency, method });
             }
         }
+        // Invoices the schedule raised on its own this month (a repeating invoice).
+        const auto = (await db.select({ id: documents.id, businessId: documents.businessId }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), isNotNull(documents.subscriptionId), gte(documents.issueDate, monthStart))))
+            .filter((d) => inScope(d.businessId)).length;
         // ---- Tasks ---------------------------------------------------------------------
         const tree = await db.select({ id: folders.id, parentId: folders.parentId, businessId: folders.businessId, name: folders.name })
             .from(folders).where(tenantWhere(folders, accountId, isNull(folders.deletedAt)));
@@ -243,6 +259,7 @@ export async function homeRoutes(app) {
         return {
             today,
             figures: { owed, overdue, comingIn, moneyIn, byMethod, cameInToday },
+            didForYou: { afterReminder, afterReminderCount: remindedDocs.size, autoInvoices: auto, cardSelf },
             items,
             counts: {
                 overdue: items.filter((i) => i.group === 'overdue').length,
