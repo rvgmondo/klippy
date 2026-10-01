@@ -11,7 +11,7 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<LoginResult>;
   verify2fa: (ticket: string, code: string) => Promise<void>;
-  signup: (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => Promise<void>;
+  signup: (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string; vatRegistered?: boolean; vatNumber?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateAccount: (patch: Partial<Pick<Account, 'name' | 'folderLabelSingular' | 'folderLabelPlural' | 'currency'>>) => Promise<void>;
@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const verify2fa = async (ticket: string, code: string) => {
     apply(await apiPost<Session>('/auth/2fa/verify', { ticket, code }));
   };
-  const signup = async (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string }) => {
+  const signup = async (accountName: string, name: string, email: string, password: string, extras?: { blueprint?: string; currency?: string; vatRegistered?: boolean; vatNumber?: string }) => {
     apply(await apiPost<Session>('/auth/signup', { accountName, name, email, password, ...extras }));
   };
   const logout = async () => {

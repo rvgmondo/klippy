@@ -1,16 +1,13 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
 import { apiPost } from '../lib/api';
+import { SignupFlow } from './SignupFlow';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'reset' | 'twofactor' | 'invite';
 
 export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode; onBack?: () => void }) {
-  const { login, verify2fa, signup } = useAuth();
-  const [blueprintKey, setBlueprintKey] = useState('');
-  const [currency, setCurrency] = useState('ZAR');
+  const { login, verify2fa } = useAuth();
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [accountName, setAccountName] = useState('');
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
@@ -48,8 +45,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
         if (res?.twoFactorRequired) { setTicket(res.ticket); setCode(''); setMode('twofactor'); }
       } else if (mode === 'twofactor') {
         await verify2fa(ticket, code);
-      } else if (mode === 'signup') await signup(accountName, name, email, password, { blueprint: blueprintKey || undefined, currency });
-      else if (mode === 'forgot') {
+      } else if (mode === 'forgot') {
         const res = await apiPost<{ message: string }>('/auth/forgot', { email });
         setNotice(res.message ?? 'Check your email for a reset link.');
       } else if (mode === 'invite') {
@@ -74,13 +70,27 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
     'text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20';
 
   const subtitle = {
-    login: 'Sign in to your workspace',
-    signup: 'Create your workspace',
+    login: 'Sign in',
+    signup: 'Create your account',
     forgot: 'Reset your password',
     reset: 'Choose a new password',
     twofactor: 'Enter the code from your authenticator app',
     invite: 'Sign in with your own password to join this workspace',
   }[mode];
+
+  // Signing up is its own short walk, one question per screen.
+  if (mode === 'signup') {
+    return (
+      <div className="h-full overflow-y-auto px-4 py-8">
+        <div className="mx-auto w-full max-w-md">
+          {onBack && (
+            <button onClick={onBack} className="mb-4 text-sm text-slate-400 hover:text-slate-200">&larr; Back to home</button>
+          )}
+          <SignupFlow onSignIn={() => { setMode('login'); setError(null); setNotice(null); }} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full grid place-items-center px-4">
@@ -95,30 +105,6 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
         </div>
 
         <form onSubmit={submit} className="space-y-3">
-          {mode === 'signup' && (
-            <>
-              <input className={input} placeholder="Your business name (e.g. Mondobase)" value={accountName} onChange={(e) => setAccountName(e.target.value)} required />
-              <input className={input} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} required />
-              {/* What kind of business, so the FIRST one is set up like it, not as
-                  a generic default only a second business used to escape. */}
-              <select className={input} value={blueprintKey} onChange={(e) => setBlueprintKey(e.target.value)}
-                aria-label="What kind of business is it?">
-                <option value="">What kind of business? (pick the closest)</option>
-                <option value="agency">Agency or studio</option>
-                <option value="consultant">Consultant or freelancer</option>
-                <option value="hosting">Hosting or recurring services</option>
-                <option value="ecommerce">Shop or e-commerce</option>
-                <option value="saas">Software or SaaS</option>
-                <option value="creator">Content or creator</option>
-              </select>
-              <select className={input} value={currency} onChange={(e) => setCurrency(e.target.value)}
-                aria-label="What do you bill in?">
-                {['ZAR', 'USD', 'EUR', 'GBP', 'AUD', 'CAD', 'INR', 'NGN', 'KES'].map((c) => (
-                  <option key={c} value={c}>{c === 'ZAR' ? 'Billing in ZAR (South African Rand)' : `Billing in ${c}`}</option>
-                ))}
-              </select>
-            </>
-          )}
           {(mode === 'login' || mode === 'signup' || mode === 'forgot' || mode === 'invite') && (
             <input className={input} type="email" placeholder="Email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           )}
@@ -150,7 +136,7 @@ export function AuthPage({ initialMode = 'login', onBack }: { initialMode?: Mode
           {mode === 'login' && (
             <>
               <p><button className="text-violet-400 hover:text-violet-300" onClick={() => { setMode('forgot'); setError(null); setNotice(null); }}>Forgot password?</button></p>
-              <p>Don't have a workspace? <button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('signup'); setError(null); setNotice(null); }}>Create one</button></p>
+              <p>New to Klippy? <button className="font-medium text-violet-400 hover:text-violet-300" onClick={() => { setMode('signup'); setError(null); setNotice(null); }}>Create an account</button></p>
             </>
           )}
           {mode === 'signup' && (

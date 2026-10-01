@@ -53,7 +53,7 @@ const YOU: Item[] = [
 ];
 
 const BUSINESS: Item[] = [
-  { id: 'biz:modules', label: 'Modules', icon: LayoutGrid, hint: 'Which parts of Klippy this business uses' },
+  { id: 'biz:modules', label: 'Features', icon: LayoutGrid, hint: 'Which parts of Klippy this business uses' },
   { id: 'biz:brand', label: 'Brand', icon: Building2, hint: 'Logo, display name and brand colour' },
   { id: 'biz:invoicing', label: 'Invoicing', icon: Receipt, hint: 'Address, VAT number, bank details and terms' },
   { id: 'biz:pdf', label: 'Document design', icon: FileText, hint: 'How your invoices and quotes look as a PDF' },

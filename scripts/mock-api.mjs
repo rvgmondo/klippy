@@ -34,6 +34,8 @@ const folders = [
 ];
 const clientName = (fid) => folders.find((x) => x.id === fid)?.name ?? 'Walk-in';
 let nextId = 200;
+// Signed in until the app signs out, so the landing page and sign-up can be walked too.
+let signedIn = true;
 const docs = [
   { id: 31, type: 'invoice', number: 'INV-0031', status: 'sent', folderId: 10, businessId: 1, issueDate: day(-64), dueDate: day(-34), total: '9200.00', currency: 'ZAR', lastReminderOn: day(-4) },
   { id: 42, type: 'invoice', number: 'INV-0042', status: 'sent', folderId: 11, businessId: 1, issueDate: day(-26), dueDate: day(-12), total: '4600.00', currency: 'ZAR', lastReminderOn: null },
@@ -127,7 +129,7 @@ const docSummary = (d) => ({ id: d.id, type: d.type, number: d.number, clientNam
 function route(method, path, q, body) {
   const m = (re) => path.match(re);
   if (method === 'GET') {
-    if (path === '/api/v1/auth/me') return { user, account };
+    if (path === '/api/v1/auth/me') return signedIn ? { user, account } : [401, { error: 'Not authenticated.' }];
     if (path === '/api/v1/businesses') return { businesses };
     if (path === '/api/v1/modules') return { primitives: [], modules: MODS.concat(['takings']).map((k) => ({ key: k, label: ({ pipeline: 'Deals', offerings: 'Price list', social: 'Posts', billing: 'Quotes and invoices', collections: 'Owed to you', cashflow: 'Coming in', takings: 'Counter sales' })[k] ?? k[0].toUpperCase() + k.slice(1), primitive: 'x' })) };
     if (path === '/api/v1/folders') return { folders };
@@ -140,7 +142,7 @@ function route(method, path, q, body) {
     if (m(/^\/api\/v1\/documents\/(\d+)$/)) { const d = docs.find((x) => x.id === Number(path.split('/')[4])); return d ? { document: { ...docSummary(d), clientEmail: null, clientAddress: null, clientVatNumber: null, taxRate: '15', folderId: d.folderId, businessId: d.businessId, notes: null, discountType: 'none', discountValue: '0', depositType: 'none', depositValue: '0' }, lines: [{ description: 'Work done', quantity: 1, unitPrice: Number(d.total) }], brand: { name: 'Mondobase', hasLogo: false, logoUrl: null }, issuer: { name: 'Mondobase', accent: '#c6f432' } } : [404, { error: 'Not found.' }]; }
     if (path === '/api/v1/collections') { const items = docs.filter((d) => d.type === 'invoice' && d.status === 'sent' && d.dueDate < today && left(d) > 0).map((d) => ({ id: d.id, number: d.number, clientName: clientName(d.folderId), clientEmail: folders.find((x) => x.id === d.folderId)?.billingEmail ?? null, hasPhone: !!folders.find((x) => x.id === d.folderId)?.billingPhone, businessId: d.businessId, folderId: d.folderId, currency: d.currency, total: Number(d.total), outstanding: left(d), dueDate: d.dueDate, daysOverdue: Math.round((Date.parse(today) - Date.parse(d.dueDate)) / 864e5), lastReminderOn: d.lastReminderOn ?? null, suspended: false })); return { items, summary: { count: items.length, byCurrency: [], suspended: 0 } }; }
     if (path.startsWith('/api/v1/payfast/mode')) return { live: false, test: false };
-    if (path === '/api/v1/onboarding' || path === '/api/v1/account/onboarding') return { steps: [], done: true };
+    if (path === '/api/v1/onboarding') return { steps: [{ key: 'client', done: true }, { key: 'invoice', done: false }, { key: 'bank', done: false }, { key: 'brand', done: false }, { key: 'offering', done: false }, { key: 'payments', done: false }] };
     if (path.startsWith('/api/v1/notifications')) return { notifications: [], unread: 0 };
     if (path.startsWith('/api/v1/timer')) return { timer: null, running: null };
     if (path.startsWith('/api/v1/contacts')) return { contacts: [] };
@@ -149,6 +151,13 @@ function route(method, path, q, body) {
     if (path.startsWith('/api/v1/search')) return { clients: [], tasks: [], documents: [], deals: [], contacts: [], offerings: [] };
     if (path.startsWith('/api/v1/branding') || path.startsWith('/api/v1/account')) return { account };
     if (path.startsWith('/api/v1/tasks/') && path.endsWith('/detail')) return [404, { error: 'Mock has no task detail.' }];
+  }
+  if (method === 'POST' && path === '/api/v1/auth/logout') { signedIn = false; return { ok: true }; }
+  if (method === 'POST' && path === '/api/v1/auth/signup') {
+    signedIn = true;
+    Object.assign(account, { name: body.accountName, folderLabelSingular: body.blueprint === 'trade' ? 'Customer' : 'Client', folderLabelPlural: body.blueprint === 'trade' ? 'Customers' : 'Clients' });
+    Object.assign(user, { name: body.name, email: body.email });
+    return [201, { user, account }];
   }
   if (method === 'POST' && path === '/api/v1/collections/chase') return { sent: 1, covered: 1, skipped: [] };
   if (method === 'POST' && m(/^\/api\/v1\/documents\/(\d+)\/convert$/)) { const q0 = docs.find((x) => x.id === Number(path.split('/')[4])); const n = { ...q0, id: nextId++, type: 'invoice', number: `INV-00${nextId}`, status: 'draft', decision: null }; docs.push(n); q0.status = 'accepted'; return [201, { document: n }]; }

@@ -9,6 +9,7 @@ import {
 } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
+import { CLEAN_START_FOLDER } from './seed.js';
 import { addMonths, anchorDayOf } from './billing.js';
 
 /**
@@ -97,7 +98,23 @@ export async function workspaceHoldsRealWork(accountId: number): Promise<string 
 
   const realFolders = await db.select({ id: folders.id, name: folders.name }).from(folders)
     .where(and(tenantWhere(folders, accountId), isNull(folders.parentId)));
-  const extra = realFolders.filter((f) => !names.folders.includes(f.name));
+  /**
+   * A new account starts with one empty "Internal work" folder and a "To do" board
+   * (seedNewAccount), not the old examples. That folder is not real work while its
+   * boards hold no tasks; once somebody has put a task on it, it is theirs. It is not
+   * added to sampleNames, because Clear examples deletes those by name and would
+   * take a person's own to-do board with it.
+   */
+  const startFolders = realFolders.filter((f) => f.name === CLEAN_START_FOLDER);
+  const startIds = new Set<number>();
+  for (const f of startFolders) {
+    const bs = await db.select({ id: boards.id }).from(boards)
+      .where(tenantWhere(boards, accountId, eq(boards.folderId, f.id)));
+    const [used] = bs.length ? await db.select({ n: sql<number>`count(*)` }).from(tasks)
+      .where(tenantWhere(tasks, accountId, inArray(tasks.boardId, bs.map((b) => b.id)))) : [{ n: 0 }];
+    if (Number(used?.n ?? 0) === 0) startIds.add(f.id);
+  }
+  const extra = realFolders.filter((f) => !names.folders.includes(f.name) && !startIds.has(f.id));
   if (extra.length) return `this workspace already has clients in it (for example "${extra[0]!.name}")`;
 
   /**

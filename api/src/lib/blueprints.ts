@@ -27,9 +27,21 @@ export interface Blueprint {
   invoicing?: { defaultTaxRate?: number; defaultDueDays?: number };
   /** Reminder schedule: days relative to due, and when to flag as at risk. */
   reminders?: { offsets?: number[]; suspendAfterDays?: number | null };
+  /** What this kind of business calls the people it works for. Default Client. */
+  clientWord?: { one: string; many: string };
 }
 
 export const BLUEPRINTS: Blueprint[] = [
+  {
+    key: 'trade',
+    label: 'Trade',
+    type: 'services',
+    blurb: 'Plumbers, electricians, builders. Quote the job, do it, invoice it, get paid.',
+    // A tradesperson needs quotes, invoices and their day. Not deals, posts or timesheets.
+    modules: ['today', 'calendar', 'offerings', 'billing', 'collections', 'cashflow', 'expenses', 'files'],
+    invoicing: { defaultDueDays: 7 },
+    clientWord: { one: 'Customer', many: 'Customers' },
+  },
   {
     key: 'agency',
     label: 'Agency or studio',
@@ -62,6 +74,7 @@ export const BLUEPRINTS: Blueprint[] = [
     type: 'products',
     blurb: 'Stock, orders and margins. No timesheets.',
     invoicing: { defaultDueDays: 0 },
+    clientWord: { one: 'Customer', many: 'Customers' },
   },
   {
     key: 'saas',

@@ -32,6 +32,10 @@ const signupSchema = z.object({
   // 'services' while the 6-archetype picker sat one screen too deep.
   blueprint: z.string().trim().max(40).optional(),
   currency: z.string().trim().length(3).optional(),
+  // Asked once at sign-up, because it decides whether every invoice is a Tax
+  // Invoice with VAT on it. Omitted means the old behaviour: nothing set.
+  vatRegistered: z.boolean().optional(),
+  vatNumber: z.string().trim().max(60).optional(),
 });
 
 const loginSchema = z.object({
@@ -74,14 +78,30 @@ export async function authRoutes(app: FastifyInstance) {
     const passwordHash = await hashPassword(password);
 
     const result = await db.transaction(async (tx) => {
-      const accIns = await tx.insert(accounts).values({ name: accountName, slug, ...(currency ? { currency } : {}) });
+      const accIns = await tx.insert(accounts).values({
+        name: accountName, slug, ...(currency ? { currency } : {}),
+        ...(bp?.clientWord ? { folderLabelSingular: bp.clientWord.one, folderLabelPlural: bp.clientWord.many } : {}),
+      });
       const accountId = Number(accIns[0].insertId);
       const userIns = await tx.insert(users).values({
         name, email, passwordHash, lastLogin: new Date(),
       });
       const userId = Number(userIns[0].insertId);
       await tx.insert(memberships).values({ accountId, userId, role: 'owner' });
-      await seedNewAccount(tx, accountId, userId, accountName, prov?.type, prov?.modules ?? null);
+      // VAT: registered means 15% on every line and the VAT number printed, which is
+      // what makes it a Tax Invoice. South African rate; elsewhere the person sets
+      // their own rate in Settings, so only the number is kept.
+      const vat = parsed.data.vatRegistered;
+      const zar = (currency ?? 'ZAR') === 'ZAR';
+      await seedNewAccount(tx, accountId, userId, accountName, prov?.type, {
+        modules: prov?.modules ?? null,
+        defaultDueDays: prov?.defaultDueDays,
+        reminderOffsets: prov?.reminderOffsets,
+        suspendAfterDays: prov?.suspendAfterDays,
+        defaultTaxRate: vat === true ? (zar ? '15.00' : null) : vat === false ? '0.00'
+          : (prov?.defaultTaxRate != null ? String(prov.defaultTaxRate) : null),
+        bizTaxNumber: vat ? (parsed.data.vatNumber || null) : null,
+      });
       return { accountId, userId };
     });
 

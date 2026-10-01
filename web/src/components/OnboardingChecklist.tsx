@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2, Circle, ChevronRight, X } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { setUrlParams } from '../lib/urlAction';
+import { useAuth } from '../lib/auth';
 
 interface Step {
   key: string; done: boolean;
@@ -23,41 +24,53 @@ interface Step {
  * hidden by hand before that.
  */
 type Nav = (view: string) => void;
-const META: Record<string, { label: string; hint: string; go: (nav: Nav) => void }> = {
+const META: Record<string, { label: (w: Words) => string; hint: (w: Words) => string; go: (nav: Nav) => void }> = {
   client: {
-    label: 'Add your first client',
-    hint: 'Everything hangs off a client: boards, time, invoices, their portal.',
-    // The sidebar is mounted and listening; the modal opens right here on Home.
+    label: (w) => `Add your first ${w.one}`,
+    hint: () => 'A name and a cell number is enough to send them a quote.',
+    // The sidebar is mounted and listening; the form opens right here on Home.
     go: () => setUrlParams({ 'new-client': '1' }),
   },
+  invoice: {
+    label: () => 'Send your first quote or invoice',
+    hint: () => 'Once it goes out, Klippy keeps track of it and reminds them if they are late.',
+    go: (nav) => { setUrlParams({ new: 'quote' }); nav('billing'); },
+  },
+  bank: {
+    label: () => 'Add your bank details',
+    hint: () => 'So every invoice tells them where to pay you by EFT.',
+    go: (nav) => { setUrlParams({ s: 'biz:invoicing' }); nav('settings'); },
+  },
   brand: {
-    label: 'Put your brand on it',
-    hint: 'Your name and colour on every invoice, email and portal page.',
+    label: () => 'Add your logo and colour',
+    hint: (w) => `It goes on every quote, invoice and email your ${w.many} see.`,
     go: (nav) => { setUrlParams({ s: 'biz:brand' }); nav('settings'); },
   },
   offering: {
-    label: 'Write down what you sell',
-    hint: 'Offerings price your invoices and power subscriptions.',
+    label: () => 'Write down your prices',
+    hint: () => 'Then a quote is a few taps: pick the item, the price fills itself in.',
     go: (nav) => { setUrlParams({ new: '1' }); nav('offerings'); },
   },
   deal: {
-    label: 'Track your first deal',
-    hint: 'Or share your lead form and let leads add themselves.',
+    label: () => 'Add a job you are trying to win',
+    hint: () => 'So the follow-up lands on your Home on the right day.',
     go: (nav) => { setUrlParams({ new: '1' }); nav('pipeline'); },
   },
-  invoice: {
-    label: 'Send your first invoice',
-    hint: 'From scratch or straight out of tracked time.',
-    go: (nav) => { setUrlParams({ new: 'invoice' }); nav('billing'); },
-  },
   payments: {
-    label: 'Switch on online payments',
-    hint: 'A pay link on every invoice gets you paid days sooner.',
+    label: (w) => `Let ${w.many} pay by card (optional)`,
+    hint: () => 'A Pay now button on every invoice, and it marks itself paid. Your payment provider charges a small fee.',
     go: (nav) => { setUrlParams({ s: 'payments' }); nav('settings'); },
   },
 };
 
+interface Words { one: string; many: string }
+
 export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string) => void } = {}) {
+  const { account } = useAuth();
+  const words: Words = {
+    one: (account?.folderLabelSingular || 'Client').toLowerCase(),
+    many: (account?.folderLabelPlural || 'Clients').toLowerCase(),
+  };
   const [hidden, setHidden] = useState(() => localStorage.getItem('klippy.onboarding.hidden') === '1');
   const { data } = useQuery({
     queryKey: ['onboarding'],
@@ -77,7 +90,7 @@ export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold text-slate-100">Getting set up</h2>
-          <p className="text-[11px] text-slate-400">{done} of {steps.length} done. Each one takes a minute or two.</p>
+          <p className="text-[11px] text-slate-400">{done} of {steps.length} done. Each one takes a minute or two, and none of them is required to start.</p>
         </div>
         <button onClick={hide} title="Hide this checklist" aria-label="Hide the setup checklist"
           className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-300"><X size={14} /></button>
@@ -88,14 +101,14 @@ export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string
           return s.done ? (
             <div key={s.key} className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 opacity-60">
               <CheckCircle2 size={16} className="shrink-0 text-[var(--accent)]" />
-              <span className="text-sm text-slate-400 line-through decoration-slate-600">{m.label}</span>
+              <span className="text-sm text-slate-400 line-through decoration-slate-600">{m.label(words)}</span>
             </div>
           ) : (
             <button key={s.key} onClick={() => m.go(onNavigate ?? (() => {}))}
               className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-slate-800/50">
               <Circle size={16} className="shrink-0 text-slate-600" />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm text-slate-200">{m.label}</span>
+                <span className="block text-sm text-slate-200">{m.label(words)}</span>
                 {s.note === 'sandbox' ? (
                   // The usual hint says to switch payments on, which is wrong for someone
                   // whose gateway is already on in test mode.
@@ -105,7 +118,7 @@ export function OnboardingChecklist({ onNavigate }: { onNavigate?: (view: string
                     test payment has worked.
                   </span>
                 ) : (
-                  <span className="block text-[11px] text-slate-500">{m.hint}</span>
+                  <span className="block text-[11px] text-slate-500">{m.hint(words)}</span>
                 )}
               </span>
               <ChevronRight size={14} className="shrink-0 text-slate-600 group-hover:text-slate-300" />

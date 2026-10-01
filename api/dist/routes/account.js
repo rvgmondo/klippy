@@ -12,6 +12,7 @@ import { publicAccount } from '../lib/publicAccount.js';
 import { businesses, businessMembers, businessEmail, memberships, users, teams, teamMembers, hostingSettings, paymentSettings, folders, deals, offerings, documents } from '../db/schema.js';
 import { sampleNames } from '../lib/templates.js';
 import { gatewayModeFor } from '../lib/paymentSettings.js';
+import { effectiveModules } from '../lib/modules.js';
 import { inArray, isNull, or } from 'drizzle-orm';
 import { and } from 'drizzle-orm';
 const nullableStr = (max) => z.string().trim().max(max).nullable().optional().or(z.literal(''));
@@ -274,13 +275,29 @@ export async function accountRoutes(app) {
             // invoice was going out with a link to PayFast's test checkout.
             gatewayModeFor(accountId),
         ]);
+        // Bank details are what turn an invoice into one somebody can pay by EFT, which is
+        // how most South African clients pay. Done when any business, or the workspace
+        // its businesses inherit from, has them.
+        const bizRows = await db.select({
+            bankDetails: businesses.bankDetails, modules: businesses.modules, type: businesses.type,
+            secondaryTypes: businesses.secondaryTypes,
+        }).from(businesses).where(tenantWhere(businesses, accountId));
+        const [acc] = await db.select({ bankDetails: accounts.bankDetails }).from(accounts)
+            .where(eq(accounts.id, accountId)).limit(1);
+        const bank = !!acc?.bankDetails?.trim() || bizRows.some((b) => !!b.bankDetails?.trim());
+        // Only ask for things this workspace actually uses: a plumber is never told to
+        // track a deal when Deals is switched off for them.
+        const uses = new Set(bizRows.flatMap((b) => effectiveModules(b.modules, b.type, b.secondaryTypes ?? [])));
         return {
+            // In the order a new business needs them: someone to bill, a first invoice,
+            // somewhere to be paid into, then the polish.
             steps: [
                 { key: 'client', done: client },
-                { key: 'brand', done: brand },
-                { key: 'offering', done: offering },
-                { key: 'deal', done: deal },
                 { key: 'invoice', done: invoice },
+                { key: 'bank', done: bank },
+                { key: 'brand', done: brand },
+                ...(uses.has('offerings') ? [{ key: 'offering', done: offering }] : []),
+                ...(uses.has('pipeline') ? [{ key: 'deal', done: deal }] : []),
                 {
                     key: 'payments', done: gateway.live,
                     // Said instead of the usual hint, which would tell someone whose gateway is

@@ -77,17 +77,36 @@ export async function seedNewBusiness(tx, accountId, userId, businessId, type) {
         });
     }
 }
-/** Signup: create the account's first business (defaults to services) and seed it. */
-export async function seedNewAccount(tx, accountId, userId, businessName = 'My Business', type = 'services', modules = null) {
+/** The one folder a new account starts with. The restore check recognises it by this name. */
+export const CLEAN_START_FOLDER = 'Internal work';
+/**
+ * Signup: create the account's first business and give it a clean start.
+ *
+ * New accounts used to arrive full of made-up clients, deals and prices ("Sample
+ * Client", a pipeline of invented companies), which a stranger then had to find
+ * and delete before the app showed anything true. Now the first business gets
+ * one empty internal board, so a task has somewhere to live, and nothing else.
+ * Adding a second business later still offers the example content.
+ */
+export async function seedNewAccount(tx, accountId, userId, businessName = 'My Business', type = 'services', setup = {}) {
     // secondaryTypes written explicitly: a JSON column DEFAULT needs MySQL 8.0.13+,
     // and a strict-mode server rejects an insert that omits a NOT NULL column whose
     // default it will not honour. Signup must not depend on that.
     const bizIns = await tx.insert(businesses).values({
         accountId, name: businessName, type, secondaryTypes: [], position: 0, createdBy: userId,
         // The blueprint's module set, when signup chose one; null keeps the type default.
-        modules,
+        modules: setup.modules ?? null,
+        ...(setup.defaultDueDays != null ? { defaultDueDays: setup.defaultDueDays } : {}),
+        ...(setup.defaultTaxRate != null ? { defaultTaxRate: setup.defaultTaxRate } : {}),
+        ...(setup.bizTaxNumber ? { bizTaxNumber: setup.bizTaxNumber } : {}),
+        ...(setup.reminderOffsets ? { reminderOffsets: setup.reminderOffsets } : {}),
+        ...(setup.suspendAfterDays !== undefined ? { suspendAfterDays: setup.suspendAfterDays } : {}),
     });
     const businessId = Number(bizIns[0].insertId);
-    await seedNewBusiness(tx, accountId, userId, businessId, type);
+    const ins = await tx.insert(folders).values({
+        accountId, businessId, parentId: null, name: CLEAN_START_FOLDER, pillar: 'operations', position: 0,
+        color: '#0ea5e9', createdBy: userId, notes: null,
+    });
+    await seedBoard(tx, accountId, userId, Number(ins[0].insertId), 'To do', 'Your own jobs: admin, quotes to write, things to chase.', []);
 }
 //# sourceMappingURL=seed.js.map
