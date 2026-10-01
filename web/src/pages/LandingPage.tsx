@@ -22,19 +22,20 @@ import '../marketing/marketing.css';
 const SignalField = lazy(() => import('../marketing/SignalField'));
 
 const AREAS = [
-  { key: 'Home', line: 'What needs you today, and what the business is worth, on one screen.' },
-  { key: 'Work', line: 'Boards per client, a timer on every card, and a day you can actually plan.' },
-  { key: 'Sales', line: 'Leads arrive on their own, quotes get accepted online, deals move.' },
-  { key: 'Money', line: 'Invoices, what is owed, what is coming in, and who to chase first.' },
-  { key: 'Admin', line: 'Your brand, your people, your files, your backups. Set once.' },
+  { key: 'Home', line: 'One list of what needs you today, and the button that does each thing right there.' },
+  { key: 'Clients', line: 'A page for every client: what they owe, what you are busy with, and how to reach them.' },
+  { key: 'Work', line: 'Your day planned against the hours you have, your boards, your calendar.' },
+  { key: 'Sales', line: 'Jobs you are trying to win, a lead form that fills itself, quotes they accept online.' },
+  { key: 'Money', line: 'Quotes, invoices, who owes you and what is coming in. Send, chase and mark paid in a tap.' },
+  { key: 'Settings', line: 'Your businesses, your brand, VAT and bank details. Set once, used everywhere.' },
 ];
 
-const SCATTER = ['A board', 'A timer', 'A spreadsheet', 'An invoice', 'A reminder', 'Your memory'];
+const SCATTER = ['A WhatsApp thread', 'A spreadsheet', 'An invoice template', 'Your banking app', 'A notebook', 'Your memory'];
 
 const AUTOMATIC = [
   ['Chases what is owed', 'Overdue invoices get chased on your schedule, by email and WhatsApp, with a pay link and their statement attached.'],
-  ['Bills the recurring work', 'Subscriptions raise their own invoices on the right day, whether that is monthly, quarterly or yearly.'],
-  ['Catches the leads', 'Your lead form drops enquiries straight into the pipeline and tells you the moment one lands.'],
+  ['Bills the work that repeats', 'Monthly, quarterly or yearly invoices go out on the right day without you remembering them.'],
+  ['Catches the leads', 'Your lead form drops enquiries straight into Deals and tells you the moment one lands.'],
   ['Backs itself up', 'Your whole workspace exported and emailed to you every Sunday, so the worst case is a week old.'],
 ];
 
@@ -166,7 +167,7 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
               ))}
             </div>
             <div id="mk-one" className="pointer-events-none absolute inset-0 flex items-center justify-center px-5">
-              <p className="mk-display mk-accent text-center">One tab.</p>
+              <p className="mk-display mk-accent text-center">One place.</p>
             </div>
           </div>
         </section>
@@ -175,9 +176,9 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
         {/* ---- The five areas ------------------------------------------ */}
         <section id="how" className="border-t mk-rule py-20 sm:py-32">
           <div className="mx-auto max-w-[1400px] px-5 sm:px-10">
-            <div className="mk-reveal max-w-[18rem]">
+            <div className="mk-reveal max-w-[26rem]">
               <p className="mk-eyebrow mk-accent mb-5">The shape of it</p>
-              <h2 className="mk-h2">Five areas. Every business runs on the same five.</h2>
+              <h2 className="mk-h2">Six doors. Everything has a home.</h2>
             </div>
             <div className="mt-14 divide-y divide-[var(--mk-line)] border-y mk-rule">
               {AREAS.map((a) => (
@@ -193,15 +194,15 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
         {/* ---- The flow that pays for the software --------------------- */}
         <section className="border-t mk-rule py-20 sm:py-32">
           <div className="mx-auto max-w-[1400px] px-5 sm:px-10">
-            <div className="mk-reveal max-w-[19rem]">
+            <div className="mk-reveal max-w-[26rem]">
               <p className="mk-eyebrow mk-accent mb-5">The part that pays for itself</p>
-              <h2 className="mk-h2">Hours in. Invoice out.</h2>
+              <h2 className="mk-h2">Quote it.<br />Invoice it.<br />Get paid.</h2>
             </div>
             <ol className="mt-14 grid gap-10 sm:grid-cols-3 sm:gap-8">
               {[
-                ['01', 'Run the timer', 'Every card carries a timer. Hit play when you start, and the hours attach themselves to the client without you writing anything down.'],
-                ['02', 'Pull the month', 'Raise an invoice straight from tracked time. Klippy prices it at the rate you set for that client and marks those hours billed, so nothing goes out twice.'],
-                ['03', 'Get paid', 'It sends with a pay link, chases itself when it goes late, and tells you the moment the money lands.'],
+                ['01', 'Send the quote', 'Pick the work from your price list and send it on WhatsApp or by email. They read it and accept it online, on their phone.'],
+                ['02', 'Turn it into an invoice', 'One tap when they say yes: same lines, same total, nothing typed twice. Billing by the hour? Pull in the time you tracked instead.'],
+                ['03', 'Get paid', 'It goes out with your bank details and a pay link, reminds them when it is late, and tells you the moment the money lands.'],
               ].map(([n, title, body]) => (
                 <li key={n} className="mk-reveal">
                   <p className="num mk-accent mb-4 text-sm">{n}</p>
@@ -264,8 +265,8 @@ export function LandingPage({ onGetStarted, onLogin }: { onGetStarted: () => voi
             <div className="mk-reveal">
               <h2 className="mk-display mx-auto max-w-[11rem]">Start with one client.</h2>
               <p className="mk-lead mk-muted mx-auto mt-8 max-w-[30rem]">
-                Free to start, no card. Add a client, run a timer on something real, and send the
-                invoice that comes out of it. That is the whole trial.
+                Free to start, no card. Add a client, send them a quote, and let Klippy take it from
+                there. That is the whole trial.
               </p>
               <div className="mt-10 flex flex-wrap justify-center gap-3">
                 <button onClick={onGetStarted} className="mk-cta flex items-center gap-2 rounded-xl px-8 py-4 text-base">
