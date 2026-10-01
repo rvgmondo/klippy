@@ -33,7 +33,7 @@ export interface DocRef {
 export function useMoneyRefresh() {
   const qc = useQueryClient();
   return () => {
-    for (const k of ['documents', 'collections', 'home', 'client', 'clients', 'payments', 'cashflow']) {
+    for (const k of ['documents', 'document', 'collections', 'home', 'client', 'clients', 'payments', 'cashflow']) {
       qc.invalidateQueries({ queryKey: [k] });
     }
   };

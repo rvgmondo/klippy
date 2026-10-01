@@ -10,6 +10,7 @@ import { iso } from '../lib/dates';
 import type { Folder } from '../lib/types';
 import { useUrlAction, takeUrlParam } from '../lib/urlAction';
 import { DocActionSheet, type DocAction, type DocRef } from './DocActionSheet';
+import { DocumentView } from './DocumentView';
 import { EmptyState, Skeleton } from './ui';
 import { Modal } from './Modal';
 import { Menu } from './Menu';
@@ -48,6 +49,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   const qc = useQueryClient();
   const [tab, setTab] = useState<DocType>('invoice');
   const [editing, setEditing] = useState<number | 'new' | null>(null);
+  // Looking at a document is not editing it. Opening one shows it; Edit is a choice.
+  const [viewing, setViewing] = useState<number | null>(null);
   const [initialFolder, setInitialFolder] = useState<number | null>(null);
 
   // The palette and the client action row hand this view an intent through the
@@ -66,10 +69,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     if (!Number.isFinite(id) || id <= 0) return;
     const given = takeUrlParam('doctype');
     const show = (t: string) => {
-      // A credit note has no editor of its own here; its PDF is the whole of it.
-      if (t === 'credit_note') { window.open(`/api/v1/documents/${id}/pdf`, '_blank', 'noopener'); return; }
       setTab(t === 'quote' ? 'quote' : 'invoice');
-      setEditing(id);
+      setViewing(id);
     };
     if (given) { show(given); return; }
     apiGet<{ document: { type: string } }>(`/documents/${id}`)
@@ -255,7 +256,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
               {docs.map((d) => (
                 <tr key={d.id} className="group border-t border-slate-800">
                   <td className="px-3 py-2 font-medium text-slate-200">
-                    {d.number}
+                    <button onClick={() => setViewing(d.id)} className="num hover:text-[var(--accent)] hover:underline">{d.number}</button>
                     {/* A quote past its valid-until that nobody decided on. The public
                         accept page refuses it too; this is the staff-side echo. */}
                     {d.type === 'quote' && d.status === 'sent' && d.dueDate && d.dueDate < todayStr && (
@@ -331,7 +332,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           )}
           {docs.map((d) => (
             <div key={d.id} className="border-t border-slate-800 px-3 py-3 first:border-t-0">
-              <button onClick={() => setEditing(d.id)} className="flex w-full items-start justify-between gap-3 text-left">
+              <button onClick={() => setViewing(d.id)} className="flex w-full items-start justify-between gap-3 text-left">
                 <span className="min-w-0">
                   <span className="flex items-center gap-2">
                     <span className="num font-medium text-slate-200">{d.number}</span>
@@ -382,6 +383,11 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
       {acting && <DocActionSheet doc={acting.doc} action={acting.action} onClose={() => { setActing(null); invalidate(); }} />}
+      {viewing && !editing && (
+        <DocumentView id={viewing} onClose={() => { setViewing(null); invalidate(); }}
+          onOpen={(next) => setViewing(next)}
+          onEdit={(docId, t) => { setTab(t === 'quote' ? 'quote' : 'invoice'); setViewing(null); setEditing(docId); }} />
+      )}
     </Page>
   );
 }
