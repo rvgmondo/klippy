@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Trash2, X } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
@@ -24,6 +24,15 @@ export function PaymentsModal({ doc, onClose }: { doc: DocSummary; onClose: () =
   const [amount, setAmount] = useState('');
   const [paidOn, setPaidOn] = useState(todayStr());
   const [method, setMethod] = useState('');
+  // Pressing Paid nearly always means "it all came in", so the amount starts at what
+  // is still owed. Only once, on load: after a part payment the box stays clear
+  // rather than guessing again.
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || !data) return;
+    prefilled.current = true;
+    if (doc.type === 'invoice' && data.outstanding > 0.005) setAmount(String(data.outstanding));
+  }, [data, doc.type]);
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: ['documents'] });

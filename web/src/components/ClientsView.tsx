@@ -5,12 +5,12 @@ import {
   KanbanSquare, Target, AlertTriangle, Plus,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
-import { money } from '../lib/money';
+import { money, moneyRound } from '../lib/money';
 import { navigateTo } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import { PageHeader } from './PageHeader';
 import { ClientDetails } from './ClientDetails';
-import { Card, EmptyState, Skeleton, btnPrimary, btnSecondary, fieldClass } from './ui';
+import { Card, EmptyState, Skeleton, btnPrimary, btnSecondary, fieldClass, fieldInlineClass } from './ui';
 import type { BusinessSelection } from './BusinessSwitcher';
 import type { Business, Folder } from '../lib/types';
 
@@ -51,11 +51,11 @@ interface ClientPageData {
   deals: { id: number; title: string; stage: string; value: number }[];
 }
 
-/** Each currency on its own, never added together. */
-function perCur(m: PerCur, empty = 'Nothing'): string {
+/** Each currency on its own, never added together. Whole units in lists, where width matters. */
+function perCur(m: PerCur, empty = 'Nothing', round = false): string {
   const keys = Object.keys(m).filter((k) => Math.abs(m[k]!) > 0.001)
     .sort((a, b) => (a === 'ZAR' ? -1 : b === 'ZAR' ? 1 : a.localeCompare(b)));
-  return keys.length ? keys.map((k) => money(m[k], k)).join(' and ') : empty;
+  return keys.length ? keys.map((k) => (round ? moneyRound : money)(m[k], k)).join(' and ') : empty;
 }
 const hasAny = (m: PerCur) => Object.values(m).some((v) => v > 0.001);
 
@@ -172,7 +172,7 @@ function ClientList({ businessId, onOpen }: { businessId: BusinessSelection; onO
                 </button>
               ))}
           </div>
-          <select className={`${fieldClass} w-auto`} value={sort} onChange={(e) => setSort(e.target.value as Sort)}
+          <select className={fieldInlineClass} value={sort} onChange={(e) => setSort(e.target.value as Sort)}
             aria-label="Sort">
             <option value="az">A to Z</option>
             <option value="owes">Owes you most</option>
@@ -213,13 +213,13 @@ function ClientList({ businessId, onOpen }: { businessId: BusinessSelection; onO
                       </span>
                     </span>
                     <span className="hidden shrink-0 text-right sm:block">
-                      <span className="num block text-sm text-slate-200">{hasAny(c.owed) ? perCur(c.owed) : ''}</span>
-                      {hasAny(c.overdue) && <span className="num block text-xs text-red-400">{perCur(c.overdue)} late</span>}
+                      <span className="num block text-sm text-slate-200">{hasAny(c.owed) ? perCur(c.owed, '', true) : ''}</span>
+                      {hasAny(c.overdue) && <span className="num block text-xs text-red-400">{perCur(c.overdue, '', true)} late</span>}
                     </span>
                   </button>
                   {/* On a phone the amount moves under the button row, so it never squeezes the name. */}
                   <span className="shrink-0 text-right sm:hidden">
-                    {hasAny(c.owed) && <span className="num block text-xs text-slate-200">{perCur(c.owed)}</span>}
+                    {hasAny(c.owed) && <span className="num block text-xs text-slate-200">{perCur(c.owed, '', true)}</span>}
                     {hasAny(c.overdue) && <span className="num block text-[11px] text-red-400">late</span>}
                   </span>
                   {wa ? (

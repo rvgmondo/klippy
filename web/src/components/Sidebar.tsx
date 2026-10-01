@@ -255,9 +255,7 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
             </nav>
           </>
         ) : (
-          <div className="flex-1 px-4 py-4 text-[11px] leading-relaxed text-slate-600">
-            {area.blurb}.
-          </div>
+          <div className="flex-1" />
         )}
       </div>
     </aside>

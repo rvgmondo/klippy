@@ -5,7 +5,7 @@ import {
   LayoutGrid, List, Receipt, Share2, Target, Plus,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
-import { money } from '../lib/money';
+import { money, moneyRound } from '../lib/money';
 import { navigateTo } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import { confirmDialog, notify } from './ConfirmDialog';
@@ -53,10 +53,11 @@ interface HomeData {
   perBusiness: { id: number; count: number }[];
 }
 
+/** Headline figures drop the cents; the exact amount is one click away. */
 function perCur(m: PerCur, empty = 'Nothing'): string {
   const keys = Object.keys(m).filter((k) => Math.abs(m[k]!) > 0.001)
     .sort((a, b) => (a === 'ZAR' ? -1 : b === 'ZAR' ? 1 : a.localeCompare(b)));
-  return keys.length ? keys.map((k) => money(m[k], k)).join(' and ') : empty;
+  return keys.length ? keys.map((k) => moneyRound(m[k], k)).join(' and ') : empty;
 }
 const hasAny = (m: PerCur) => Object.values(m).some((v) => v > 0.001);
 
@@ -244,9 +245,10 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
           <div className="grid gap-3 sm:grid-cols-3">
             <Figure label="Owed to you" value={perCur(f.owed, 'Nothing')} onClick={() => onNavigate('collections')}
               line={hasAny(f.overdue) ? `${perCur(f.overdue)} of it overdue` : 'None of it is late'} warn={hasAny(f.overdue)} />
-            <Figure label="Coming in, next 8 weeks" value={perCur(f.comingIn, 'Nothing due')} onClick={() => onNavigate('cashflow')}
+            {/* On a phone the list is the point, so only the figure that drives it stays on top. */}
+            <Figure label="Coming in, next 8 weeks" value={perCur(f.comingIn, 'Nothing due')} onClick={() => onNavigate('cashflow')} wide
               line="Invoices due in the next 8 weeks. What is already late is in Owed, not here." />
-            <Figure label="Money in this month" value={perCur(f.moneyIn, 'Nothing yet')} onClick={() => onNavigate('billing')}
+            <Figure label="Money in this month" value={perCur(f.moneyIn, 'Nothing yet')} onClick={() => onNavigate('billing')} wide
               line={f.byMethod.length ? f.byMethod.map((m) => `${money(m.amount, m.currency)} ${m.method === 'Other' ? 'other ways' : `by ${m.method}`}`).join(', ') : 'Payments you record show up here'} />
           </div>
         )}
@@ -352,11 +354,13 @@ function whenText(at: string, allDay?: boolean): string {
   return allDay ? `${day}, all day` : `${day}, ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-function Figure({ label, value, line, warn, onClick }: {
+function Figure({ label, value, line, warn, onClick, wide }: {
   label: string; value: string; line: string; warn?: boolean; onClick: () => void;
+  /** Only shown from tablet width up. */
+  wide?: boolean;
 }) {
   return (
-    <button onClick={onClick} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-800/40">
+    <button onClick={onClick} className={`rounded-xl border border-slate-800 bg-slate-900/40 p-4 text-left hover:bg-slate-800/40 ${wide ? 'hidden sm:block' : ''}`}>
       <div className="text-xs font-medium text-slate-400">{label}</div>
       <div className="num mt-1 font-display text-2xl font-bold text-slate-100">{value}</div>
       <div className={`mt-1 text-xs ${warn ? 'font-medium text-red-400' : 'text-slate-500'}`}>{line}</div>

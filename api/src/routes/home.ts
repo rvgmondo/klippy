@@ -33,6 +33,9 @@ const plusDays = (day: string, n: number) => {
   d.setUTCDate(d.getUTCDate() + n);
   return iso(d);
 };
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** 27 Sep, the way a person says it, not 2026-09-27. */
+const say = (day: string) => `${Number(day.slice(8, 10))} ${MON[Number(day.slice(5, 7)) - 1]}`;
 const daysBetween = (a: string, b: string) =>
   Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
 
@@ -116,7 +119,7 @@ export async function homeRoutes(app: FastifyInstance) {
         items.push({
           ...base, key: `inv-${d.id}`, group: 'overdue', kind: 'invoice-late',
           title: `${d.number} is ${n} ${n === 1 ? 'day' : 'days'} overdue`,
-          sub: d.lastReminderOn ? `Chased ${d.lastReminderOn}` : 'Not chased yet',
+          sub: d.lastReminderOn ? `Chased ${say(d.lastReminderOn)}` : 'Not chased yet',
           rank: -n,
         });
       } else {
@@ -158,7 +161,7 @@ export async function homeRoutes(app: FastifyInstance) {
         && d.dueDate >= today && d.dueDate <= plusDays(today, 3)) {
         items.push({
           key: `qe-${d.id}`, group: 'week', kind: 'quote-expiring',
-          title: `${d.number} runs out ${d.dueDate === today ? 'today' : `on ${d.dueDate}`}`,
+          title: `${d.number} runs out ${d.dueDate === today ? 'today' : `on ${say(d.dueDate)}`}`,
           sub: 'No answer from them yet', businessId: d.businessId, folderId: d.folderId,
           clientName: d.clientName, amount: Number(d.total), currency: d.currency,
           docId: d.id, docType: d.type, docNumber: d.number, rank: daysBetween(today, d.dueDate),
