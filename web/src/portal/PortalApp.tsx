@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import { money as fmt } from '../lib/money';
 import type { PortalMe } from './PortalRoot';
+import { PortalHelp } from './PortalHelp';
 
 interface Doc {
   id: number; type: 'invoice' | 'quote' | 'credit_note'; number: string;
@@ -33,7 +34,9 @@ const money = (currency: string, v: string | number) => fmt(v, currency);
  */
 export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () => void }) {
   const qc = useQueryClient();
-  const [tab, setTab] = useState<'documents' | 'statement' | 'report' | 'hosting' | 'details'>('documents');
+  // An email about a help request links here with ?help=12, straight onto it.
+  const [helpId] = useState(() => Number(new URLSearchParams(window.location.search).get('help')) || null);
+  const [tab, setTab] = useState<'documents' | 'statement' | 'report' | 'hosting' | 'details' | 'help'>(helpId ? 'help' : 'documents');
   const accent = { background: 'var(--portal-accent, #0f172a)' };
 
   const { data } = useQuery({
@@ -93,8 +96,14 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
             <div className="truncate text-sm font-semibold">{me.brand.name}</div>
             <div className="truncate text-xs text-slate-500">{me.client.name}</div>
           </div>
+          {me.brand.whatsapp && (
+            <a href={`https://wa.me/${me.brand.whatsapp}`} target="_blank" rel="noopener"
+              className="ml-auto shrink-0 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500">
+              WhatsApp us
+            </a>
+          )}
           <button onClick={() => logout.mutate()}
-            className="ml-auto shrink-0 text-xs text-slate-500 underline hover:text-slate-800">
+            className={`${me.brand.whatsapp ? '' : 'ml-auto '}shrink-0 text-xs text-slate-500 underline hover:text-slate-800`}>
             {me.preview ? 'End preview' : 'Sign out'}
           </button>
         </div>
@@ -134,11 +143,14 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
           </div>
         )}
 
-        <nav className="mb-4 flex gap-1 border-b border-slate-200">
-          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['report', 'Work report'], ['hosting', 'Hosting'], ['details', 'Your details']] as const)
+        <nav className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200">
+          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['report', 'Work report'], ['hosting', 'Hosting'], ['help', 'Get help'], ['details', 'Your details']] as const)
             .map(([id, labelText]) => (
               <button key={id} onClick={() => setTab(id)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+                // On a phone the row scrolls sideways; keep the open tab in sight.
+                ref={tab === id ? (el) => el?.scrollIntoView({ block: 'nearest', inline: 'nearest' }) : undefined}
+                aria-current={tab === id ? 'page' : undefined}
+                className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm ${
                   tab === id ? 'border-slate-900 font-medium text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
                 {labelText}
               </button>
@@ -156,6 +168,10 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
             did not, so a client pressing Pay there got nothing at all when it failed. */}
         {tab === 'hosting' && <Hosting accent={accent} onPay={(id) => pay.mutate(id)}
           payError={pay.error instanceof Error ? pay.error.message : ''} />}
+        {tab === 'help' && (
+          <PortalHelp brandName={me.brand.name} whatsapp={me.brand.whatsapp ?? null} readOnly={!!me.preview}
+            accent={accent} openId={helpId} />
+        )}
         {tab === 'details' && (me.preview
           ? <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">
               The client edits their own details here. Hidden while previewing.

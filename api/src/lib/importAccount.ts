@@ -5,7 +5,7 @@ import {
   deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses,
   taskSubtasks, taskComments, labels, taskLabels, teams, teamMembers, boardTeams,
   calendarEvents, hostingAccounts, portalUsers, productNotes, focusItems,
-  memberships, users, sales, recurringExpenses,
+  memberships, users, sales, recurringExpenses, clientEmails, supportRequests, supportMessages,
 } from '../db/schema.js';
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
@@ -267,7 +267,7 @@ export async function importAccountData(
         name: b.name ?? 'Business', type: b.type ?? 'services', secondaryTypes: [],
         currency: b.currency ?? 'ZAR', brandName: b.brandName ?? null,
         bizAddress: b.bizAddress ?? null, bizTaxNumber: b.bizTaxNumber ?? null,
-        bizRegNumber: b.bizRegNumber ?? null, bankDetails: b.bankDetails ?? null,
+        bizRegNumber: b.bizRegNumber ?? null, bizWhatsapp: b.bizWhatsapp ?? null, bankDetails: b.bankDetails ?? null,
         defaultTaxRate: b.defaultTaxRate ?? null, defaultDueDays: b.defaultDueDays ?? null,
         prefixInvoice: b.prefixInvoice ?? undefined, prefixQuote: b.prefixQuote ?? undefined,
         prefixCreditNote: b.prefixCreditNote ?? undefined,
@@ -584,6 +584,35 @@ export async function importAccountData(
       await insert('portalUsers', portalUsers as never, p.id, {
         businessId, folderId, email: String(p.email ?? '').toLowerCase(),
         name: p.name ?? null, isActive: p.isActive !== false,
+      });
+    }
+    for (const m of arr(data, 'clientEmails')) {
+      const folderId = ref('folders', m.folderId);
+      if (!folderId) continue;
+      await insert('clientEmails', clientEmails as never, m.id, {
+        businessId: ref('businesses', m.businessId), folderId,
+        toEmails: String(m.toEmails ?? ''), subject: String(m.subject ?? ''), body: String(m.body ?? ''),
+        status: m.status === 'failed' ? 'failed' : 'sent', sentBy: importerUserId,
+        createdAt: m.createdAt ? new Date(String(m.createdAt)) : undefined,
+      });
+    }
+    for (const r of arr(data, 'supportRequests')) {
+      const businessId = ref('businesses', r.businessId);
+      const folderId = ref('folders', r.folderId);
+      if (!businessId || !folderId) continue;
+      await insert('supportRequests', supportRequests as never, r.id, {
+        businessId, folderId, portalUserId: ref('portalUsers', r.portalUserId),
+        subject: String(r.subject ?? 'Help request'),
+        status: r.status === 'answered' || r.status === 'closed' ? r.status : 'open',
+        lastMessageAt: r.lastMessageAt ? new Date(String(r.lastMessageAt)) : new Date(),
+      });
+    }
+    for (const m of arr(data, 'supportMessages')) {
+      const requestId = ref('supportRequests', m.requestId);
+      if (!requestId) continue;
+      await insert('supportMessages', supportMessages as never, m.id, {
+        requestId, fromClient: !!m.fromClient, authorName: m.authorName ?? null, body: String(m.body ?? ''),
+        createdAt: m.createdAt ? new Date(String(m.createdAt)) : undefined,
       });
     }
     for (const e of arr(data, 'expenses')) {

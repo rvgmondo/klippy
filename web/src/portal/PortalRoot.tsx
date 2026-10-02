@@ -12,7 +12,7 @@ export interface PortalMe {
   client: { name: string; billingEmail: string | null; phone?: string | null; vatNumber: string | null; address: string | null };
   brand: {
     name: string; accent: string;
-    fontDisplay: string | null; fontBody: string | null; hasLogo: boolean;
+    fontDisplay: string | null; fontBody: string | null; hasLogo: boolean; whatsapp?: string | null;
   };
 }
 

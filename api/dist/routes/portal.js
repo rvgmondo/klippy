@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY, formatMoney, payfastSupports } from '../lib/currency.js';
 import { db } from '../db/client.js';
-import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, offerings, boards, tasks, timeEntries, } from '../db/schema.js';
+import { documents, documentLines, payments, folders, hostingAccounts, subscriptions, portalUsers, memberships, users, events, offerings, boards, tasks, timeEntries, boardColumns, supportRequests, supportMessages, } from '../db/schema.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
@@ -150,8 +150,142 @@ export async function portalRoutes(app) {
                 fontDisplay: c.business.fontDisplay,
                 fontBody: c.business.fontBody,
                 hasLogo: !!c.business.logoPath,
+                // Digits only: what a wa.me link needs. Null hides the button.
+                whatsapp: (c.business.bizWhatsapp ?? '').replace(/\D/g, '') || null,
             },
         };
+    });
+    // ---- Asking for help --------------------------------------------------------
+    /**
+     * The client's help requests, and the conversation in each.
+     *
+     * Scoped by account AND client like everything else here: one client must never
+     * see another's request, so every read filters on both, never on the id alone.
+     */
+    const myRequest = (c) => and(eq(supportRequests.accountId, c.user.accountId), eq(supportRequests.folderId, c.user.folderId));
+    const SUPPORT_TEXT = z.string().trim().min(1).max(10000);
+    app.get('/api/v1/portal/support', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        const rows = await db.select({
+            id: supportRequests.id, subject: supportRequests.subject, status: supportRequests.status,
+            lastMessageAt: supportRequests.lastMessageAt, createdAt: supportRequests.createdAt,
+        }).from(supportRequests).where(myRequest(c)).orderBy(desc(supportRequests.lastMessageAt)).limit(100);
+        return { requests: rows };
+    });
+    app.get('/api/v1/portal/support/:id', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const [r] = await db.select().from(supportRequests).where(and(myRequest(c), eq(supportRequests.id, id))).limit(1);
+        if (!r)
+            return reply.code(404).send({ error: 'That request is not here.' });
+        const messages = await db.select({
+            id: supportMessages.id, fromClient: supportMessages.fromClient, authorName: supportMessages.authorName,
+            body: supportMessages.body, createdAt: supportMessages.createdAt,
+        }).from(supportMessages)
+            .where(and(eq(supportMessages.accountId, c.user.accountId), eq(supportMessages.requestId, r.id)))
+            .orderBy(supportMessages.createdAt, supportMessages.id);
+        return { request: { id: r.id, subject: r.subject, status: r.status, createdAt: r.createdAt }, messages };
+    });
+    /** Tell the business: in the app, and by email to the owner, who may not have it open. */
+    const tellTeam = async (c, requestId, subject, body, isNew) => {
+        const who = c.user.name || c.user.email;
+        const link = `/?v=clients&client=${c.client.id}&help=${requestId}`;
+        await notifyAdmins(c.user.accountId, {
+            kind: 'support',
+            title: isNew ? `${c.client.name} needs help: ${subject}` : `${c.client.name} replied: ${subject}`,
+            body: body.slice(0, 200),
+            url: link,
+        });
+        const owner = await ownerEmail(c.user.accountId);
+        if (!owner)
+            return;
+        const brand = await emailBrandFor(c.user.accountId, c.user.businessId);
+        const content = {
+            heading: isNew ? `${c.client.name} needs help` : `${c.client.name} replied`,
+            body: [`${who} wrote:`, ...body.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean)],
+            facts: [['Subject', subject], ['Client', c.client.name]],
+            button: { label: 'Answer in Klippy', url: `${appUrl()}${link}` },
+        };
+        await sendBusinessMail({
+            accountId: c.user.accountId, businessId: c.user.businessId, purpose: 'general', to: owner,
+            subject: `${isNew ? 'Help needed' : 'Reply'}: ${subject}`,
+            text: renderEmailText(brand, content), html: renderEmail(brand, content),
+        }).catch(() => { });
+    };
+    app.post('/api/v1/portal/support', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        if (await blockedByPreview(c, reply))
+            return;
+        const parsed = z.object({ subject: z.string().trim().min(1).max(200), body: SUPPORT_TEXT }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Say what it is about, and what you need.' });
+        // A ceiling on open requests, so a stuck script cannot fill the inbox.
+        const open = await db.select({ id: supportRequests.id }).from(supportRequests)
+            .where(and(myRequest(c), eq(supportRequests.status, 'open')));
+        if (open.length >= 20) {
+            return reply.code(429).send({ error: 'You have 20 requests waiting already. We will get to them, or add to one of those.' });
+        }
+        const { subject, body } = parsed.data;
+        // A card on the client's board, when there is one, so the work sits with the
+        // rest of their work. No board means no card; the request still shows on Home.
+        let taskId = null;
+        const [board] = await db.select({ id: boards.id }).from(boards)
+            .where(and(eq(boards.accountId, c.user.accountId), eq(boards.folderId, c.user.folderId), eq(boards.isArchived, false), isNull(boards.deletedAt)))
+            .orderBy(boards.position, boards.id).limit(1);
+        if (board) {
+            const [col] = await db.select({ id: boardColumns.id }).from(boardColumns)
+                .where(and(eq(boardColumns.accountId, c.user.accountId), eq(boardColumns.boardId, board.id), eq(boardColumns.isDoneColumn, false)))
+                .orderBy(boardColumns.position, boardColumns.id).limit(1);
+            if (col) {
+                const t = await db.insert(tasks).values({
+                    accountId: c.user.accountId, boardId: board.id, columnId: col.id,
+                    title: `Help: ${subject}`.slice(0, 255), description: body.slice(0, 5000), priority: 'high', position: 0,
+                });
+                taskId = Number(t[0].insertId);
+            }
+        }
+        const ins = await db.insert(supportRequests).values({
+            accountId: c.user.accountId, businessId: c.user.businessId, folderId: c.user.folderId,
+            portalUserId: c.user.id, subject, status: 'open', taskId, lastMessageAt: new Date(),
+        });
+        const id = Number(ins[0].insertId);
+        await db.insert(supportMessages).values({
+            accountId: c.user.accountId, requestId: id, fromClient: true, authorName: c.user.name || c.user.email, body,
+        });
+        await tellTeam(c, id, subject, body, true);
+        return reply.code(201).send({ id });
+    });
+    app.post('/api/v1/portal/support/:id/reply', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        if (await blockedByPreview(c, reply))
+            return;
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const parsed = z.object({ body: SUPPORT_TEXT }).safeParse(req.body);
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Write something first.' });
+        const [r] = await db.select().from(supportRequests).where(and(myRequest(c), eq(supportRequests.id, id))).limit(1);
+        if (!r)
+            return reply.code(404).send({ error: 'That request is not here.' });
+        await db.insert(supportMessages).values({
+            accountId: c.user.accountId, requestId: r.id, fromClient: true, authorName: c.user.name || c.user.email, body: parsed.data.body,
+        });
+        // The client spoke last, so it is waiting on the business again, closed or not.
+        await db.update(supportRequests).set({ status: 'open', lastMessageAt: new Date() })
+            .where(and(myRequest(c), eq(supportRequests.id, r.id)));
+        await tellTeam(c, r.id, r.subject, parsed.data.body, false);
+        return { ok: true };
     });
     /** The business logo, for the portal header. Public to the signed-in client only. */
     app.get('/api/v1/portal/logo', async (req, reply) => {

@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, recurringExpenses, } from '../db/schema.js';
+import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts, deals, dealActivities, documents, documentLines, payments, offerings, subscriptions, expenses, taskSubtasks, taskComments, taskFiles, labels, taskLabels, teams, teamMembers, boardTeams, calendarEvents, storageNodes, hostingAccounts, portalUsers, productNotes, focusItems, memberships, users, sales, recurringExpenses, clientEmails, supportRequests, supportMessages, } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
 /**
  * Everything in one workspace as one plain JSON object.
@@ -35,11 +35,11 @@ import { tenantWhere } from './tenant.js';
  * say "download" and not "restore".
  */
 /** Bumped when the SHAPE changes, so a future importer can tell what it is holding. */
-export const EXPORT_SCHEMA_VERSION = 5;
+export const EXPORT_SCHEMA_VERSION = 6;
 export async function buildAccountExport(accountId) {
     const own = (t) => tenantWhere(t, accountId);
-    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows, salesRows, recurringRows,] = await Promise.all([
-        db.select({ id: businesses.id, name: businesses.name, type: businesses.type, currency: businesses.currency, brandName: businesses.brandName, bizAddress: businesses.bizAddress, bizTaxNumber: businesses.bizTaxNumber, bizRegNumber: businesses.bizRegNumber, bankDetails: businesses.bankDetails, defaultTaxRate: businesses.defaultTaxRate, defaultDueDays: businesses.defaultDueDays, prefixInvoice: businesses.prefixInvoice, prefixQuote: businesses.prefixQuote, prefixCreditNote: businesses.prefixCreditNote, seqStartInvoice: businesses.seqStartInvoice, seqStartQuote: businesses.seqStartQuote, seqStartCreditNote: businesses.seqStartCreditNote, position: businesses.position }).from(businesses).where(own(businesses)),
+    const [biz, folderRows, boardRows, columnRows, taskRows, timeRows, contactRows, dealRows, dealActivityRows, docRows, lineRows, paymentRows, offeringRows, subscriptionRows, expenseRows, subtaskRows, commentRows, fileRows, labelRows, taskLabelRows, teamRows, teamMemberRows, boardTeamRows, eventRows, storageRows, hostingRows, portalRows, noteRows, focusRows, peopleRows, salesRows, recurringRows, emailRows, supportRows, supportMessageRows,] = await Promise.all([
+        db.select({ id: businesses.id, name: businesses.name, type: businesses.type, currency: businesses.currency, brandName: businesses.brandName, bizAddress: businesses.bizAddress, bizTaxNumber: businesses.bizTaxNumber, bizRegNumber: businesses.bizRegNumber, bizWhatsapp: businesses.bizWhatsapp, bankDetails: businesses.bankDetails, defaultTaxRate: businesses.defaultTaxRate, defaultDueDays: businesses.defaultDueDays, prefixInvoice: businesses.prefixInvoice, prefixQuote: businesses.prefixQuote, prefixCreditNote: businesses.prefixCreditNote, seqStartInvoice: businesses.seqStartInvoice, seqStartQuote: businesses.seqStartQuote, seqStartCreditNote: businesses.seqStartCreditNote, position: businesses.position }).from(businesses).where(own(businesses)),
         db.select({ id: folders.id, name: folders.name, parentId: folders.parentId, businessId: folders.businessId, pillar: folders.pillar, billingEmail: folders.billingEmail, billingPhone: folders.billingPhone, billingVatNumber: folders.billingVatNumber, billingAddress: folders.billingAddress, hourlyRate: folders.hourlyRate, monthlyHoursBudget: folders.monthlyHoursBudget, notes: folders.notes, legalName: folders.legalName, regNumber: folders.regNumber, companyType: folders.companyType, country: folders.country, taxNumber: folders.taxNumber, industry: folders.industry, website: folders.website, bbbeeLevel: folders.bbbeeLevel, financialYearEnd: folders.financialYearEnd, paymentTermsDays: folders.paymentTermsDays, creditLimit: folders.creditLimit, currency: folders.currency, clientStatus: folders.clientStatus, clientSince: folders.clientSince, accountManagerId: folders.accountManagerId, source: folders.source, primaryContactId: folders.primaryContactId, isArchived: folders.isArchived, deletedAt: folders.deletedAt, position: folders.position }).from(folders).where(own(folders)),
         db.select({ id: boards.id, folderId: boards.folderId, name: boards.name, description: boards.description, isArchived: boards.isArchived, deletedAt: boards.deletedAt, position: boards.position }).from(boards).where(own(boards)),
         db.select({ id: boardColumns.id, boardId: boardColumns.boardId, name: boardColumns.name, position: boardColumns.position }).from(boardColumns).where(own(boardColumns)),
@@ -93,6 +93,11 @@ export async function buildAccountExport(accountId) {
         // restored workspace stops recording rent next month and nobody notices until the
         // figures are already wrong.
         db.select({ id: recurringExpenses.id, businessId: recurringExpenses.businessId, description: recurringExpenses.description, category: recurringExpenses.category, amount: recurringExpenses.amount, vatAmount: recurringExpenses.vatAmount, intervalMonths: recurringExpenses.intervalMonths, nextDueOn: recurringExpenses.nextDueOn, startedOn: recurringExpenses.startedOn, endsOn: recurringExpenses.endsOn, isActive: recurringExpenses.isActive }).from(recurringExpenses).where(own(recurringExpenses)),
+        // What was said to clients, by email and in their help requests. The record of a
+        // conversation is the part nobody can rebuild from memory.
+        db.select({ id: clientEmails.id, businessId: clientEmails.businessId, folderId: clientEmails.folderId, toEmails: clientEmails.toEmails, subject: clientEmails.subject, body: clientEmails.body, status: clientEmails.status, createdAt: clientEmails.createdAt }).from(clientEmails).where(own(clientEmails)),
+        db.select({ id: supportRequests.id, businessId: supportRequests.businessId, folderId: supportRequests.folderId, portalUserId: supportRequests.portalUserId, subject: supportRequests.subject, status: supportRequests.status, lastMessageAt: supportRequests.lastMessageAt, createdAt: supportRequests.createdAt }).from(supportRequests).where(own(supportRequests)),
+        db.select({ id: supportMessages.id, requestId: supportMessages.requestId, fromClient: supportMessages.fromClient, authorName: supportMessages.authorName, body: supportMessages.body, createdAt: supportMessages.createdAt }).from(supportMessages).where(own(supportMessages)),
     ]);
     return {
         exportedOn: new Date().toISOString().slice(0, 10),
@@ -129,6 +134,9 @@ export async function buildAccountExport(accountId) {
         people: peopleRows,
         sales: salesRows,
         recurringExpenses: recurringRows,
+        clientEmails: emailRows,
+        supportRequests: supportRows,
+        supportMessages: supportMessageRows,
     };
 }
 //# sourceMappingURL=export.js.map

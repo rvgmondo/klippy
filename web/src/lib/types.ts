@@ -93,6 +93,7 @@ export interface Business {
   bizAddress?: string | null;
   bizTaxNumber?: string | null;
   bizRegNumber?: string | null;
+  bizWhatsapp?: string | null;
   bankDetails?: string | null;
   invoiceFooter?: string | null;
   invoiceAccent?: string;

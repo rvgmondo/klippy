@@ -526,6 +526,13 @@
       "when": 1789021320289,
       "tag": "0074_dry_jackpot",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "5",
+      "when": 1790945694740,
+      "tag": "0075_client_talk",
+      "breakpoints": true
     }
   ]
 }

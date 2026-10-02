@@ -5,6 +5,7 @@ import { apiPost, ApiError } from '../lib/api';
 import { confirmDialog, notify } from './ConfirmDialog';
 import type { Business } from '../lib/types';
 import { money } from '../lib/money';
+import { btnPrimary } from './ui';
 
 /**
  * Bring clients over from Invoice Ninja.
@@ -278,7 +279,7 @@ export function ImportPanel({ business }: { business: Business }) {
 
           <div className="flex flex-wrap items-center gap-3">
             <button onClick={() => void run()} disabled={busy}
-              className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50">
+              className={btnPrimary}>
               {busy ? 'Working' : `Import into ${preview.business}`}
             </button>
             <p className="text-xs text-slate-500">Nothing is sent to your clients.</p>

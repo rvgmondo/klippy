@@ -180,6 +180,9 @@ export const businesses = mysqlTable('businesses', {
     bizAddress: varchar('biz_address', { length: 500 }),
     bizTaxNumber: varchar('biz_tax_number', { length: 60 }),
     bizRegNumber: varchar('biz_reg_number', { length: 60 }),
+    // The number clients can WhatsApp, for the chat button in their portal. Digits
+    // with country code (27...), because that is what a wa.me link needs.
+    bizWhatsapp: varchar('biz_whatsapp', { length: 20 }),
     bankDetails: text('bank_details'),
     invoiceFooter: text('invoice_footer'),
     invoiceAccent: varchar('invoice_accent', { length: 20 }).default('#6366f1').notNull(),
@@ -2012,4 +2015,75 @@ export const socialPostMediaRelations = relations(socialPostMedia, ({ one }) => 
     post: one(socialPosts, { fields: [socialPostMedia.postId], references: [socialPosts.id] }),
     node: one(storageNodes, { fields: [socialPostMedia.storageNodeId], references: [storageNodes.id] }),
 }));
+// ---- Talking to clients -------------------------------------------------------
+/**
+ * An email somebody wrote to a client from inside Klippy.
+ *
+ * Kept on the client so "what did we last tell them" has one answer, whoever
+ * sent it. Replies go to the business's own inbox (its reply-to), not here:
+ * receiving mail is a different job from sending it, and the record of what WE
+ * said is the part that gets lost.
+ */
+export const clientEmails = mysqlTable('client_emails', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true })
+        .references(() => businesses.id, { onDelete: 'cascade' }),
+    folderId: int('folder_id', { unsigned: true }).notNull()
+        .references(() => folders.id, { onDelete: 'cascade' }),
+    toEmails: varchar('to_emails', { length: 500 }).notNull(),
+    subject: varchar('subject', { length: 200 }).notNull(),
+    body: text('body').notNull(),
+    status: mysqlEnum('status', ['sent', 'failed']).default('sent').notNull(),
+    error: varchar('error', { length: 255 }),
+    sentBy: int('sent_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_client_emails_folder').on(t.accountId, t.folderId),
+]);
+/**
+ * A client asking for help through their portal.
+ *
+ * A conversation, not a ticket system: a subject, the messages back and forth,
+ * and whether it is waiting on us. "open" means the client spoke last and is
+ * waiting; "answered" means we did; "closed" means it is done. That is the whole
+ * state machine, because a one-person business needs to know who owes a reply,
+ * not which queue a ticket is in.
+ */
+export const supportRequests = mysqlTable('support_requests', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    businessId: int('business_id', { unsigned: true }).notNull()
+        .references(() => businesses.id, { onDelete: 'cascade' }),
+    folderId: int('folder_id', { unsigned: true }).notNull()
+        .references(() => folders.id, { onDelete: 'cascade' }),
+    portalUserId: int('portal_user_id', { unsigned: true })
+        .references(() => portalUsers.id, { onDelete: 'set null' }),
+    subject: varchar('subject', { length: 200 }).notNull(),
+    status: mysqlEnum('status', ['open', 'answered', 'closed']).default('open').notNull(),
+    /** The task made for it on the client's board, when the client has a board. */
+    taskId: int('task_id', { unsigned: true }).references(() => tasks.id, { onDelete: 'set null' }),
+    lastMessageAt: datetime('last_message_at').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+}, (t) => [
+    index('idx_support_account_status').on(t.accountId, t.status),
+    index('idx_support_folder').on(t.accountId, t.folderId),
+]);
+export const supportMessages = mysqlTable('support_messages', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    requestId: int('request_id', { unsigned: true }).notNull()
+        .references(() => supportRequests.id, { onDelete: 'cascade' }),
+    fromClient: boolean('from_client').notNull(),
+    authorName: varchar('author_name', { length: 150 }),
+    userId: int('user_id', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_support_messages_request').on(t.accountId, t.requestId),
+]);
 //# sourceMappingURL=schema.js.map

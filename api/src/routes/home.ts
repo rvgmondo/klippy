@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { eq, gte, inArray, isNotNull, isNull, lte, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import {
-  documents, payments, tasks, boards, folders, calendarEvents, deals, socialPosts, businesses,
+  documents, payments, tasks, boards, folders, calendarEvents, deals, socialPosts, businesses, supportRequests,
 } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
@@ -44,7 +44,7 @@ interface Item {
   key: string;
   group: Group;
   kind: 'invoice-late' | 'invoice-due' | 'draft' | 'quote-accepted' | 'quote-expiring'
-    | 'task' | 'event' | 'deal' | 'post';
+    | 'task' | 'event' | 'deal' | 'post' | 'support';
   title: string;
   sub: string;
   businessId: number | null;
@@ -62,6 +62,7 @@ interface Item {
   eventId?: number;
   dealId?: number;
   postId?: number;
+  supportId?: number;
   /** A meeting's start, for the browser to write in local time. */
   at?: string;
   allDay?: boolean;
@@ -284,6 +285,26 @@ export async function homeRoutes(app: FastifyInstance) {
         sub: d.followUpNote || (d.company ?? 'A job you are trying to win'),
         businessId: d.businessId, folderId: null, clientName: d.company, dealId: d.id,
         rank: daysBetween(today, d.nextFollowUpAt),
+      });
+    }
+
+    // ---- Clients waiting for an answer ---------------------------------------------
+    // A help request the client sent and nobody has answered. Late once it has
+    // waited two days, because that is when a client starts to feel ignored.
+    const sr = await db.select({
+      id: supportRequests.id, subject: supportRequests.subject, businessId: supportRequests.businessId,
+      folderId: supportRequests.folderId, clientName: folders.name, lastMessageAt: supportRequests.lastMessageAt,
+    }).from(supportRequests).innerJoin(folders, eq(folders.id, supportRequests.folderId))
+      .where(tenantWhere(supportRequests, accountId, eq(supportRequests.status, 'open')));
+    for (const r of sr) {
+      if (!inScope(r.businessId)) continue;
+      const waited = daysBetween(iso(r.lastMessageAt), today);
+      items.push({
+        key: `help-${r.id}`, group: waited >= 2 ? 'overdue' : 'today', kind: 'support',
+        title: `${r.clientName} needs help: ${r.subject}`,
+        sub: waited <= 0 ? 'Asked today' : waited === 1 ? 'Waiting since yesterday' : `Waiting ${waited} days`,
+        businessId: r.businessId, folderId: r.folderId, clientName: r.clientName, supportId: r.id,
+        rank: -waited,
       });
     }
 

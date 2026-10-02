@@ -61,6 +61,7 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     bizAddress: business.bizAddress ?? '',
     bizTaxNumber: business.bizTaxNumber ?? '',
     bizRegNumber: business.bizRegNumber ?? '',
+    bizWhatsapp: business.bizWhatsapp ?? '',
     bankDetails: business.bankDetails ?? '',
     invoiceFooter: business.invoiceFooter ?? '',
     invoiceHeaderHtml: business.invoiceHeaderHtml ?? '',
@@ -97,7 +98,7 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     mutationFn: () => apiPatch(`/businesses/${business.id}`, {
       brandName: form.brandName, currency: form.currency || null,
       bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
-      bizRegNumber: form.bizRegNumber, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
+      bizRegNumber: form.bizRegNumber, bizWhatsapp: form.bizWhatsapp, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
       invoiceHeaderHtml: form.invoiceHeaderHtml || null,
       invoiceFooterHtml: form.invoiceFooterHtml || null,
       prefixInvoice: form.prefixInvoice, prefixQuote: form.prefixQuote,
@@ -256,6 +257,14 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                 <label className={label}>Company registration</label>
                 <input className={field} value={form.bizRegNumber} onChange={(e) => set('bizRegNumber', e.target.value)} placeholder="2021/123456/07" />
               </div>
+            </div>
+            <div>
+              <label className={label}>WhatsApp number</label>
+              <input className={field} value={form.bizWhatsapp} inputMode="tel"
+                onChange={(e) => set('bizWhatsapp', e.target.value)} placeholder="082 555 0101" />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Puts a WhatsApp button in your clients' portal. Leave it empty to hide the button.
+              </p>
             </div>
             <div>
               <label className={label}>Bank details for payment</label>

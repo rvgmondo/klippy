@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, KanbanSquare,
-  LayoutGrid, List, Receipt, Share2, Target, Plus,
+  LayoutGrid, List, Receipt, Share2, Target, Plus, LifeBuoy,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { money, moneyRound } from '../lib/money';
@@ -38,7 +38,7 @@ interface Item {
   businessId: number | null; folderId: number | null; clientName: string | null;
   amount?: number; currency?: string; of?: number;
   docId?: number; docType?: string; docNumber?: string;
-  taskId?: number; boardId?: number; eventId?: number; dealId?: number; postId?: number;
+  taskId?: number; boardId?: number; eventId?: number; dealId?: number; postId?: number; supportId?: number;
   at?: string; allDay?: boolean;
 }
 interface HomeData {
@@ -174,11 +174,14 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
       case 'event': return [b('Open', () => onNavigate('calendar'))];
       case 'deal': return [b('Open deal', () => onNavigate('pipeline'))];
       case 'post': return [b('Open', () => navigateTo('social', { post: String(i.postId) }))];
+      case 'support': return [b('Answer', () => openHelp(i), true)];
       default: return [];
     }
   }
+  const openHelp = (i: Item) => navigateTo('clients', { client: String(i.folderId), help: String(i.supportId) });
   const openRow = (i: Item) => {
-    if (i.docId) navigateTo('billing', { open: String(i.docId), doctype: i.docType ?? 'invoice' });
+    if (i.supportId) openHelp(i);
+    else if (i.docId) navigateTo('billing', { open: String(i.docId), doctype: i.docType ?? 'invoice' });
     else if (i.taskId && i.boardId) setTask({ id: i.taskId, boardId: i.boardId });
     else if (i.eventId) onNavigate('calendar');
     else if (i.dealId) onNavigate('pipeline');
@@ -191,6 +194,7 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
     if (i.kind.startsWith('quote')) return <span className={`${cls} bg-[var(--accent-quiet)] text-violet-300`}><FileText size={16} /></span>;
     if (i.kind === 'event') return <span className={`${cls} bg-sky-500/15 text-sky-400`}><CalendarDays size={16} /></span>;
     if (i.kind === 'deal') return <span className={`${cls} bg-sky-500/15 text-sky-400`}><Target size={16} /></span>;
+    if (i.kind === 'support') return <span className={`${cls} ${i.group === 'overdue' ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-400'}`}><LifeBuoy size={16} /></span>;
     if (i.kind === 'post') return <span className={`${cls} bg-slate-800 text-slate-300`}><Share2 size={16} /></span>;
     return <span className={`${cls} ${i.group === 'overdue' ? 'bg-red-500/15 text-red-400' : 'bg-slate-800 text-slate-400'}`}><KanbanSquare size={16} /></span>;
   };

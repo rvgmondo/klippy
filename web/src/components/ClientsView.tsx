@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft, MessageCircle, Phone, Mail, MapPin, Pencil, FileText, Receipt, Users, Search,
   KanbanSquare, Target, AlertTriangle, Plus,
 } from 'lucide-react';
+import { ClientMessages, EmailComposer } from './ClientTalk';
 import { apiGet } from '../lib/api';
 import { money, moneyRound } from '../lib/money';
-import { navigateTo } from '../lib/urlAction';
+import { navigateTo, takeUrlParam } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import { PageHeader } from './PageHeader';
 import { ClientDetails } from './ClientDetails';
@@ -242,7 +243,7 @@ function ClientList({ businessId, onOpen }: { businessId: BusinessSelection; onO
 // One client
 // ---------------------------------------------------------------------------------
 
-type Tab = 'overview' | 'money' | 'work' | 'people';
+type Tab = 'overview' | 'money' | 'work' | 'people' | 'messages';
 
 function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
   const { account } = useAuth();
@@ -255,7 +256,17 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
   // The edit form already exists; it wants the folder row, which the tree has cached.
   const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: Folder[] }>('/folders') });
   const [editing, setEditing] = useState(false);
-  const [tab, setTab] = useState<Tab>('overview');
+  // A link from a help notification (?help=12) opens straight on that conversation.
+  // Read once, then taken off the address so it does not follow you to the next client.
+  const [helpId] = useState(() => Number(new URLSearchParams(window.location.search).get('help')) || null);
+  useEffect(() => { if (helpId) takeUrlParam('help'); }, [helpId]);
+  const [tab, setTab] = useState<Tab>(helpId ? 'messages' : 'overview');
+  const [writing, setWriting] = useState(false);
+  const help = useQuery({
+    queryKey: ['client-help', id],
+    queryFn: () => apiGet<{ requests: { status: string }[] }>(`/support?folderId=${id}`),
+  });
+  const waiting = (help.data?.requests ?? []).filter((r) => r.status === 'open').length;
 
   if (isLoading) {
     return <div className="mx-auto max-w-6xl space-y-3 p-6"><Skeleton className="h-12 w-64" /><Skeleton className="h-40 w-full" /></div>;
@@ -285,7 +296,10 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
     { key: 'money', label: 'Money', n: data.documents.length },
     { key: 'work', label: 'Work', n: data.tasks.length },
     { key: 'people', label: 'People', n: data.people.length },
+    { key: 'messages', label: 'Messages', n: waiting || undefined },
   ];
+  const addresses = [...new Set([c.billingEmail, ...data.people.map((p) => p.email)]
+    .filter((x): x is string => !!x).map((x) => x.trim()))];
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
@@ -312,7 +326,7 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
               </div>
             </div>
             {/* The four things you do for a client, thumb-sized on a phone. */}
-            <div className="grid w-full grid-cols-4 gap-2 sm:flex sm:w-auto">
+            <div className="grid w-full auto-cols-fr grid-flow-col gap-2 sm:flex sm:w-auto">
               {wa ? (
                 <a href={wa} target="_blank" rel="noopener"
                   className="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-500 sm:flex-row sm:gap-1.5 sm:text-sm">
@@ -324,6 +338,9 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
                   <Phone size={15} /> Call
                 </a>
               )}
+              <button onClick={() => setWriting(true)} className={`${btnSecondary} flex min-h-11 flex-col items-center justify-center gap-0.5 px-3 text-xs sm:flex-row sm:gap-1.5 sm:text-sm`}>
+                <Mail size={15} /> Email
+              </button>
               <button onClick={() => newDoc('quote')} className={`${btnSecondary} flex min-h-11 flex-col items-center justify-center gap-0.5 px-3 text-xs sm:flex-row sm:gap-1.5 sm:text-sm`}>
                 <FileText size={15} /> Quote
               </button>
@@ -537,9 +554,14 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
             </div>
           )
         )}
+
+        {tab === 'messages' && (
+          <ClientMessages clientId={id} openHelpId={helpId} onWrite={() => setWriting(true)} />
+        )}
       </div>
 
       {editing && folder && <ClientDetails folder={folder} onClose={() => setEditing(false)} />}
+      {writing && <EmailComposer clientId={id} clientName={c.name} addresses={addresses} onClose={() => setWriting(false)} />}
     </div>
   );
 }

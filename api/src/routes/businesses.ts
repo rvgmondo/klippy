@@ -44,6 +44,14 @@ const updateSchema = z.object({
   bizAddress: nullableStr(500),
   bizTaxNumber: nullableStr(60),
   bizRegNumber: nullableStr(60),
+  // Kept as digits with the country code: "082 555 0101" becomes 27825550101.
+  bizWhatsapp: z.string().trim().max(30).nullable().optional()
+    .transform((v) => {
+      if (v == null) return v;
+      const d = v.replace(/\D/g, '');
+      return d ? (d.startsWith('0') ? `27${d.slice(1)}` : d) : '';
+    })
+    .refine((v) => v == null || v === '' || (v.length >= 9 && v.length <= 15), 'That does not look like a phone number.'),
   bankDetails: nullableStr(2000),
   invoiceFooter: nullableStr(2000),
   invoiceAccent: z.string().trim().max(20).optional(),
@@ -164,7 +172,7 @@ export async function businessRoutes(app: FastifyInstance) {
       patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
     }
     // Empty strings from the form mean "clear it"; decimals are stored as strings.
-    for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody', 'currency'] as const) {
+    for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bizWhatsapp', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody', 'currency'] as const) {
       if (patch[k] === '') patch[k] = null;
     }
     // Stored upper case, so nothing downstream has to normalise it.

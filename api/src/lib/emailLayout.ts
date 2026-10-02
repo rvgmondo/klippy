@@ -59,7 +59,7 @@ function inkOn(hex: string): string {
 }
 
 export interface EmailContent {
-  /** The bold line at the top of the card. */
+  /** The bold line at the top of the card. Empty for a personal email. */
   heading: string;
   /** Paragraphs, plain text. Escaped for you. */
   body: string[];
@@ -109,7 +109,7 @@ export function renderEmail(brand: EmailBrand, content: EmailContent): string {
           <td style="padding-left:12px;vertical-align:middle;font:700 16px/1.2 ${body};color:#0f172a;">${esc(brand.name)}</td>
         </tr></table>
       </td></tr>
-      <tr><td style="padding:12px 28px 0;font:700 20px/1.3 ${body};color:#0f172a;">${esc(content.heading)}</td></tr>
+      ${content.heading ? `<tr><td style="padding:12px 28px 0;font:700 20px/1.3 ${body};color:#0f172a;">${esc(content.heading)}</td></tr>` : ''}
       <tr><td style="padding:8px 28px 0;">
         ${content.body.map((p) => `<p style="margin:0 0 12px;font:400 15px/1.6 ${body};color:#334155;">${esc(p)}</p>`).join('')}
       </td></tr>
@@ -136,7 +136,8 @@ export function renderEmail(brand: EmailBrand, content: EmailContent): string {
  * multipart message rather than HTML alone.
  */
 export function renderEmailText(brand: EmailBrand, content: EmailContent): string {
-  const out = [content.heading, '', ...content.body];
+  // A personal email has no heading: the subject line already says it.
+  const out = content.heading ? [content.heading, '', ...content.body] : [...content.body];
   if (content.facts?.length) {
     out.push('');
     for (const [k, v] of content.facts) out.push(`${k}: ${v}`);
