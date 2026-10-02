@@ -226,6 +226,18 @@ export async function importAccountData(
     await tx.delete(deals).where(and(tenantWhere(deals, accountId),
       or(inArray(deals.company, seed.companies), inArray(deals.title, seed.dealTitles))));
     await tx.delete(offerings).where(and(tenantWhere(offerings, accountId), inArray(offerings.name, seed.offerings)));
+    // A newer account starts with one empty "Internal work / To do" board instead of
+    // examples. The precondition only lets a restore through while it holds no tasks,
+    // so removing it cannot take anything a person made; leaving it would put a stray
+    // board next to the restored ones.
+    const startFolders = await tx.select({ id: folders.id }).from(folders)
+      .where(and(tenantWhere(folders, accountId), isNull(folders.parentId), eq(folders.name, CLEAN_START_FOLDER)));
+    for (const f of startFolders) {
+      const bs = await tx.select({ id: boards.id }).from(boards).where(and(tenantWhere(boards, accountId), eq(boards.folderId, f.id)));
+      const [used] = bs.length ? await tx.select({ n: sql<number>`count(*)` }).from(tasks)
+        .where(and(tenantWhere(tasks, accountId), inArray(tasks.boardId, bs.map((b) => b.id)))) : [{ n: 0 }];
+      if (Number(used?.n ?? 0) === 0) await tx.delete(folders).where(and(tenantWhere(folders, accountId), eq(folders.id, f.id)));
+    }
     if (clearedFolders[0].affectedRows) {
       notes.push('The example client and sample content that came with this workspace were removed, so what you see is your own data.');
     }
