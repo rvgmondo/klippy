@@ -23,6 +23,7 @@ import { commandRoutes } from './routes/command.js';
 import { calendarEventRoutes } from './routes/calendarEvents.js';
 import { fileRoutes } from './routes/files.js';
 import { accountRoutes } from './routes/account.js';
+import { importNinjaRoutes } from './routes/importNinja.js';
 import { userRoutes, invitationRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
@@ -178,6 +179,7 @@ export function buildServer() {
     app.register(calendarEventRoutes);
     app.register(fileRoutes);
     app.register(accountRoutes);
+    app.register(importNinjaRoutes);
     app.register(userRoutes);
     app.register(invitationRoutes);
     app.register(searchRoutes);

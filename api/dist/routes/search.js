@@ -72,7 +72,7 @@ export async function searchRoutes(app) {
             total: documents.total, currency: documents.currency,
         }).from(documents)
             .where(tenantWhere(documents, accountId, or(like(documents.number, term), like(documents.clientName, term)), await businessScope(req, documents.businessId)))
-            .orderBy(desc(documents.createdAt))
+            .orderBy(desc(documents.issueDate), desc(documents.createdAt))
             .limit(8);
         const offeringRows = await db.select({
             id: offerings.id, name: offerings.name, price: offerings.price, recurring: offerings.recurring,

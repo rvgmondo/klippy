@@ -17,6 +17,7 @@ import { phoneForClient, sendReminderMessage } from './messaging.js';
 import { notifyAdmins } from './notify.js';
 import { syncAllConnections } from './salesSync.js';
 import { runRecurringExpenses } from './recurringExpenses.js';
+import { IMPORTED_SEQ_BASE } from './numbering.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
  *
@@ -584,7 +585,10 @@ export async function reminderEmailFor(doc) {
 export async function runInvoiceReminders() {
     const today = todayStr();
     const rows = await db.select().from(documents).where(and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), // draft = not sent yet, paid/void = done
-    isNotNull(documents.dueDate)));
+    isNotNull(documents.dueDate), 
+    // History brought over from another system is never chased automatically:
+    // the founder has to look at it first, and much of it is already settled.
+    lt(documents.seq, IMPORTED_SEQ_BASE)));
     /**
      * Never chase a client who is in the Trash.
      *

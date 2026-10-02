@@ -95,7 +95,7 @@ export async function searchRoutes(app: FastifyInstance) {
         or(like(documents.number, term), like(documents.clientName, term)),
         await businessScope(req, documents.businessId),
       ))
-      .orderBy(desc(documents.createdAt))
+      .orderBy(desc(documents.issueDate), desc(documents.createdAt))
       .limit(8);
 
     const offeringRows = await db.select({

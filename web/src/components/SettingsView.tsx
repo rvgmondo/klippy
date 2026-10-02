@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   User, Palette, Building2, Receipt, BellRing, Mail, Users, Building,
-  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, Trash2, MessageSquare,
+  CreditCard, Zap, Tag, KeyRound, StickyNote, Shield, LayoutGrid, FileText, Server, Trash2, MessageSquare, Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
@@ -28,6 +28,7 @@ import { ModulesPanel } from './ModulesPanel';
 import { PdfDesignPanel } from './PdfDesignPanel';
 import { TrashPanel } from './TrashPanel';
 import { MessagingPanel } from './MessagingPanel';
+import { ImportPanel } from './ImportPanel';
 
 /**
  * Settings as a real page.
@@ -41,7 +42,7 @@ import { MessagingPanel } from './MessagingPanel';
 
 type SectionId =
   | 'profile' | 'appearance'
-  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting' | 'biz:messaging'
+  | `biz:${BusinessSection}` | 'biz:modules' | 'biz:pdf' | 'biz:payments' | 'biz:hosting' | 'biz:messaging' | 'biz:import'
   | 'account' | 'account-brand' | 'people' | 'teams' | 'payments' | 'hosting' | 'connections' | 'automation'
   | 'labels' | 'tokens' | 'notes' | 'trash' | 'messaging';
 
@@ -63,6 +64,9 @@ const BUSINESS: Item[] = [
   { id: 'biz:messaging', label: 'SMS and WhatsApp', icon: MessageSquare, hint: 'Reminders by text, with this business\'s own sender' },
   { id: 'biz:email', label: 'Email', icon: Mail, hint: 'What this business sends from' },
   { id: 'biz:access', label: 'Access', icon: Shield, hint: 'Who can work in this business' },
+];
+const BUSINESS_ADMIN: Item[] = [
+  { id: 'biz:import', label: 'Import clients', icon: Upload, hint: 'Bring clients and old invoices over from Invoice Ninja' },
 ];
 
 const ACCOUNT: Item[] = [
@@ -104,7 +108,7 @@ export function SettingsView({ businessId }: { businessId: BusinessSelection }) 
   const isAdmin = user?.role === 'owner' || user?.role === 'admin';
   const groups: { title: string; note?: string; items: Item[] }[] = [
     { title: 'You', items: YOU },
-    ...(focused ? [{ title: focused.name, note: 'What your clients see', items: BUSINESS }] : []),
+    ...(focused ? [{ title: focused.name, note: 'What your clients see', items: isAdmin ? [...BUSINESS, ...BUSINESS_ADMIN] : BUSINESS }] : []),
     ...(isAdmin ? [{ title: 'Account', note: 'Shared by everyone', items: ACCOUNT }] : []),
   ];
 
@@ -202,6 +206,7 @@ function SectionBody({ id, business }: { id: SectionId; business?: Business }) {
     if (id === 'biz:payments') return <PaymentsPanel businessId={business.id} />;
     if (id === 'biz:hosting') return <HostingPanel businessId={business.id} />;
     if (id === 'biz:messaging') return <MessagingPanel businessId={business.id} />;
+    if (id === 'biz:import') return <ImportPanel business={business} />;
     return <BusinessSettingsPanel business={business} only={id.slice(4) as BusinessSection} />;
   }
   switch (id) {

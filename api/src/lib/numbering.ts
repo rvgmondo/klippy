@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, businesses } from '../db/schema.js';
 import { tenantWhere } from './tenant.js';
@@ -17,6 +17,19 @@ import { tenantWhere } from './tenant.js';
  * exists, and lowering the start quietly does nothing rather than issuing a
  * duplicate number.
  */
+
+/**
+ * Where documents brought over from another system are numbered.
+ *
+ * They keep the number they were issued under (the text a client recognises),
+ * but their sequence sits far above anything Klippy will ever issue, so two
+ * things hold without a schema change: an old "MB-10408" never collides with
+ * Klippy's own 10408, and importing history never moves where Klippy's count
+ * carries on from. The same line marks them as history for the reminder job,
+ * which never chases them on its own; the Chase button still works.
+ */
+export const IMPORTED_SEQ_BASE = 3_000_000_000;
+export const isImportedSeq = (seq: number) => seq >= IMPORTED_SEQ_BASE;
 
 export type DocType = 'quote' | 'invoice' | 'credit_note';
 
@@ -57,6 +70,7 @@ export async function nextNumberFor(
 
   const [row] = await db.select({ m: sql<number>`COALESCE(MAX(seq),0)` }).from(documents)
     .where(tenantWhere(documents, accountId, eq(documents.type, type),
+      lt(documents.seq, IMPORTED_SEQ_BASE),
       businessId == null ? sql`business_id IS NULL` : eq(documents.businessId, businessId)));
 
   const highestUsed = Number(row?.m ?? 0);

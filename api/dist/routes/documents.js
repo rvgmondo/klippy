@@ -134,7 +134,9 @@ export async function documentRoutes(app) {
             status: documents.status, currency: documents.currency, total: documents.total,
         }).from(documents)
             .where(tenantWhere(documents, accountId, ...conds))
-            .orderBy(desc(documents.createdAt));
+            // By date on the document, so history brought over from another system sits in
+            // its own place rather than above everything because it was added today.
+            .orderBy(desc(documents.issueDate), desc(documents.createdAt));
         return { documents: rows };
     });
     // Collections: unpaid invoices that are past due, worst first. Scoped to the

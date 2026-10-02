@@ -17,6 +17,7 @@ import { phoneForClient, sendReminderMessage } from './messaging.js';
 import { notifyAdmins } from './notify.js';
 import { syncAllConnections } from './salesSync.js';
 import { runRecurringExpenses } from './recurringExpenses.js';
+import { IMPORTED_SEQ_BASE } from './numbering.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -618,6 +619,9 @@ export async function runInvoiceReminders(): Promise<string> {
     eq(documents.type, 'invoice'),
     eq(documents.status, 'sent'),            // draft = not sent yet, paid/void = done
     isNotNull(documents.dueDate),
+    // History brought over from another system is never chased automatically:
+    // the founder has to look at it first, and much of it is already settled.
+    lt(documents.seq, IMPORTED_SEQ_BASE),
   ));
 
   /**
