@@ -127,7 +127,7 @@ function QuickAdd({ boardId, columnId, onAdded }: { boardId: number; columnId: n
       onSubmit={(e) => { e.preventDefault(); if (title.trim()) add.mutate(title.trim()); }}
       className="flex items-center gap-2 border-t border-slate-800/60 px-2 py-1.5 sm:px-3">
       <Plus size={14} className="shrink-0 text-slate-600" />
-      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a card"
+      <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Add a task"
         className="min-w-0 flex-1 bg-transparent py-1 text-sm text-slate-200 placeholder-slate-600 outline-none" />
       {title.trim() && (
         <button type="submit" disabled={add.isPending}

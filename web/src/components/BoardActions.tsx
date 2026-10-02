@@ -97,7 +97,7 @@ export function BoardActions({ boardId, boardName, onClose, onCreated }: {
             <>
               <p className="text-xs text-slate-500">
                 Copies <span className="text-slate-300">{boardName}</span> with its columns
-                {includeCards ? ' and cards' : ''}. Time tracked, comments, due dates and who a card was
+                {includeCards ? ' and tasks' : ''}. Time tracked, comments, due dates and who a task was
                 assigned to stay with the original, since those belong to that run of the work.
               </p>
               <label className="flex items-center gap-2 text-sm text-slate-300">

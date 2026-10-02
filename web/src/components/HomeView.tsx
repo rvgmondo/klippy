@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, KanbanSquare,
   LayoutGrid, List, Receipt, Share2, Target, Plus,
@@ -231,6 +231,7 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
         </div>
 
         <OnboardingChecklist onNavigate={onNavigate} />
+        <ExamplesNotice />
 
         {others.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm text-slate-400">
@@ -366,6 +367,37 @@ function DidForYou({ d }: { d: NonNullable<HomeData['didForYou']> }) {
     <p className="rounded-lg border border-[var(--accent-quiet)] bg-[var(--accent-quiet)]/40 px-3 py-2 text-sm text-slate-300">
       <span className="font-medium text-slate-100">This month Klippy: </span>{bits.join(' ')}
     </p>
+  );
+}
+
+/**
+ * Older workspaces still carry the example client, deals and prices that sign-up
+ * used to add. The button to remove them lived on the old Home, so it moves here,
+ * and it only shows while there is something to remove.
+ */
+function ExamplesNotice() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['samples'], queryFn: () => apiGet<{ present: boolean }>('/account/samples') });
+  const [busy, setBusy] = useState(false);
+  if (!data?.present) return null;
+  async function clear() {
+    const ok = await confirmDialog('Remove the example client, its boards, and the example deals and prices? Anything you made yourself, or renamed, stays.',
+      { confirmLabel: 'Remove the examples' });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await apiPost('/account/clear-samples', {});
+      qc.clear();
+      notify('The examples are gone. What you see now is all yours.');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'The examples could not be removed.', 'error');
+    } finally { setBusy(false); }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2.5 text-sm text-slate-300">
+      <span className="flex-1">This workspace still has the example client, deals and prices it started with.</span>
+      <button disabled={busy} onClick={clear} className={`${btnSecondary} min-h-9 px-3 py-1.5 text-xs`}>Remove the examples</button>
+    </div>
   );
 }
 

@@ -7,7 +7,7 @@ import { liveHostingForSubscriptions } from '../lib/hosting.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
-import { seedNewBusiness } from '../lib/seed.js';
+import { seedCleanStart } from '../lib/seed.js';
 import { accessibleBusinessIds, assertBusinessAccess } from '../lib/access.js';
 import { encryptSecret, secretsAvailable } from '../lib/secretbox.js';
 import { MODULES, PRIMITIVES, PRIMITIVE_LABEL, PRIMITIVE_BLURB, effectiveModules } from '../lib/modules.js';
@@ -133,15 +133,15 @@ export async function businessRoutes(app: FastifyInstance) {
     }));
     const businessId = Number(ins[0].insertId);
 
-    // Seeding example content is a convenience, not part of creating the business.
-    // It touches five more tables, so if any of them trips, the business must still
-    // exist rather than the whole thing rolling back into a 500.
+    // A clean start, as at sign-up: one empty to-do board and no made-up examples.
+    // Kept outside the insert, so a hiccup here still leaves the business existing
+    // rather than rolling the whole thing back into a 500.
     try {
       await db.transaction(async (tx) => {
-        await seedNewBusiness(tx, accountId, userId, businessId, type);
+        await seedCleanStart(tx, accountId, userId, businessId);
       });
     } catch (err) {
-      req.log.error({ err, businessId }, 'business created but seeding its example content failed');
+      req.log.error({ err, businessId }, 'business created but its starting board was not');
     }
 
     const [row] = await db.select().from(businesses)

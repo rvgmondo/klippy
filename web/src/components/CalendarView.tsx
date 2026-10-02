@@ -176,7 +176,7 @@ function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curs
         return (
           <div key={i} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
             <div className="mb-1 flex items-center justify-between">
-              <button onClick={() => onAdd(iso(d))} title="Add a card on this day"
+              <button onClick={() => onAdd(iso(d))} title="Add a task on this day"
                 className="grid h-5 w-5 place-items-center rounded text-slate-500 opacity-0 hover:bg-slate-800 hover:text-violet-300 focus:opacity-100 group-hover/day:opacity-100">
                 <Plus size={12} />
               </button>
@@ -206,7 +206,7 @@ function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curso
           <div key={i} className="min-h-24 rounded-xl border border-slate-800 p-2 lg:min-h-64">
             <div className="mb-2 flex items-center justify-between">
               <span className={`text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : 'text-slate-400'}`}>{DOW[i]} {d.getDate()}</span>
-              <button onClick={() => onAdd(iso(d))} title="Add a card on this day"
+              <button onClick={() => onAdd(iso(d))} title="Add a task on this day"
                 className="grid h-5 w-5 place-items-center rounded text-slate-500 hover:bg-slate-800 hover:text-violet-300">
                 <Plus size={12} />
               </button>
@@ -229,7 +229,7 @@ function DayList({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor
     <div className="mx-auto max-w-2xl space-y-2">
       <button onClick={() => onAdd(iso(cursor))}
         className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-700 p-3 text-sm text-slate-400 hover:border-slate-500 hover:text-slate-200">
-        <Plus size={15} /> Add a card on this day
+        <Plus size={15} /> Add a task on this day
       </button>
       {/* The diary first: a meeting at nine shapes the day more than a due date. */}
       {evs.map((e) => (

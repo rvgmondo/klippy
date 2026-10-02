@@ -103,6 +103,16 @@ export async function seedNewAccount(tx, accountId, userId, businessName = 'My B
         ...(setup.suspendAfterDays !== undefined ? { suspendAfterDays: setup.suspendAfterDays } : {}),
     });
     const businessId = Number(bizIns[0].insertId);
+    await seedCleanStart(tx, accountId, userId, businessId);
+}
+/**
+ * The one thing a new business gets: an empty internal "To do" board, so a task has
+ * somewhere to live. Used for a new account and for every business added after it.
+ * Adding a business used to pour a made-up client, boards, deals and prices into a
+ * workspace that already held real work, where they then turned up in Clients and
+ * on Today among the real things.
+ */
+export async function seedCleanStart(tx, accountId, userId, businessId) {
     const ins = await tx.insert(folders).values({
         accountId, businessId, parentId: null, name: CLEAN_START_FOLDER, pillar: 'operations', position: 0,
         color: '#0ea5e9', createdBy: userId, notes: null,

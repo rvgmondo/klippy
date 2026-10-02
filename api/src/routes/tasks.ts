@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lte, ne, or, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments, taskLabels, labels } from '../db/schema.js';
+import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments, taskLabels, labels, calendarEvents } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -151,19 +151,50 @@ export async function taskRoutes(app: FastifyInstance) {
         isNull(tasks.scheduledStart),
         or(isNull(tasks.dueDate), lte(tasks.dueDate, date)),
       )))
-      .orderBy(asc(tasks.dueDate)).limit(50);
+      // Late first, then due today, then undated. A plain ascending sort put every
+      // undated task ABOVE the late ones, because the database sorts nulls first.
+      .orderBy(sql`${tasks.dueDate} IS NULL`, asc(tasks.dueDate)).limit(50);
 
-    const plannedMinutes = scheduled
+    /**
+     * The day's meetings. The planner used to ignore them, so a day with a two-hour
+     * workshop still showed eight free hours. They sit on the timeline as fixed
+     * blocks and count toward what is planned.
+     */
+    const meetingScopes = [
+      gte(calendarEvents.startAt, dayStart), lte(calendarEvents.startAt, dayEnd),
+      eq(calendarEvents.allDay, false),
+    ];
+    if (businessId) meetingScopes.push(eq(calendarEvents.businessId, businessId));
+    const meetingScope = await businessScope(req, calendarEvents.businessId);
+    if (meetingScope) meetingScopes.push(or(meetingScope, isNull(calendarEvents.businessId))!);
+    const meetings = (await db.select({
+      id: calendarEvents.id, title: calendarEvents.title, kind: calendarEvents.kind,
+      startAt: calendarEvents.startAt, endAt: calendarEvents.endAt, location: calendarEvents.location,
+      folderId: calendarEvents.folderId,
+    }).from(calendarEvents)
+      .where(tenantWhere(calendarEvents, accountId, and(...meetingScopes)))
+      .orderBy(asc(calendarEvents.startAt)))
+      .map((m) => ({
+        ...m,
+        minutes: Math.max(15, Math.round(((m.endAt?.getTime() ?? m.startAt.getTime() + 30 * 60000) - m.startAt.getTime()) / 60000)),
+      }));
+    const meetingMinutes = meetings.reduce((sum, m) => sum + m.minutes, 0);
+
+    const taskMinutes = scheduled
       .filter((t) => !t.isCompleted)
       .reduce((sum, t) => sum + (t.estimateMinutes ?? 0), 0);
+    const plannedMinutes = taskMinutes + meetingMinutes;
 
     return {
       date,
       scheduled,
       backlog,
+      meetings,
       capacity: {
         workingMinutes,
         plannedMinutes,
+        meetingMinutes,
+        taskMinutes,
         remainingMinutes: workingMinutes - plannedMinutes,
         overcommitted: plannedMinutes > workingMinutes,
         // Cards on the day with no estimate: the planned total is a lie until these

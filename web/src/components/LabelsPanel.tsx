@@ -20,7 +20,7 @@ export function LabelsPanel() {
 
   return (
     <div>
-      <p className="mb-3 text-xs text-slate-500">Labels are shared across the workspace. Deleting one removes it from every card.</p>
+      <p className="mb-3 text-xs text-slate-500">Labels are shared across the workspace. Deleting one removes it from every task.</p>
       <div className="mb-4 space-y-1">
         {labels.map((l) => (
           <div key={l.id} className="group flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-900">

@@ -85,6 +85,10 @@ ok(vAcc.folderLabelPlural === 'Clients', 'an agency still says Clients');
 const second = await V.post('/businesses', { name: `Six Hosting ${tag}`, type: 'services' });
 ok(second.status === 201, 'a second business can be added', second.status);
 const biz2 = second.body.business?.id;
+const [b2Folders] = await db.query('SELECT name FROM folders WHERE business_id = ?', [biz2]);
+const [[{ n: b2Deals }]] = await db.query('SELECT COUNT(*) n FROM deals WHERE business_id = ?', [biz2]);
+ok(b2Folders.length === 1 && b2Folders[0].name === 'Internal work' && Number(b2Deals) === 0,
+  'adding a business starts it clean too, with no made-up client or deals', b2Folders.map((f) => f.name).join(', '));
 
 const noBiz = await V.post('/documents', {
   type: 'invoice', clientName: 'Somebody', issueDate: day(0), taxRate: 0,
@@ -151,6 +155,27 @@ const draft = await V.post('/documents', {
 });
 const homeAfter = (await V.get('/home')).body;
 ok((homeAfter.items ?? []).some((i) => i.kind === 'draft' && i.docId === draft.body.document?.id), 'an unsent draft shows on Home as something to send');
+
+// ---- Today: late first, meetings on the day ---------------------------------------
+{
+  const [[fold]] = await db.query("SELECT id FROM folders WHERE account_id = ? AND name = 'Internal work' LIMIT 1", [vAcc.id]);
+  const [[brd]] = await db.query('SELECT id FROM boards WHERE folder_id = ? LIMIT 1', [fold.id]);
+  const [[col]] = await db.query('SELECT id FROM board_columns WHERE board_id = ? ORDER BY position LIMIT 1', [brd.id]);
+  await V.post('/tasks', { boardId: brd.id, columnId: col.id, title: 'No date yet', estimateMinutes: 30 });
+  await V.post('/tasks', { boardId: brd.id, columnId: col.id, title: 'Three days late', dueDate: day(-3), estimateMinutes: 60 });
+  await V.post('/tasks', { boardId: brd.id, columnId: col.id, title: 'Due today', dueDate: day(0), estimateMinutes: 15 });
+  const start = new Date(); start.setUTCHours(12, 0, 0, 0);
+  const end = new Date(start.getTime() + 45 * 60000);
+  await V.post('/calendar-events', { title: 'A call', kind: 'call', startAt: start.toISOString(), endAt: end.toISOString(), businessId: vBiz.id });
+  const dayData = (await V.get(`/tasks/day?date=${day(0)}`)).body;
+  const order = (dayData.backlog ?? []).map((t) => t.title).filter((t) => ['No date yet', 'Three days late', 'Due today'].includes(t));
+  ok(order.join(' > ') === 'Three days late > Due today > No date yet', 'Today lists late tasks first and undated ones last', order.join(' > '));
+  const call = (dayData.meetings ?? []).find((m) => m.title === 'A call');
+  ok(!!call && call.minutes === 45, "the day's meetings are on Today, with their length", JSON.stringify(call && call.minutes));
+  ok(dayData.capacity?.meetingMinutes === 45 && dayData.capacity?.plannedMinutes >= 45, 'and meeting time counts toward what is planned', JSON.stringify(dayData.capacity));
+  const theirs = (await V.get(`/tasks/day?date=${day(0)}&businessId=${biz2}`)).body;
+  ok(!(theirs.meetings ?? []).some((m) => m.title === 'A call'), "another business's day does not show this business's meeting");
+}
 
 // ---- one account never sees another's client ----------------------------------------
 const other = await signup({ accountName: `Six Other ${tag}`, name: 'Other Test', email: emails[2] });

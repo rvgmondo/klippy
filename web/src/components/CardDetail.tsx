@@ -31,6 +31,12 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
   const key = ['task', taskId, 'detail'];
   const { data, error, refetch } = useQuery({ queryKey: key, queryFn: () => apiGet<TaskDetail>(`/tasks/${taskId}/detail`), retry: false });
   const { data: usersData } = useQuery({ queryKey: ['users'], queryFn: () => apiGet<{ users: TeamUser[] }>('/users') });
+  // The board's columns, so a task can be moved with a tap. Dragging was the only way,
+  // and dragging a card across a board is close to impossible on a phone.
+  const { data: boardFull } = useQuery({
+    queryKey: ['board', boardId, 'columns'],
+    queryFn: () => apiGet<{ columns: { id: number; name: string }[] }>(`/boards/${boardId}/full`),
+  });
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -56,6 +62,10 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
   const toggleSub = useMutation({ mutationFn: (v: { id: number; isCompleted: boolean }) => apiPatch(`/subtasks/${v.id}`, { isCompleted: v.isCompleted }), onSuccess: invalidate });
   const delSub = useMutation({ mutationFn: (id: number) => apiDelete(`/subtasks/${id}`), onSuccess: invalidate });
   const addComment = useMutation({ mutationFn: (c: string) => apiPost('/comments', { taskId, comment: c }), onSuccess: () => { setNewComment(''); invalidate(); } });
+  const moveTask = useMutation({
+    mutationFn: (columnId: number) => apiPost(`/tasks/${taskId}/move`, { columnId, position: 0 }),
+    onSuccess: () => { invalidate(); qc.invalidateQueries({ queryKey: ['day'] }); },
+  });
   const delTask = useMutation({ mutationFn: () => apiDelete(`/tasks/${taskId}`), onSuccess: () => { qc.invalidateQueries({ queryKey: ['board', boardId] }); onClose(); } });
 
   const t = data?.task;
@@ -74,7 +84,7 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
             </button>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={async () => { if (await confirmDialog('Delete this card?', { danger: true })) delTask.mutate(); }}
+            <button onClick={async () => { if (await confirmDialog('Delete this task?', { danger: true })) delTask.mutate(); }}
               className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-400"><Trash2 size={15} /></button>
             <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-800"><X size={16} /></button>
           </div>
@@ -85,6 +95,26 @@ export function CardDetail({ taskId, boardId, onClose }: { taskId: number; board
             <input className={field + ' text-base font-medium'} value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => title.trim() && title !== t?.title && patchTask.mutate({ title: title.trim() })} />
+
+            {(boardFull?.columns?.length ?? 0) > 1 && (
+              <div>
+                <label className="mb-1 block text-xs text-slate-500">Where it is</label>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Move to column">
+                  {boardFull!.columns.map((c) => {
+                    const here = t?.columnId === c.id;
+                    return (
+                      <button key={c.id} disabled={here || moveTask.isPending} aria-pressed={here}
+                        onClick={() => moveTask.mutate(c.id)}
+                        className={`min-h-9 rounded-full border px-3 text-xs ${here
+                          ? 'border-[var(--accent)] bg-[var(--accent-quiet)] text-slate-100'
+                          : 'border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>

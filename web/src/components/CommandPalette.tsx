@@ -176,7 +176,7 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
         <div className="max-h-[46vh] overflow-y-auto py-1.5">
           {entries.length === 0 && (
             <p className="px-4 py-6 text-center text-sm text-slate-500">
-              {debounced.length >= 2 && !results.isLoading ? 'Nothing matches that.' : 'Type to search clients, cards, invoices, deals...'}
+              {debounced.length >= 2 && !results.isLoading ? 'Nothing matches that.' : 'Search clients, tasks, invoices, deals'}
             </p>
           )}
           {entries.map((e, i) => {

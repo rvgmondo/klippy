@@ -75,7 +75,7 @@ const ACCOUNT: Item[] = [
   { id: 'hosting', label: 'Hosting', icon: Server, hint: 'Create cPanel accounts when hosting invoices are paid' },
   { id: 'connections', label: 'Connections', icon: Server, hint: 'Where each business banks, hosts and sends from' },
   { id: 'automation', label: 'Automation', icon: Zap, hint: 'Scheduled jobs and when they last ran' },
-  { id: 'labels', label: 'Labels', icon: Tag, hint: 'Card labels shared across boards' },
+  { id: 'labels', label: 'Labels', icon: Tag, hint: 'Task labels shared across boards' },
   { id: 'tokens', label: 'API tokens', icon: KeyRound, hint: 'For scripts and integrations' },
   { id: 'notes', label: 'Notes', icon: StickyNote, hint: 'Your private scratch notes' },
   { id: 'trash', label: 'Trash', icon: Trash2, hint: 'Deleted clients and boards, restorable for 30 days' },

@@ -5,7 +5,7 @@ import {
   DndContext, useDraggable, useDroppable, PointerSensor, TouchSensor, useSensor, useSensors,
   rectIntersection, type DragEndEvent, type CollisionDetection,
 } from '@dnd-kit/core';
-import { ChevronLeft, ChevronRight, X, Clock, AlertTriangle, CalendarPlus, Play, Square, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, AlertTriangle, CalendarPlus, Play, Square, Plus, Maximize2, Users, Check } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 import type { Priority, Folder as TFolder } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
@@ -19,13 +19,19 @@ interface DayTask {
   estimateMinutes: number | null; scheduledStart: string | null;
   boardName: string | null; folderName: string | null;
 }
+interface DayMeeting {
+  id: number; title: string; kind: string; startAt: string; endAt: string | null;
+  location: string | null; folderId: number | null; minutes: number;
+}
 interface DayData {
   date: string;
   scheduled: DayTask[];
   backlog: DayTask[];
+  meetings?: DayMeeting[];
   capacity: {
     workingMinutes: number; plannedMinutes: number; remainingMinutes: number;
     overcommitted: boolean; unestimated: number;
+    meetingMinutes?: number; taskMinutes?: number;
   };
 }
 
@@ -240,7 +246,12 @@ export function TodayView({ businessId, onNavigate }: {
                   <AlertTriangle size={11} /> Over by {fmtDuration(Math.abs(cap.remainingMinutes))}
                 </span>
               ) : (
-                <span className="text-slate-500">{fmtDuration(cap?.remainingMinutes ?? 0)} left</span>
+                <span className="text-slate-500">
+                  {fmtDuration(cap?.remainingMinutes ?? 0)} left
+                  {cap?.meetingMinutes
+                    ? (cap.taskMinutes ? `. Planned: ${fmtDuration(cap.meetingMinutes)} of meetings, ${fmtDuration(cap.taskMinutes)} of work` : `. ${fmtDuration(cap.meetingMinutes)} of the day is meetings`)
+                    : ''}
+                </span>
               )}
               {!!cap?.unestimated && (
                 <span className="text-amber-400/90">{cap.unestimated} without an estimate</span>
@@ -257,8 +268,17 @@ export function TodayView({ businessId, onNavigate }: {
 
       <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={onDragEnd}>
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:flex-row lg:overflow-hidden lg:p-6">
+          {/* On a phone: the day as a list, in time order. A timeline you have to drag
+              onto is unusable on a narrow screen, and it overlapped the list below it. */}
+          <PhonePlan tasks={data?.scheduled ?? []} meetings={data?.meetings ?? []} runningTaskId={runningTaskId}
+            onToggleTimer={(id) => toggleTimer.mutate(id)}
+            onOpen={(t) => setOpenTask({ id: t.id, boardId: t.boardId })}
+            onDone={(t) => patch.mutate({ id: t.id, body: { isCompleted: !t.isCompleted } })}
+            onUnschedule={(t) => patch.mutate({ id: t.id, body: { scheduledStart: null } })}
+            onMeeting={() => onNavigate?.('calendar')} />
+
           {/* Timeline */}
-          <div className="min-h-0 flex-1 lg:overflow-y-auto">
+          <div className="hidden min-h-0 flex-1 lg:block lg:overflow-y-auto">
             <div className="relative rounded-2xl border border-slate-800 bg-slate-900 p-3">
               <div className="relative" style={{ height: hours.length * PX_PER_HOUR }}>
                 {hours.map((h, i) => (
@@ -266,6 +286,10 @@ export function TodayView({ businessId, onNavigate }: {
                 ))}
                 {/* Now line */}
                 {isToday && <NowLine />}
+                {/* Meetings: fixed, because they happen when they happen. */}
+                {(data?.meetings ?? []).map((m) => (
+                  <MeetingBlock key={`m${m.id}`} meeting={m} onOpen={() => onNavigate?.('calendar')} />
+                ))}
                 {/* Blocks */}
                 {(data?.scheduled ?? []).map((t) => (
                   <Block key={t.id} task={t} running={runningTaskId === t.id}
@@ -280,6 +304,7 @@ export function TodayView({ businessId, onNavigate }: {
 
           {/* Backlog */}
           <BacklogPanel tasks={data?.backlog ?? []} businessId={businessId}
+            runningTaskId={runningTaskId} onToggleTimer={(id) => toggleTimer.mutate(id)}
             onOpen={(t) => setOpenTask({ id: t.id, boardId: t.boardId })}
             onEstimate={(id, m) => patch.mutate({ id, body: { estimateMinutes: m } })}
             onSchedule={(id, hour) => {
@@ -390,9 +415,9 @@ function Block({ task, running, onToggleTimer, onOpen, onUnschedule, onEstimate 
             {running ? <Square size={13} /> : <Play size={13} />}
           </button>
           <EstimateMenu value={task.estimateMinutes} onPick={onEstimate} />
-          <button onClick={onOpen} title="Open card"
-            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200"><Clock size={13} /></button>
-          <button onClick={onUnschedule} title="Unschedule"
+          <button onClick={onOpen} title="Open task" aria-label="Open task"
+            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200"><Maximize2 size={13} /></button>
+          <button onClick={onUnschedule} title="Take it off the plan"
             className="tap text-slate-500 hover:bg-red-500/10 hover:text-red-400"><X size={13} /></button>
         </div>
       </div>
@@ -548,8 +573,9 @@ function QuickAdd({ businessId }: { businessId: BusinessSelection }) {
   );
 }
 
-function BacklogPanel({ tasks, businessId, onOpen, onEstimate, onSchedule, onNavigate }: {
+function BacklogPanel({ tasks, businessId, runningTaskId, onToggleTimer, onOpen, onEstimate, onSchedule, onNavigate }: {
   tasks: DayTask[]; businessId: BusinessSelection; onOpen: (t: DayTask) => void;
+  runningTaskId: number | null; onToggleTimer: (id: number) => void;
   onEstimate: (id: number, m: number) => void; onSchedule: (id: number, hour: number) => void;
   onNavigate?: (v: string) => void;
 }) {
@@ -558,7 +584,7 @@ function BacklogPanel({ tasks, businessId, onOpen, onEstimate, onSchedule, onNav
     <div ref={setNodeRef}
       className={`flex w-full shrink-0 flex-col rounded-2xl border bg-slate-900 lg:w-80 ${isOver ? 'border-[var(--accent)]/60 bg-[var(--accent-quiet)]' : 'border-slate-800'}`}>
       <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-3">
-        <span className="font-display text-sm font-semibold text-slate-100">Unscheduled</span>
+        <span className="font-display text-sm font-semibold text-slate-100">Not planned yet</span>
         <span className="num text-[11px] text-slate-500">{tasks.length}</span>
       </div>
 
@@ -569,11 +595,12 @@ function BacklogPanel({ tasks, businessId, onOpen, onEstimate, onSchedule, onNav
       <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2">
         {tasks.length === 0 && (
           <p className="px-2 py-8 text-center text-xs text-slate-500">
-            Nothing waiting. Drag a block here to unschedule it.
+            Nothing waiting. Drag a block here to take it off the plan.
           </p>
         )}
         {tasks.map((t) => (
-          <BacklogCard key={t.id} task={t} onOpen={() => onOpen(t)} onEstimate={(m) => onEstimate(t.id, m)} onSchedule={(h) => onSchedule(t.id, h)} />
+          <BacklogCard key={t.id} task={t} running={runningTaskId === t.id} onToggleTimer={() => onToggleTimer(t.id)}
+            onOpen={() => onOpen(t)} onEstimate={(m) => onEstimate(t.id, m)} onSchedule={(h) => onSchedule(t.id, h)} />
         ))}
       </div>
       {onNavigate && (
@@ -586,30 +613,124 @@ function BacklogPanel({ tasks, businessId, onOpen, onEstimate, onSchedule, onNav
   );
 }
 
-function BacklogCard({ task, onOpen, onEstimate, onSchedule }: { task: DayTask; onOpen: () => void; onEstimate: (m: number) => void; onSchedule: (hour: number) => void }) {
+function BacklogCard({ task, running, onToggleTimer, onOpen, onEstimate, onSchedule }: {
+  task: DayTask; running: boolean; onToggleTimer: () => void; onOpen: () => void;
+  onEstimate: (m: number) => void; onSchedule: (hour: number) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `t-${task.id}` });
   const style = transform ? { transform: `translate(${transform.x}px, ${transform.y}px)` } : undefined;
   return (
     <div ref={setNodeRef} style={style}
       className={`group rounded-lg border border-slate-700/70 bg-slate-800/80 p-2.5 ${isDragging ? 'opacity-50' : ''}`}>
-      <div className="flex items-start gap-2">
+      {/* On a phone the buttons take their own row, so the task's name is readable. */}
+      <div className="flex flex-wrap items-start gap-2 lg:flex-nowrap">
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[task.priority] }} />
-        <div className="min-w-0 flex-1 cursor-grab active:cursor-grabbing" {...listeners} {...attributes}>
+        <div className="min-w-0 flex-1 cursor-grab active:cursor-grabbing max-lg:basis-[calc(100%-1.25rem)]" {...listeners} {...attributes}>
           <div className="truncate text-sm text-slate-100">{task.title}</div>
-          <div className="truncate text-[11px] text-slate-500">
-            {[task.folderName, task.boardName].filter(Boolean).join(' / ')}
-            {task.dueDate ? `, due ${task.dueDate}` : ''}
+          <div className="flex flex-wrap items-center gap-x-1.5 text-[11px] text-slate-500">
+            <DueTag due={task.dueDate} />
+            <span className="truncate">{[task.folderName, task.boardName].filter(Boolean).join(' / ')}</span>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 max-lg:w-full max-lg:justify-end">
           <EstimateMenu value={task.estimateMinutes} onPick={onEstimate} />
           <ScheduleMenu onPick={onSchedule} />
-          <button onClick={onOpen} title="Open card"
-            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200 lg:opacity-0 lg:group-hover:opacity-100">
-            <Clock size={13} />
+          <button onClick={onToggleTimer} title={running ? 'Stop the timer' : 'Start the timer'} aria-label={running ? 'Stop the timer' : 'Start the timer'}
+            className={`tap ${running ? 'text-[var(--accent)]' : 'text-slate-500 hover:bg-slate-700 hover:text-slate-200'}`}>
+            {running ? <Square size={13} /> : <Play size={13} />}
+          </button>
+          <button onClick={onOpen} title="Open task" aria-label="Open task"
+            className="tap text-slate-500 hover:bg-slate-700 hover:text-slate-200">
+            <Maximize2 size={13} />
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Late, due today, or the day it is due, in words. */
+function DueTag({ due }: { due: string | null }) {
+  if (!due) return null;
+  const today = todayStr();
+  if (due < today) {
+    const [y, m, d] = due.split('-').map(Number) as [number, number, number];
+    const [ty, tm, td] = today.split('-').map(Number) as [number, number, number];
+    const n = Math.round((new Date(ty, tm - 1, td).getTime() - new Date(y, m - 1, d).getTime()) / 86400000);
+    return <span className="shrink-0 rounded bg-red-500/15 px-1.5 font-medium text-red-300">{n} {n === 1 ? 'day' : 'days'} late</span>;
+  }
+  if (due === today) return <span className="shrink-0 rounded bg-amber-500/15 px-1.5 font-medium text-amber-300">Due today</span>;
+  return <span className="shrink-0">Due {new Date(`${due}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</span>;
+}
+
+/** A meeting on the day. Fixed in place: it happens when it happens. */
+function MeetingBlock({ meeting, onOpen }: { meeting: DayMeeting; onOpen: () => void }) {
+  const top = Math.max(0, (offsetMinutes(meeting.startAt) / 60) * PX_PER_HOUR);
+  const height = Math.max(26, (meeting.minutes / 60) * PX_PER_HOUR - 4);
+  return (
+    <button onClick={onOpen} style={{ top, height }}
+      className="absolute left-14 right-1 z-10 overflow-hidden rounded-lg border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-left hover:bg-sky-500/15">
+      <div className="flex items-center gap-1.5 truncate text-sm text-sky-100">
+        <Users size={12} className="shrink-0 text-sky-300" /> {meeting.title}
+      </div>
+      <div className="num truncate text-[11px] text-sky-300/80">
+        {fmtClock(meeting.startAt)}, {fmtDuration(meeting.minutes)}{meeting.location ? `, ${meeting.location}` : ''}
+      </div>
+    </button>
+  );
+}
+
+/** The planned day on a phone: meetings and planned tasks together, earliest first. */
+function PhonePlan({ tasks, meetings, runningTaskId, onToggleTimer, onOpen, onDone, onUnschedule, onMeeting }: {
+  tasks: DayTask[]; meetings: DayMeeting[]; runningTaskId: number | null;
+  onToggleTimer: (id: number) => void; onOpen: (t: DayTask) => void; onDone: (t: DayTask) => void;
+  onUnschedule: (t: DayTask) => void; onMeeting: () => void;
+}) {
+  const rows = [
+    ...meetings.map((m) => ({ at: m.startAt, meeting: m, task: null as DayTask | null })),
+    ...tasks.map((t) => ({ at: t.scheduledStart!, meeting: null as DayMeeting | null, task: t })),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+  return (
+    <div className="lg:hidden">
+      <div className="mb-2 font-display text-sm font-semibold text-slate-100">Planned for the day</div>
+      {rows.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-700 px-3 py-4 text-sm text-slate-500">
+          Nothing planned yet. Tap the calendar on a task below to give it a time.
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-800">
+          {rows.map((r) => r.meeting ? (
+            <button key={`m${r.meeting.id}`} onClick={onMeeting}
+              className="flex w-full items-center gap-3 border-b border-slate-800 bg-sky-500/5 px-3 py-2.5 text-left last:border-b-0">
+              <span className="num w-12 shrink-0 text-xs text-sky-300">{fmtClock(r.meeting.startAt)}</span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 truncate text-sm text-slate-100"><Users size={13} className="shrink-0 text-sky-300" />{r.meeting.title}</span>
+                <span className="block truncate text-xs text-slate-500">{fmtDuration(r.meeting.minutes)}{r.meeting.location ? `, ${r.meeting.location}` : ''}</span>
+              </span>
+            </button>
+          ) : (
+            <div key={`t${r.task!.id}`} className="flex items-center gap-2 border-b border-slate-800 bg-slate-900/40 px-3 py-2 last:border-b-0">
+              <span className="num w-12 shrink-0 text-xs text-slate-400">{fmtClock(r.task!.scheduledStart!)}</span>
+              <button onClick={() => onOpen(r.task!)} className="min-w-0 flex-1 text-left">
+                <span className={`block truncate text-sm ${r.task!.isCompleted ? 'text-slate-500 line-through' : 'text-slate-100'}`}>{r.task!.title}</span>
+                <span className="block truncate text-xs text-slate-500">
+                  {fmtDuration(r.task!.estimateMinutes ?? DEFAULT_ESTIMATE)}{r.task!.folderName ? `, ${r.task!.folderName}` : ''}
+                </span>
+              </button>
+              <button onClick={() => onToggleTimer(r.task!.id)} aria-label={runningTaskId === r.task!.id ? 'Stop the timer' : 'Start the timer'}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${runningTaskId === r.task!.id ? 'text-[var(--accent)]' : 'text-slate-400 hover:bg-slate-800'}`}>
+                {runningTaskId === r.task!.id ? <Square size={15} /> : <Play size={15} />}
+              </button>
+              <button onClick={() => onDone(r.task!)} aria-label={r.task!.isCompleted ? 'Not done after all' : 'Done'}
+                className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${r.task!.isCompleted ? 'text-emerald-400' : 'text-slate-400 hover:bg-slate-800'}`}>
+                <Check size={16} />
+              </button>
+              <button onClick={() => onUnschedule(r.task!)} aria-label="Take it off the plan"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-800"><X size={15} /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

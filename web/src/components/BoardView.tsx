@@ -351,7 +351,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
           <div className="rounded-lg border border-slate-700 bg-slate-900 p-2">
             <textarea autoFocus value={title} onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (title.trim()) createTask.mutate(title.trim()); } if (e.key === 'Escape') setAdding(false); }}
-              placeholder="Card title..." rows={2}
+              placeholder="What needs doing?" rows={2}
               className="w-full resize-none bg-transparent text-sm text-slate-100 placeholder-slate-500 outline-none" />
             <div className="mt-1 flex gap-2">
               <button onClick={() => title.trim() && createTask.mutate(title.trim())} className="rounded bg-violet-600 px-2 py-1 text-xs text-[var(--accent-ink)] hover:bg-violet-500">Add</button>
