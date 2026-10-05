@@ -1101,6 +1101,18 @@ export const subscriptions = mysqlTable('subscriptions', {
     intervalMonths: int('interval_months', { unsigned: true }).default(1).notNull(),
     startedOn: date('started_on', { mode: 'string' }).notNull(),
     nextBillDate: date('next_bill_date', { mode: 'string' }).notNull(),
+    /**
+     * The day of the month it bills on, when someone has moved it.
+     *
+     * Without this the day came from startedOn, so moving a bill from the 5th to the
+     * 25th lasted one cycle and then jumped back to the 5th. Null means "the day it
+     * started", which is every subscription made before this existed.
+     */
+    billingDay: int('billing_day', { unsigned: true }),
+    /** Stop billing after this date: a fixed-term deal. Null runs until cancelled. */
+    endsOn: date('ends_on', { mode: 'string' }),
+    /** Private, never on an invoice: what was agreed, why the price is what it is. */
+    notes: text('notes'),
     lastBilledAt: datetime('last_billed_at'),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),

@@ -5,6 +5,7 @@ import {
   Home, Target, Wallet, Settings, Users, Receipt, Package,
   CalendarDays, CalendarCheck, BarChart3, HardDrive, AlertTriangle, TrendingUp,
   Plus, Building2, SquareKanban, FileText, Search, type LucideIcon,
+  Repeat,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { setUrlParams, navigateTo } from '../lib/urlAction';
@@ -80,14 +81,14 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
       ['home', 'Home', Home], ['clients', 'Clients', Users], ['today', 'Today', CalendarCheck],
       ['calendar', 'Calendar', CalendarDays], ['reports', 'Reports', BarChart3], ['files', 'Files', HardDrive],
       ['pipeline', 'Deals', Target], ['offerings', 'Price list', Package], ['contacts', 'People', Users],
-      ['billing', 'Quotes and invoices', Receipt], ['collections', 'Owed to you', AlertTriangle],
+      ['billing', 'Quotes and invoices', Receipt], ['subscriptions', 'Subscriptions', Repeat], ['collections', 'Owed to you', AlertTriangle],
       ['cashflow', 'Coming in', TrendingUp], ['expenses', 'Expenses', Wallet],
       ['settings', 'Settings', Settings],
     ];
     // Screens answer to the names they used to have, so nobody is stranded by the rename.
     const WAS: Record<string, string> = {
       pipeline: 'Pipeline', offerings: 'Offerings', contacts: 'Contacts', billing: 'Billing',
-      collections: 'Collections', cashflow: 'Cash flow', settings: 'Admin', social: 'Social',
+      collections: 'Collections', cashflow: 'Cash flow', settings: 'Admin', social: 'Social', subscriptions: 'Recurring invoices',
     };
     for (const [view, label, icon] of goto) {
       const was = WAS[view];

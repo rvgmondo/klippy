@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Pause, Play, XCircle } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, PackageSearch, Repeat } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { Skeleton } from './ui';
 import type { Business, BusinessType, Offering, Subscription, Folder } from '../lib/types';
@@ -10,7 +10,7 @@ import type { BusinessSelection } from './BusinessSwitcher';
 import { Modal } from './Modal';
 import { money as fmt } from '../lib/money';
 import { useCurrency } from '../lib/useCurrency';
-import { useUrlAction } from '../lib/urlAction';
+import { navigateTo, useUrlAction } from '../lib/urlAction';
 import { Page, PageHeader, PageBody } from './PageHeader';
 
 const ALL_TYPES: { value: BusinessType; label: string }[] = [
@@ -18,8 +18,6 @@ const ALL_TYPES: { value: BusinessType; label: string }[] = [
   { value: 'code', label: 'Code' }, { value: 'content', label: 'Content' },
 ];
 
-/** How a billing cadence reads: short form on a row, long form in a sentence. */
-const INTERVAL_SHORT: Record<number, string> = { 1: 'mo', 3: 'quarter', 6: '6mo', 12: 'yr' };
 
 
 export function OfferingsView({ businessId }: { businessId: BusinessSelection }) {
@@ -37,7 +35,6 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     setSubFolder(Number.isFinite(n) && n > 1 ? n : null);
     setStartingSub(true);
   });
-  const [pricing, setPricing] = useState<Subscription | null>(null);
   const bizParam = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const newBusinessId = businessId === 'all' ? undefined : businessId;
 
@@ -79,32 +76,12 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
     queryKey: ['subscriptions', businessId],
     queryFn: () => apiGet<{ subscriptions: Subscription[] }>(`/subscriptions${bizParam}`),
   });
-  const subs = subsQ.data?.subscriptions ?? [];
+  const activeSubs = (subsQ.data?.subscriptions ?? []).filter((x) => x.status === 'active').length;
   const invalidateSubs = () => {
     qc.invalidateQueries({ queryKey: ['subscriptions'] });
-    // MRR is computed from subscriptions but arrives on the offerings response, so
-    // every change here moves it. Without this, pausing a client or renegotiating a
-    // retainer left the headline figure showing the old number until a reload, which
-    // is the most misleading possible moment for it to be stale.
     qc.invalidateQueries({ queryKey: ['offerings'] });
     qc.invalidateQueries({ queryKey: ['report'] });
-    qc.invalidateQueries({ queryKey: ['dashboard-money'] });
   };
-  // Pausing, cancelling or switching auto-debit on a repeating invoice failed in silence:
-  // the control snapped back and nothing said why. For a cancel that nobody notices has
-  // failed, the client simply keeps being billed.
-  const reportSubError = (e: Error) => notify(e.message || 'Could not change that repeating invoice.', 'error');
-  const setSubStatus = useMutation({
-    mutationFn: (v: { id: number; status: Subscription['status'] }) => apiPatch(`/subscriptions/${v.id}`, { status: v.status }),
-    onSuccess: invalidateSubs,
-    onError: reportSubError,
-  });
-  const delSub = useMutation({ mutationFn: (id: number) => apiDelete(`/subscriptions/${id}`), onSuccess: invalidateSubs, onError: reportSubError });
-  const setAutoDebit = useMutation({
-    mutationFn: (v: { id: number; autoDebit: boolean }) => apiPatch(`/subscriptions/${v.id}`, { autoDebit: v.autoDebit }),
-    onSuccess: invalidateSubs,
-    onError: reportSubError,
-  });
   const recurringOfferings = rows.filter((o) => o.recurring && o.active);
 
   return (
@@ -206,102 +183,23 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
         )}
 
         {recurringOfferings.length > 0 && (
-          <>
-            <div className="mb-1 mt-8 flex items-center gap-3">
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-200"><Repeat size={14} /> Subscriptions</h2>
-              <button onClick={() => setStartingSub(true)}
-                className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-200 hover:bg-slate-800 min-h-10 sm:min-h-9">
-                <Plus size={14} /> Start subscription
-              </button>
+          // Subscriptions have their own screen under Money now. The price list keeps
+          // the way in, because this is where a repeating plan is set up.
+          <div className="mt-8 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/30 p-4">
+            <Repeat size={16} className="text-slate-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-slate-200">
+                {activeSubs} active {activeSubs === 1 ? 'subscription' : 'subscriptions'}
+              </p>
+              <p className="text-xs text-slate-500">Who pays you on repeat, their next bill dates and every setting are under Money, Subscriptions.</p>
             </div>
-            <p className="mb-4 text-xs text-slate-500">Bills a client automatically every month for a recurring offering. Invoices land as drafts for you to review before sending.</p>
-
-            <div className="overflow-x-auto rounded-xl border border-slate-800">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">Client</th>
-                    <th className="px-3 py-2 font-medium">Offering</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Next bill</th>
-                    <th className="px-3 py-2 font-medium">Auto-debit</th>
-                    <th className="px-3 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {subs.length === 0 && (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">No subscriptions yet.</td></tr>
-                  )}
-                  {subs.map((s) => (
-                    <tr key={s.id} className={`border-t border-slate-800 ${s.status === 'canceled' ? 'opacity-50' : ''}`}>
-                      <td className="px-3 py-2 text-slate-200">{s.clientName}</td>
-                      <td className="px-3 py-2 text-slate-300">
-                        {s.offeringName}{' '}
-                        <span className="text-slate-500">
-                          ({money(s.price)}/{INTERVAL_SHORT[s.intervalMonths ?? 1] ?? `${s.intervalMonths}mo`})
-                        </span>
-                        {/* A negotiated rate has to be visible here. Otherwise the only
-                            way to know this client is not on the list price is to notice
-                            the number does not match, which nobody does. */}
-                        {s.isCustomPrice && (
-                          <span className="ml-1.5 rounded bg-violet-600/25 px-1.5 py-0.5 text-[10px] text-violet-200"
-                            title={`List price is ${money(s.listPrice)}`}>
-                            custom
-                          </span>
-                        )}
-                        <button
-                          onClick={() => setPricing(s)}
-                          className="tap ml-1 text-slate-600 hover:bg-slate-800 hover:text-slate-300"
-                          title="Change what this client pays">
-                          <Pencil size={12} />
-                        </button>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className={`rounded-md px-2 py-0.5 text-[11px] ${
-                          s.status === 'active' ? 'bg-green-600/30 text-green-200'
-                            : s.status === 'paused' ? 'bg-amber-600/30 text-amber-200' : 'bg-slate-800 text-slate-500'}`}>
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 num text-slate-400">{s.status === 'active' ? s.nextBillDate : '-'}</td>
-                      {/* Two separate facts, deliberately shown separately: whether the
-                          client agreed to be debited, and whether there is actually a
-                          card to debit. Agreed-but-no-card is the state that silently
-                          bills nobody, so it has to be visible. */}
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--accent)]"
-                            checked={s.autoDebit ?? false}
-                            disabled={s.status === 'canceled' || setAutoDebit.isPending}
-                            onChange={(e) => setAutoDebit.mutate({ id: s.id, autoDebit: e.target.checked })}
-                            title="Charge the saved card automatically each cycle" />
-                          {s.autoDebit && (
-                            <span className={`text-[11px] ${s.hasCard ? 'text-green-300' : 'text-amber-300'}`}>
-                              {s.hasCard ? 'card saved' : 'no card yet'}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-end gap-2">
-                          {s.status === 'active' && (
-                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'paused' })} title="Pause" className="tap text-slate-500 hover:bg-slate-800 hover:text-amber-300"><Pause size={14} /></button>
-                          )}
-                          {s.status === 'paused' && (
-                            <button onClick={() => setSubStatus.mutate({ id: s.id, status: 'active' })} title="Resume" className="tap text-slate-500 hover:bg-slate-800 hover:text-green-300"><Play size={14} /></button>
-                          )}
-                          {s.status !== 'canceled' && (
-                            <button onClick={async () => { if (await confirmDialog('Cancel this subscription? It will stop billing.', { danger: true })) setSubStatus.mutate({ id: s.id, status: 'canceled' }); }} title="Cancel" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><XCircle size={14} /></button>
-                          )}
-                          <button onClick={async () => { if (await confirmDialog('Delete this subscription record entirely?', { danger: true })) delSub.mutate(s.id); }} title="Delete" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+            <button onClick={() => navigateTo('subscriptions')}
+              className="min-h-10 rounded-lg border border-slate-700 px-3 text-sm text-slate-200 hover:bg-slate-800 sm:min-h-9">Open Subscriptions</button>
+            <button onClick={() => setStartingSub(true)}
+              className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-sm text-slate-200 hover:bg-slate-800 sm:min-h-9">
+              <Plus size={14} /> Start one
+            </button>
+          </div>
         )}
       </PageBody>
 
@@ -312,14 +210,6 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           businessId={newBusinessId}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); invalidate(); }}
-        />
-      )}
-      {pricing && (
-        <SubscriptionPriceModal
-          subscription={pricing}
-          currency={cur}
-          onClose={() => setPricing(null)}
-          onSaved={() => { setPricing(null); invalidateSubs(); }}
         />
       )}
       {startingSub && (
@@ -335,64 +225,7 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
   );
 }
 
-/**
- * Change what one client pays.
- *
- * Separate from the offering editor on purpose: editing the offering changes the
- * price for everyone on the list price, and this changes it for one client. The two
- * used to be the same action because there was nowhere else to put a price, which
- * is how a price list ends up with "Monthly Retainer (Acme)" in it.
- */
-function SubscriptionPriceModal({ subscription, currency, onClose, onSaved }: {
-  subscription: Subscription;
-  currency: string;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [price, setPrice] = useState(subscription.isCustomPrice ? String(Number(subscription.price)) : '');
-  const [error, setError] = useState<string | null>(null);
-
-  const save = useMutation({
-    mutationFn: () => apiPatch(`/subscriptions/${subscription.id}`, {
-      price: price.trim() === '' ? null : Number(price),
-    }),
-    onSuccess: onSaved,
-    onError: (e) => setError(e instanceof Error ? e.message : 'Could not save that price.'),
-  });
-
-  const list = fmt(subscription.listPrice, currency);
-
-  return (
-    <Modal onClose={onClose} size="sm">
-      <form className="p-5" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-        <h2 className="text-base font-semibold text-slate-100">What {subscription.clientName} pays</h2>
-        <p className="mt-0.5 mb-4 text-xs text-slate-500">
-          {subscription.offeringName}. List price is {list}.
-        </p>
-
-        {error && <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">{error}</p>}
-
-        <input autoFocus value={price} onChange={(e) => setPrice(e.target.value)}
-          type="number" step="0.01" min="0" placeholder={`${list} (list price)`}
-          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-[var(--accent)]" />
-        <p className="mt-1.5 text-[11px] text-slate-500">
-          Blank puts them back on the list price. This takes effect on their next invoice;
-          anything already raised stays as it was sent.
-        </p>
-
-        <div className="mt-5 flex items-center gap-3">
-          <button type="submit" disabled={save.isPending}
-            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-[var(--accent-ink)] hover:opacity-90 disabled:opacity-50">
-            {save.isPending ? 'Saving...' : 'Save price'}
-          </button>
-          <button type="button" onClick={onClose} className="text-sm text-slate-400 hover:text-slate-200">Cancel</button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-function StartSubscriptionModal({ businessId, recurringOfferings, initialFolderId, onClose, onStarted }: {
+export function StartSubscriptionModal({ businessId, recurringOfferings, initialFolderId, onClose, onStarted }: {
   businessId?: number;
   recurringOfferings: Offering[];
   initialFolderId?: number | null;

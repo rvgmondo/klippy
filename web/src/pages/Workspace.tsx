@@ -10,6 +10,7 @@ import { FilesView } from '../components/FilesView';
 import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
 import { CollectionsView } from '../components/CollectionsView';
+import { SubscriptionsView } from '../components/SubscriptionsView';
 import { CashflowView } from '../components/CashflowView';
 import { BrandThemeSync } from '../components/BrandThemeSync';
 import { TodayView } from '../components/TodayView';
@@ -31,7 +32,7 @@ import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
 import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'clients' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'collections' | 'cashflow' | 'settings';
+type View = 'home' | 'clients' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'subscriptions' | 'collections' | 'cashflow' | 'settings';
 
 
 function loadBusiness(): BusinessSelection {
@@ -42,7 +43,7 @@ function loadBusiness(): BusinessSelection {
 }
 
 const ALL_VIEWS: View[] = ['home', 'clients', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings', 'social',
-  'offerings', 'expenses', 'reports', 'billing', 'collections', 'cashflow', 'settings'];
+  'offerings', 'expenses', 'reports', 'billing', 'subscriptions', 'collections', 'cashflow', 'settings'];
 
 /**
  * The whole app used to be useState view-switching with no URL, so a push
@@ -281,6 +282,7 @@ export function Workspace() {
           {view === 'social' && <SocialView businessId={businessId} />}
           {view === 'reports' && <ReportsView businessId={businessId} />}
           {view === 'billing' && <BillingView businessId={businessId} />}
+          {view === 'subscriptions' && <SubscriptionsView businessId={businessId} />}
           {view === 'collections' && <CollectionsView businessId={businessId} />}
           {view === 'cashflow' && <CashflowView businessId={businessId} />}
           {view === 'settings' && <SettingsView businessId={businessId} />}

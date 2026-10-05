@@ -5,7 +5,7 @@ import { currencyFor } from './currencyFor.js';
 import { taxRateFor } from './taxRateFor.js';
 import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, offerings, folders } from '../db/schema.js';
-import { tenantWhere, withTenant } from './tenant.js';
+import { tenantWhere, withTenant, isDuplicateKey } from './tenant.js';
 import { nextNumberFor } from './numbering.js';
 import { sendBusinessMail, emailBrandFor } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
@@ -66,6 +66,27 @@ export function addMonths(dateStr, months, anchorDay) {
 /** Day-of-month a subscription bills on, taken from the date it started. */
 export function anchorDayOf(startedOn) {
     return Number(startedOn.split('-')[2]);
+}
+/**
+ * The day a subscription bills on: the one somebody chose, else the day it started.
+ * Every place that works out a subscription's next date goes through this, so a
+ * moved billing day is honoured by the billing run, the cash forecast, a restore
+ * and a client coming back out of the Trash alike.
+ */
+export function billingAnchor(sub) {
+    return sub.billingDay && sub.billingDay >= 1 && sub.billingDay <= 31 ? sub.billingDay : anchorDayOf(sub.startedOn);
+}
+/** The next n bill dates from a starting one, for showing what is coming. */
+export function upcomingBills(from, intervalMonths, anchor, n, endsOn) {
+    const out = [];
+    let d = from;
+    for (let i = 0; i < n; i++) {
+        if (endsOn && d > endsOn)
+            break;
+        out.push(d);
+        d = addMonths(d, intervalMonths, anchor);
+    }
+    return out;
 }
 /** Plain day arithmetic in UTC, so a due date never shifts with the server's zone. */
 export function addDays(dateStr, days) {
@@ -131,9 +152,12 @@ export async function generateSubscriptionInvoice(accountId, sub) {
      */
     const billTo = await clientBillingFor(accountId, sub.folderId, sub.businessId, folder.name);
     const dueDate = addDays(issueDate, billTo.dueDays);
-    // Numbering honours this business's prefix and starting number.
-    const { seq, number } = await nextNumberFor(accountId, sub.businessId, 'invoice');
-    const docId = await db.transaction(async (tx) => {
+    // Numbering honours this business's prefix and starting number. The number is
+    // max + 1, so two invoices made in the same instant (the billing run while
+    // somebody presses Bill now) can both pick it; the unique index refuses the
+    // second, the transaction rolls back whole, and it simply takes the next one.
+    const off = offering;
+    const insertInvoice = () => db.transaction(async (tx) => {
         const ins = await tx.insert(documents).values(withTenant(accountId, {
             type: 'invoice', seq, number, businessId: sub.businessId, folderId: sub.folderId,
             subscriptionId: sub.subscriptionId ?? null,
@@ -150,20 +174,35 @@ export async function generateSubscriptionInvoice(accountId, sub) {
             issueDate, dueDate, currency,
             taxRate: money(taxRate), subtotal: money(price),
             taxAmount: money(taxAmount), total: money(total),
-            notes: `Auto-generated for the ${offering.name} subscription.`, createdBy: sub.createdBy,
+            notes: `Auto-generated for the ${off.name} subscription.`, createdBy: sub.createdBy,
         }));
         const newId = Number(ins[0].insertId);
         await tx.insert(documentLines).values(withTenant(accountId, {
-            documentId: newId, description: `${offering.name}${offering.unit ? ` (${offering.unit})` : ''}`,
-            // What they are paying for, in the words already written on the offering.
+            documentId: newId, description: `${off.name}${off.unit ? ` (${off.unit})` : ''}`,
+            // What they are paying for, in the words already written on the off.
             // A recurring invoice is the one a client sees most often and questions
             // least often, so a bare product name is where "what is this charge?"
             // emails come from.
-            detail: offering.description || null,
+            detail: off.description || null,
             quantity: '1.00', unitPrice: money(price), amount: money(price), position: 0,
         }));
         return newId;
     });
+    let seq = 0;
+    let number = '';
+    let docId = 0;
+    for (let attempt = 0;; attempt++) {
+        ({ seq, number } = await nextNumberFor(accountId, sub.businessId, 'invoice'));
+        try {
+            docId = await insertInvoice();
+            break;
+        }
+        catch (err) {
+            if (attempt < 4 && isDuplicateKey(err))
+                continue;
+            throw err;
+        }
+    }
     // Send it, if asked to and there is somewhere to send it. A failure here must not
     // lose the invoice: it stays a draft and can be sent by hand.
     if (sub.autoSend && folder.billingEmail) {

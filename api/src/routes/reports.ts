@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { and, eq, gte, isNotNull, lte, ne, inArray, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY, roundMoney } from '../lib/currency.js';
 import { mrrByCurrency, chargeFor } from '../lib/mrr.js';
-import { addMonths, anchorDayOf, addDays } from '../lib/billing.js';
+import { addMonths, billingAnchor, addDays } from '../lib/billing.js';
 import { balancesFor } from '../lib/balances.js';
 import { db } from '../db/client.js';
 import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings, subscriptions, documents, payments, sales } from '../db/schema.js';
@@ -770,6 +770,7 @@ export async function reportRoutes(app: FastifyInstance) {
       price: subscriptions.price, listPrice: offerings.price,
       intervalMonths: subscriptions.intervalMonths, startedOn: subscriptions.startedOn,
       nextBillDate: subscriptions.nextBillDate, businessId: subscriptions.businessId,
+      billingDay: subscriptions.billingDay, endsOn: subscriptions.endsOn,
     }).from(subscriptions)
       .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'),
@@ -780,11 +781,11 @@ export async function reportRoutes(app: FastifyInstance) {
       const amount = chargeFor(s, { price: s.listPrice });
       if (!Number.isFinite(amount) || amount <= 0) continue;
       const lane = laneOf(curOf(s.businessId));
-      const anchor = anchorDayOf(s.startedOn);
+      const anchor = billingAnchor(s);
       // A next-bill date the cron has not reached yet still bills, so count it now
       // rather than dropping it into the past.
       let d = s.nextBillDate < today ? today : s.nextBillDate;
-      for (let i = 0; i < 24 && d <= horizon; i++) {
+      for (let i = 0; i < 24 && d <= horizon && !(s.endsOn && d > s.endsOn); i++) {
         lane.buckets[Math.min(WEEKS - 1, Math.max(0, weekIndex(d)))]!.subscriptions += amount;
         d = addMonths(d, s.intervalMonths, anchor);
       }

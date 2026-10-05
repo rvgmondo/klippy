@@ -8,7 +8,7 @@ import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds, assertMaybeBusiness } from '../lib/access.js';
 import { liveHostingForFolders } from '../lib/hosting.js';
 import { subtreeIds } from '../lib/folderTree.js';
-import { addMonths, anchorDayOf } from '../lib/billing.js';
+import { addMonths, billingAnchor } from '../lib/billing.js';
 
 /**
  * The Trash: where deleted clients and boards wait out their 30 days.
@@ -108,12 +108,13 @@ export async function trashRoutes(app: FastifyInstance) {
       const frozen = await db.select({
         id: subscriptions.id, nextBillDate: subscriptions.nextBillDate,
         intervalMonths: subscriptions.intervalMonths, startedOn: subscriptions.startedOn,
+        billingDay: subscriptions.billingDay,
       }).from(subscriptions)
         .where(tenantWhere(subscriptions, accountId,
           inArray(subscriptions.folderId, ids), eq(subscriptions.status, 'active')));
       for (const s of frozen) {
         if (s.nextBillDate >= today) continue;
-        const anchor = anchorDayOf(s.startedOn);
+        const anchor = billingAnchor(s);
         let next = s.nextBillDate;
         // Bounded: 600 monthly cycles is fifty years, far past any real gap.
         for (let i = 0; i < 600 && next < today; i++) next = addMonths(next, s.intervalMonths, anchor);

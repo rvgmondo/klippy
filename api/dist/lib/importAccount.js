@@ -4,7 +4,7 @@ import { businesses, folders, boards, boardColumns, tasks, timeEntries, contacts
 import { withTenant, tenantWhere } from './tenant.js';
 import { sampleNames } from './templates.js';
 import { CLEAN_START_FOLDER } from './seed.js';
-import { addMonths, anchorDayOf } from './billing.js';
+import { addMonths, billingAnchor } from './billing.js';
 const arr = (data, key) => {
     const v = data[key];
     return Array.isArray(v) ? v : [];
@@ -408,7 +408,8 @@ export async function importAccountData(accountId, importerUserId, data) {
              * sat on a disk are forgiven; if they are genuinely owed, a person raises them
              * from the Subscriptions screen where the amount is visible first.
              */
-            const anchor = anchorDayOf(typeof s.startedOn === 'string' ? s.startedOn : today);
+            const billingDay = Number(s.billingDay) || null;
+            const anchor = billingAnchor({ billingDay, startedOn: typeof s.startedOn === 'string' ? s.startedOn : today });
             const every = Number(s.intervalMonths ?? 1) || 1;
             let next = typeof s.nextBillDate === 'string' ? s.nextBillDate : today;
             for (let i = 0; i < 600 && next <= today; i++)
@@ -424,6 +425,7 @@ export async function importAccountData(accountId, importerUserId, data) {
                 domain: s.domain ?? null,
                 intervalMonths: s.intervalMonths ?? 1,
                 startedOn: s.startedOn ?? today, nextBillDate: next,
+                billingDay, endsOn: typeof s.endsOn === 'string' ? s.endsOn : null, notes: s.notes ?? null,
                 createdBy: importerUserId,
             });
         }

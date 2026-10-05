@@ -5,7 +5,7 @@ import { tasks, users, boards, folders, memberships, subscriptions, documents, p
 import { sendMail, sendBusinessMail, emailBrandFor, appUrl } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
 import { payLinkFor } from './paylink.js';
-import { addDays, addMonths, anchorDayOf, generateSubscriptionInvoice, clientBillingFor } from './billing.js';
+import { addDays, addMonths, billingAnchor, generateSubscriptionInvoice, clientBillingFor } from './billing.js';
 import { attemptAutoDebit } from './autoDebit.js';
 import { mrrByCurrency } from './mrr.js';
 import { runHostingSuspensions, liveHostingForFolders, liveArrangementsForFolders } from './hosting.js';
@@ -396,6 +396,7 @@ export async function runSubscriptionBilling() {
     let debited = 0;
     let skipped = 0;
     let trashed = 0;
+    let ended = 0;
     for (const sub of due) {
         // Claim THIS cycle before billing it: advance nextBillDate only while it still
         // equals the date we read. Two overlapping runs (or a manual re-run after the
@@ -410,7 +411,15 @@ export async function runSubscriptionBilling() {
             trashed++;
             continue;
         }
-        const nextDate = addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, anchorDayOf(sub.startedOn));
+        // A fixed-term deal that has run its course stops here, and says so on the
+        // screen as cancelled, rather than billing a month nobody agreed to.
+        if (sub.endsOn && sub.nextBillDate > sub.endsOn) {
+            await db.update(subscriptions).set({ status: 'canceled' })
+                .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.status, 'active')));
+            ended++;
+            continue;
+        }
+        const nextDate = addMonths(sub.nextBillDate, sub.intervalMonths ?? 1, billingAnchor(sub));
         const claim = await db.update(subscriptions)
             .set({ nextBillDate: nextDate, lastBilledAt: new Date() })
             .where(and(eq(subscriptions.id, sub.id), eq(subscriptions.nextBillDate, sub.nextBillDate), eq(subscriptions.status, 'active')));
@@ -482,7 +491,7 @@ export async function runSubscriptionBilling() {
             }).catch(() => { });
         }
     }
-    return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} already billed (skipped)` : ''}${trashed ? `, ${trashed} skipped (client in the Trash)` : ''}`;
+    return `${billed} invoiced of ${due.length} due${debited ? `, ${debited} auto-debited` : ''}${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} already billed (skipped)` : ''}${trashed ? `, ${trashed} skipped (client in the Trash)` : ''}${ended ? `, ${ended} ended (past their end date)` : ''}`;
 }
 /**
  * Tell people what they said they would chase.

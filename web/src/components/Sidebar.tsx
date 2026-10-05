@@ -6,6 +6,7 @@ import {
   Home, Briefcase, Target, Wallet, Settings, Users,
   CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle, TrendingUp,
   type LucideIcon, CreditCard, Share2,
+  Repeat,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
@@ -58,7 +59,7 @@ export const AREAS: {
   },
   {
     key: 'money', label: 'Money', icon: Wallet, blurb: 'Get paid',
-    defaultView: 'billing', views: ['billing', 'collections', 'cashflow', 'expenses', 'takings', 'reports'],
+    defaultView: 'billing', views: ['billing', 'subscriptions', 'collections', 'cashflow', 'expenses', 'takings', 'reports'],
     modules: ['billing', 'collections', 'cashflow', 'expenses', 'takings', 'reports'],
   },
   { key: 'settings', label: 'Settings', icon: Settings, blurb: 'Your businesses and how Klippy works for them', defaultView: 'settings', views: ['settings'], modules: [] },
@@ -150,6 +151,12 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
       icon: MODULE_ICON[k] ?? Home,
       hint: hintOf(k),
     }));
+  // Subscriptions are not a module of their own: they are how billing repeats, so
+  // they sit next to Quotes and invoices wherever billing is on.
+  if (area.key === 'money' && (showAll || enabled.has('billing'))) {
+    const at = items.findIndex((i) => i.key === 'billing');
+    items.splice(at + 1, 0, { key: 'subscriptions', label: 'Subscriptions', icon: Repeat, hint: 'Everyone who pays you on repeat, and when each bills next.' });
+  }
   if (area.key === 'clients') {
     items.push({ key: 'clients', label: account?.folderLabelPlural || 'Clients', icon: Users, hint: 'Everyone you work for.' });
     items.push({ key: 'contacts', label: 'People', icon: Users, hint: 'The people behind your deals and clients.' });

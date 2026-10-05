@@ -533,6 +533,13 @@
       "when": 1790945694740,
       "tag": "0075_client_talk",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "5",
+      "when": 1791200464823,
+      "tag": "0076_subscription_controls",
+      "breakpoints": true
     }
   ]
 }
