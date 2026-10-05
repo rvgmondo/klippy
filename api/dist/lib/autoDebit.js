@@ -55,7 +55,7 @@ export async function attemptAutoDebit(r) {
         return done('skipped', 'This client is in the Trash, so nothing was charged.');
     const cap = Number(settings.autoDebitMax);
     if (r.amount > cap) {
-        return done('skipped', `Refused: ${r.amount.toFixed(2)} is over the ${cap.toFixed(2)} per-charge limit. Raise the limit in Settings > Payments if this is correct.`, { cap: cap.toFixed(2) });
+        return done('skipped', `Refused: ${r.amount.toFixed(2)} is over the ${cap.toFixed(2)} per-charge limit. Raise the limit in Settings, Getting paid online, if this is correct.`, { cap: cap.toFixed(2) });
     }
     // The claim: this invoice has not been attempted before. The unique index on
     // documentId is what enforces it, so a concurrent run loses the race rather than

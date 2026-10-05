@@ -311,7 +311,7 @@ export async function paymentRoutes(app: FastifyInstance) {
       });
     }
     const creds = await credsFor(accountId, doc.businessId, doc.currency);
-    if (!creds) return reply.code(400).send({ error: 'PayFast is not set up for this business. Add it under the business, or set a workspace default in Settings > Payments.' });
+    if (!creds) return reply.code(400).send({ error: 'Online payments are not set up for this business. Add them in Settings, Getting paid online, or set one for every business in Settings, Defaults for every business.' });
     if (doc.type !== 'invoice') return reply.code(400).send({ error: 'Only invoices can be paid.' });
     if (doc.status === 'paid') return reply.code(400).send({ error: 'This invoice is already paid.' });
     // Charge what is STILL OWED, not the face value. An invoice with a recorded

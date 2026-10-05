@@ -307,7 +307,7 @@ export async function paymentRoutes(app) {
         }
         const creds = await credsFor(accountId, doc.businessId, doc.currency);
         if (!creds)
-            return reply.code(400).send({ error: 'PayFast is not set up for this business. Add it under the business, or set a workspace default in Settings > Payments.' });
+            return reply.code(400).send({ error: 'Online payments are not set up for this business. Add them in Settings, Getting paid online, or set one for every business in Settings, Defaults for every business.' });
         if (doc.type !== 'invoice')
             return reply.code(400).send({ error: 'Only invoices can be paid.' });
         if (doc.status === 'paid')

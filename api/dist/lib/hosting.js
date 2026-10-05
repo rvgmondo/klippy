@@ -237,7 +237,7 @@ export async function provisionSubscription(accountId, subscriptionId, invoiceNu
     if (!realDomain && !holding) {
         const asked = await requestDomain(accountId, sub);
         return done('skipped', asked
-            ? 'Waiting on the client for a domain. They have been emailed and can enter it themselves; it will set itself up as soon as they do. Set a holding address in Settings > Hosting to give them a working account straight away instead.'
+            ? 'Waiting on the client for a domain. They have been emailed and can enter it themselves; it will set itself up as soon as they do. Set a holding address in Settings, Hosting, to give them a working account straight away instead.'
             : 'No domain, and no billing email to ask for one. Add either, or set a holding address, and it will set itself up.');
     }
     const domain = (realDomain ?? holding);

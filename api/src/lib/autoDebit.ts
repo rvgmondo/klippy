@@ -103,7 +103,7 @@ export async function attemptAutoDebit(r: DebitRequest): Promise<{ outcome: Debi
   const cap = Number(settings.autoDebitMax);
   if (r.amount > cap) {
     return done('skipped',
-      `Refused: ${r.amount.toFixed(2)} is over the ${cap.toFixed(2)} per-charge limit. Raise the limit in Settings > Payments if this is correct.`,
+      `Refused: ${r.amount.toFixed(2)} is over the ${cap.toFixed(2)} per-charge limit. Raise the limit in Settings, Getting paid online, if this is correct.`,
       { cap: cap.toFixed(2) });
   }
 
