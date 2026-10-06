@@ -12,7 +12,7 @@ import { fieldClass } from './ui';
 const ACCENTS = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#8b5cf6', '#111827'];
 
 /** The sections a business carries, so the Settings page can show one at a time. */
-export type BusinessSection = 'brand' | 'invoicing' | 'reminders' | 'email' | 'access';
+export type BusinessSection = 'brand' | 'invoicing' | 'documents' | 'reminders' | 'email' | 'access';
 
 /**
  * Everything a client sees for one business: its brand (name, logo, colour) and the
@@ -64,6 +64,11 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     bizWhatsapp: business.bizWhatsapp ?? '',
     bankDetails: business.bankDetails ?? '',
     invoiceFooter: business.invoiceFooter ?? '',
+    quoteFooter: business.quoteFooter ?? '',
+    creditNoteFooter: business.creditNoteFooter ?? '',
+    quoteValidDays: business.quoteValidDays ?? 30,
+    quoteDepositPercent: business.quoteDepositPercent != null ? String(Number(business.quoteDepositPercent)) : '',
+    quoteShowBank: !!business.quoteShowBank,
     invoiceHeaderHtml: business.invoiceHeaderHtml ?? '',
     invoiceFooterHtml: business.invoiceFooterHtml ?? '',
     prefixInvoice: business.prefixInvoice ?? '',
@@ -92,13 +97,18 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
   const workspaceCurrency = account?.currency ?? 'ZAR';
   const show = (s: BusinessSection) => !only || only === s;
   // Brand, invoicing and reminders share one save, so any of them shows the button.
-  const showSave = show('brand') || show('invoicing') || show('reminders');
+  const showSave = show('brand') || show('invoicing') || show('documents') || show('reminders');
+  const [docTab, setDocTab] = useState<'invoice' | 'quote' | 'credit_note' | 'all'>('invoice');
 
   const save = useMutation({
     mutationFn: () => apiPatch(`/businesses/${business.id}`, {
       brandName: form.brandName, currency: form.currency || null,
       bizAddress: form.bizAddress, bizTaxNumber: form.bizTaxNumber,
       bizRegNumber: form.bizRegNumber, bizWhatsapp: form.bizWhatsapp, bankDetails: form.bankDetails, invoiceFooter: form.invoiceFooter,
+      quoteFooter: form.quoteFooter, creditNoteFooter: form.creditNoteFooter,
+      quoteValidDays: Number(form.quoteValidDays) || 0,
+      quoteDepositPercent: form.quoteDepositPercent === '' ? null : Number(form.quoteDepositPercent),
+      quoteShowBank: form.quoteShowBank,
       invoiceHeaderHtml: form.invoiceHeaderHtml || null,
       invoiceFooterHtml: form.invoiceFooterHtml || null,
       prefixInvoice: form.prefixInvoice, prefixQuote: form.prefixQuote,
@@ -224,7 +234,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
 
           {/* Invoicing */}
           {show('invoicing') && <section className="space-y-4 border-t border-slate-800 pt-5">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoicing details</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Business details</h3>
+            <p className="-mt-2 text-[11px] text-slate-500">The same on every quote, invoice and credit note this business sends.</p>
             <div>
               <label className={label}>Currency</label>
               <select className={field} value={form.currency} onChange={(e) => set('currency', e.target.value)}>
@@ -271,29 +282,84 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
               <textarea className={`${field} min-h-[64px] resize-y`} value={form.bankDetails}
                 onChange={(e) => set('bankDetails', e.target.value)} placeholder={'FNB Business Cheque\nAcc: 62812345678\nBranch: 250655'} />
             </div>
-            <div>
-              <label className={label}>Footer note / terms</label>
-              <textarea className={`${field} min-h-[52px] resize-y`} value={form.invoiceFooter}
-                onChange={(e) => set('invoiceFooter', e.target.value)} placeholder="Payment due within 14 days. Thank you." />
+            <div className="sm:w-1/2">
+              <label className={label}>VAT added to new documents (%)</label>
+              <input type="number" min={0} max={100} step="0.01" className={field} value={form.defaultTaxRate}
+                onChange={(e) => set('defaultTaxRate', e.target.value)} placeholder="15" />
+              <p className="mt-1 text-[11px] text-slate-500">15 if you are VAT registered, 0 if you are not.</p>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={label}>Default tax rate (%)</label>
-                <input type="number" min={0} max={100} step="0.01" className={field} value={form.defaultTaxRate}
-                  onChange={(e) => set('defaultTaxRate', e.target.value)} placeholder="15" />
-              </div>
-              <div>
+          </section>}
+
+          {/* Each kind of document: its own dates, wording and numbering */}
+          {show('documents') && <section className="space-y-4">
+            <div className="-mx-1 flex gap-1 overflow-x-auto overflow-y-hidden px-1" role="tablist" aria-label="Document type">
+              {([['invoice', 'Invoices'], ['quote', 'Quotes'], ['credit_note', 'Credit notes'], ['all', 'Custom blocks']] as const).map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={docTab === k} onClick={() => setDocTab(k)}
+                  className={`shrink-0 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm ${docTab === k
+                    ? 'bg-slate-800 font-medium text-slate-100' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'}`}>{l}</button>
+              ))}
+            </div>
+
+            {docTab === 'invoice' && <div className="space-y-4">
+              <div className="sm:w-1/2">
                 <label className={label}>Payment terms (days)</label>
                 <input type="number" min={0} max={365} className={field} value={form.defaultDueDays}
                   onChange={(e) => set('defaultDueDays', Number(e.target.value))} />
+                <p className="mt-1 text-[11px] text-slate-500">Sets the due date on a new invoice. 0 means due on receipt. A client's own terms win.</p>
               </div>
-            </div>
+              <div>
+                <label className={label}>Terms at the bottom of invoices</label>
+                <textarea className={`${field} min-h-[64px] resize-y`} value={form.invoiceFooter}
+                  onChange={(e) => set('invoiceFooter', e.target.value)} placeholder="Payment due within 14 days. Please use the invoice number as reference." />
+              </div>
+              <p className="text-[11px] text-slate-500">Invoices always show the bank details from Business details.</p>
+              <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} only="invoice" />
+            </div>}
 
-            <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} />
+            {docTab === 'quote' && <div className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={label}>A quote is valid for (days)</label>
+                  <input type="number" min={0} max={365} className={field} value={form.quoteValidDays}
+                    onChange={(e) => set('quoteValidDays', Number(e.target.value))} />
+                  <p className="mt-1 text-[11px] text-slate-500">Fills in "Valid until" on a new quote. 0 leaves it empty.</p>
+                </div>
+                <div>
+                  <label className={label}>Deposit to start (%)</label>
+                  <input type="number" min={0} max={100} step="1" className={field} value={form.quoteDepositPercent}
+                    onChange={(e) => set('quoteDepositPercent', e.target.value)} placeholder="None" />
+                  <p className="mt-1 text-[11px] text-slate-500">Asked on every new quote, and carried to the invoice made from it. You can change it per quote.</p>
+                </div>
+              </div>
+              <div>
+                <label className={label}>Terms at the bottom of quotes</label>
+                <textarea className={`${field} min-h-[64px] resize-y`} value={form.quoteFooter}
+                  onChange={(e) => set('quoteFooter', e.target.value)}
+                  placeholder={form.invoiceFooter ? `Empty uses your invoice terms: ${form.invoiceFooter.slice(0, 60)}` : 'Prices valid for 30 days. Work starts once the deposit is in.'} />
+              </div>
+              <label className="flex items-start gap-2 text-sm text-slate-300">
+                <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={form.quoteShowBank}
+                  onChange={(e) => set('quoteShowBank', e.target.checked)} />
+                <span>Show bank details on quotes<span className="block text-[11px] text-slate-500">Useful when a deposit is paid straight from the quote. Off by default, because nothing is owed yet.</span></span>
+              </label>
+              <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} only="quote" />
+            </div>}
 
-            <TemplateEditor
-              header={form.invoiceHeaderHtml} footer={form.invoiceFooterHtml}
-              onHeader={(v) => set('invoiceHeaderHtml', v)} onFooter={(v) => set('invoiceFooterHtml', v)} />
+            {docTab === 'credit_note' && <div className="space-y-4">
+              <div>
+                <label className={label}>Note at the bottom of credit notes</label>
+                <textarea className={`${field} min-h-[64px] resize-y`} value={form.creditNoteFooter}
+                  onChange={(e) => set('creditNoteFooter', e.target.value)} placeholder="This credit note reduces the invoice it names. Nothing more is owed on that amount." />
+                <p className="mt-1 text-[11px] text-slate-500">Credit notes never show payment terms or bank details.</p>
+              </div>
+              <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} only="credit_note" />
+            </div>}
+
+            {docTab === 'all' && (
+              <TemplateEditor
+                header={form.invoiceHeaderHtml} footer={form.invoiceFooterHtml}
+                onHeader={(v) => set('invoiceHeaderHtml', v)} onFooter={(v) => set('invoiceFooterHtml', v)} />
+            )}
           </section>}
 
           {/* Payment reminders */}
@@ -586,8 +652,10 @@ function TemplateEditor({ header, footer, onHeader, onFooter }: {
  * next to invoices already numbered 1042 is a bookkeeping mess. The panel shows
  * what the next number will actually be, so neither setting is a guess.
  */
-function NumberingEditor({ businessId, form, set, field, label }: {
+function NumberingEditor({ businessId, form, set, field, label, only }: {
   businessId: number;
+  /** One kind of document, on its own tab. */
+  only?: 'invoice' | 'quote' | 'credit_note';
   // The parent's form holds mixed types; this panel only reads its string fields.
   form: Record<string, unknown>;
   set: (k: never, v: never) => void;
@@ -604,7 +672,7 @@ function NumberingEditor({ businessId, form, set, field, label }: {
     { key: 'invoice', name: 'Invoices', prefixKey: 'prefixInvoice', startKey: 'seqStartInvoice', fallback: 'INV-' },
     { key: 'quote', name: 'Quotes', prefixKey: 'prefixQuote', startKey: 'seqStartQuote', fallback: 'QUO-' },
     { key: 'credit_note', name: 'Credit notes', prefixKey: 'prefixCreditNote', startKey: 'seqStartCreditNote', fallback: 'CN-' },
-  ];
+  ].filter((r) => !only || r.key === only);
 
   return (
     <div className="space-y-3 border-t border-slate-800 pt-4">

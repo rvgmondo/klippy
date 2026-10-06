@@ -188,6 +188,17 @@ export const businesses = mysqlTable('businesses', {
     invoiceAccent: varchar('invoice_accent', { length: 20 }).default('#6366f1').notNull(),
     defaultTaxRate: decimal('default_tax_rate', { precision: 5, scale: 2 }),
     defaultDueDays: int('default_due_days', { unsigned: true }).default(14).notNull(),
+    // ---- Quotes and credit notes have their own wording ----------------------------
+    // They used to borrow the invoice's, so a quote said "Payment within 7 days" and a
+    // credit note asked to be paid. Null footers fall back as documentWording says.
+    /** How long a new quote is valid; fills "Valid until". */
+    quoteValidDays: int('quote_valid_days', { unsigned: true }).default(30).notNull(),
+    /** Deposit asked on a new quote, as a percentage. Null asks none. */
+    quoteDepositPercent: decimal('quote_deposit_percent', { precision: 5, scale: 2 }),
+    quoteFooter: text('quote_footer'),
+    /** Whether quotes carry the bank details. Most do not: nothing is owed yet. */
+    quoteShowBank: boolean('quote_show_bank').default(false).notNull(),
+    creditNoteFooter: text('credit_note_footer'),
     // ---- Payment reminder schedule (per business) ------------------------------
     // Days relative to an invoice's due date to send a reminder on: negative is
     // before due, 0 is on the due date, positive is overdue. Null means the sensible

@@ -518,7 +518,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
   // so the common case needs no adjusting. Falls back to nothing when no business.
   const bizDefaults = useQuery({
     queryKey: ['businesses'], enabled: isNew,
-    queryFn: () => apiGet<{ businesses: { id: number; name: string; color: string; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null }[] }>('/businesses'),
+    queryFn: () => apiGet<{ businesses: { id: number; name: string; color: string; defaultTaxRate: string | null; defaultDueDays: number; currency: string | null; quoteValidDays?: number; quoteDepositPercent?: string | null }[] }>('/businesses'),
   });
   const bizList = bizDefaults.data?.businesses ?? [];
   /**
@@ -567,6 +567,17 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
       const due = new Date(`${issueDate}T00:00:00`);
       due.setDate(due.getDate() + fromRow.defaultDueDays);
       setDueDate(iso(due));
+    }
+    // A quote gets the business's own defaults: how long it is valid, and the deposit
+    // it asks to start. Never over anything already set on this quote.
+    if (type === 'quote') {
+      if (fromRow.quoteValidDays && !dueDate) {
+        const until = new Date(`${issueDate}T00:00:00`);
+        until.setDate(until.getDate() + fromRow.quoteValidDays);
+        setDueDate(iso(until));
+      }
+      const dep = Number(fromRow.quoteDepositPercent ?? 0);
+      if (dep > 0 && depositType === 'none') { setDepositType('percent'); setDepositValue(dep); }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNew, fromRow?.id]);

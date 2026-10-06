@@ -54,6 +54,11 @@ const updateSchema = z.object({
     .refine((v) => v == null || v === '' || (v.length >= 9 && v.length <= 15), 'That does not look like a phone number.'),
   bankDetails: nullableStr(2000),
   invoiceFooter: nullableStr(2000),
+  quoteValidDays: z.number().int().min(0).max(365).optional(),
+  quoteDepositPercent: z.number().min(0).max(100).nullable().optional(),
+  quoteFooter: nullableStr(2000),
+  quoteShowBank: z.boolean().optional(),
+  creditNoteFooter: nullableStr(2000),
   invoiceAccent: z.string().trim().max(20).optional(),
   defaultTaxRate: z.number().min(0).max(100).nullable().optional(),
   defaultDueDays: z.number().int().min(0).max(365).optional(),
@@ -172,11 +177,15 @@ export async function businessRoutes(app: FastifyInstance) {
       patch.secondaryTypes = [...new Set(parsed.data.secondaryTypes)].filter((t) => t !== existing?.type);
     }
     // Empty strings from the form mean "clear it"; decimals are stored as strings.
-    for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bizWhatsapp', 'bankDetails', 'invoiceFooter', 'fontDisplay', 'fontBody', 'currency'] as const) {
+    for (const k of ['brandName', 'bizAddress', 'bizTaxNumber', 'bizRegNumber', 'bizWhatsapp', 'bankDetails', 'invoiceFooter', 'quoteFooter', 'creditNoteFooter', 'fontDisplay', 'fontBody', 'currency'] as const) {
       if (patch[k] === '') patch[k] = null;
     }
     // Stored upper case, so nothing downstream has to normalise it.
     if (typeof patch.currency === 'string') patch.currency = patch.currency.toUpperCase();
+    if (parsed.data.quoteDepositPercent !== undefined) {
+      patch.quoteDepositPercent = parsed.data.quoteDepositPercent === null || parsed.data.quoteDepositPercent === 0
+        ? null : String(parsed.data.quoteDepositPercent);
+    }
     if (parsed.data.defaultTaxRate !== undefined) {
       patch.defaultTaxRate = parsed.data.defaultTaxRate === null ? null : String(parsed.data.defaultTaxRate);
     }

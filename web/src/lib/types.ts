@@ -94,6 +94,11 @@ export interface Business {
   bizTaxNumber?: string | null;
   bizRegNumber?: string | null;
   bizWhatsapp?: string | null;
+  quoteValidDays?: number;
+  quoteDepositPercent?: string | null;
+  quoteFooter?: string | null;
+  quoteShowBank?: boolean;
+  creditNoteFooter?: string | null;
   bankDetails?: string | null;
   invoiceFooter?: string | null;
   invoiceAccent?: string;

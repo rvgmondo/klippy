@@ -1,3 +1,4 @@
+import { documentWording } from './documentWording.js';
 import PDFDocument from 'pdfkit';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
@@ -88,8 +89,7 @@ export async function renderDocumentPdf(accountId, docId, override) {
             address: pick('bizAddress'),
             vat: pick('bizTaxNumber'),
             reg: pick('bizRegNumber'),
-            bank: doc.type === 'quote' ? null : pick('bankDetails'),
-            footer: pick('invoiceFooter'),
+            ...documentWording(doc.type, business, account),
             logo,
         },
         client: {

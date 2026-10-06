@@ -540,6 +540,13 @@
       "when": 1791200464823,
       "tag": "0076_subscription_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "5",
+      "when": 1791277433212,
+      "tag": "0077_document_settings",
+      "breakpoints": true
     }
   ]
 }

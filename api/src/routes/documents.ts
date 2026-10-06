@@ -15,6 +15,7 @@ import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
 import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { settleIfCovered } from '../lib/settle.js';
+import { documentWording } from '../lib/documentWording.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor } from '../lib/numbering.js';
@@ -526,8 +527,9 @@ export async function documentRoutes(app: FastifyInstance) {
         address: pick('bizAddress'),
         taxNumber: pick('bizTaxNumber'),
         regNumber: pick('bizRegNumber'),
-        bankDetails: pick('bankDetails'),
-        footer: pick('invoiceFooter'),
+        // By document type: a quote's own terms, a credit note's own note.
+        bankDetails: documentWording(doc.type, business, account).bank,
+        footer: documentWording(doc.type, business, account).footer,
         accent: business?.invoiceAccent || account?.invoiceAccent || '#6366f1',
         // A VAT-registered issuer's invoices are "Tax Invoices" (SARS wording).
         vatRegistered: !!pick('bizTaxNumber'),
