@@ -8,7 +8,7 @@ import { db } from '../db/client.js';
 import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
-import { balanceOf, balancesFor } from '../lib/balances.js';
+import { balanceOf, balancesFor, CHASE_MIN } from '../lib/balances.js';
 import { intId } from '../lib/http.js';
 import { businessForDocument } from '../lib/business.js';
 import { sendBusinessMail, emailBrandFor } from '../lib/mailer.js';
@@ -293,7 +293,7 @@ export async function documentRoutes(app: FastifyInstance) {
     if (!rows.length) return { sent: 0, covered: 0, skipped: 0, detail: 'Nothing overdue matched.' };
 
     const balances = await balancesFor(accountId, rows);
-    const owedRows = rows.filter((r) => (balances.get(r.id)?.outstanding ?? Number(r.total)) > 0.001);
+    const owedRows = rows.filter((r) => (balances.get(r.id)?.outstanding ?? Number(r.total)) >= CHASE_MIN);
 
     // One email per (client, currency). Grouped by folder when the invoice knows
     // its client record, otherwise by the email address on the invoice.

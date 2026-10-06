@@ -18,6 +18,8 @@ import { notifyAdmins } from './notify.js';
 import { syncAllConnections } from './salesSync.js';
 import { runRecurringExpenses } from './recurringExpenses.js';
 import { IMPORTED_SEQ_BASE } from './numbering.js';
+import { balancesFor, CHASE_MIN } from './balances.js';
+import { settleIfCovered } from './settle.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -669,10 +671,34 @@ export async function runInvoiceReminders(): Promise<string> {
     return cfg;
   }
 
+  // What each invoice really still owes: payments and credit notes taken off, by
+  // the same rule every screen uses. Per account, because balances are tenant-scoped.
+  const owing = new Map<number, number>();
+  const byAccount = new Map<number, typeof rows>();
+  for (const r of rows) byAccount.set(r.accountId, [...(byAccount.get(r.accountId) ?? []), r]);
+  for (const [accountId, docs] of byAccount) {
+    const bal = await balancesFor(accountId, docs);
+    for (const d of docs) owing.set(d.id, bal.get(d.id)?.outstanding ?? Number(d.total));
+  }
+
   let sent = 0;
   let suspended = 0;
+  let settledNow = 0;
   for (const doc of rows) {
     if (doc.folderId != null && trashedClients.has(doc.folderId)) continue;
+    const left = owing.get(doc.id) ?? Number(doc.total);
+    if (left <= 0.001) {
+      // Covered by payments or credit notes but never marked paid. Mark it now,
+      // and certainly do not ask the client for money they have already paid.
+      try {
+        const r = await settleIfCovered(doc.accountId, doc.id, Number(doc.total), doc.status);
+        if (r.flipped) settledNow++;
+      } catch { /* chasing nothing is the safe outcome either way */ }
+      continue;
+    }
+    if (left < CHASE_MIN) continue;
+    const owed = formatMoney(left, doc.currency);
+    const partPaid = left < Number(doc.total) - 0.001;
     const cfg = await scheduleFor(doc.businessId);
     if (!cfg.enabled) continue;
     if (doc.lastReminderOn === today) continue; // never twice in a day
@@ -698,7 +724,7 @@ export async function runInvoiceReminders(): Promise<string> {
           'To avoid any interruption to your service, please settle it as soon as possible.',
         ],
         facts: [
-          ['Amount', formatMoney(doc.total, doc.currency)] as [string, string],
+          [partPaid ? 'Still to pay' : 'Amount', owed] as [string, string],
           ['Was due', doc.dueDate!] as [string, string],
           ['Days overdue', String(overdueBy)] as [string, string],
         ],
@@ -720,7 +746,7 @@ export async function runInvoiceReminders(): Promise<string> {
         // that gets ignored is exactly the one this exists to back up.
         await sendReminderMessage(doc.accountId, doc.businessId, phone, {
           clientName: doc.clientName, number: doc.number,
-          amount: formatMoney(doc.total, doc.currency),
+          amount: owed,
           whenPhrase: `was due on ${doc.dueDate} (${overdueBy} days ago)`,
           link: payLink, brand: cfg.brand,
         }, { kind: 'suspension', docId: doc.id });
@@ -753,7 +779,7 @@ export async function runInvoiceReminders(): Promise<string> {
           : `This is a reminder that invoice ${doc.number} is due on ${doc.dueDate}.`,
       ],
       facts: [
-        ['Amount', formatMoney(doc.total, doc.currency)] as [string, string],
+        [partPaid ? 'Still to pay' : 'Amount', owed] as [string, string],
         [overdueBy > 0 ? 'Was due' : 'Due', doc.dueDate!] as [string, string],
       ],
       ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),
@@ -773,7 +799,7 @@ export async function runInvoiceReminders(): Promise<string> {
       }
       await sendReminderMessage(doc.accountId, doc.businessId, phone, {
         clientName: doc.clientName, number: doc.number,
-        amount: formatMoney(doc.total, doc.currency),
+        amount: owed,
         whenPhrase: overdueBy > 0
           ? `was due on ${doc.dueDate} (${overdueBy} day${overdueBy === 1 ? '' : 's'} ago)`
           : overdueBy === 0 ? 'is due today' : `is due on ${doc.dueDate}`,
@@ -784,7 +810,7 @@ export async function runInvoiceReminders(): Promise<string> {
       sent++;
     } catch { /* try again on the next run */ }
   }
-  return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid`;
+  return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid${settledNow ? `, ${settledNow} found already paid and marked paid` : ''}`;
 }
 
 /** dateStr + n days, as YYYY-MM-DD. */

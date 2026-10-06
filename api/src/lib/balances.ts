@@ -68,3 +68,15 @@ export async function balanceOf(accountId: number, docId: number, total: number)
   const map = await balancesFor(accountId, [{ id: docId, total }]);
   return map.get(docId) ?? { paid: 0, credited: 0, outstanding: round(total) };
 }
+
+/**
+ * The least an invoice can still owe before anything chases it.
+ *
+ * Status alone said who to chase, and status only turns to "paid" when the money
+ * recorded covers the total to the cent. A client who paid R287 on an R287.50
+ * invoice, or an invoice part-paid and settled by a credit note, stayed "sent" and
+ * was chased for the full amount by email, SMS and WhatsApp. Every automatic
+ * reminder, notice and suspension now asks the balance, and a remainder under one
+ * unit of the currency (rounding, a bank fee) is never worth a reminder.
+ */
+export const CHASE_MIN = 1;

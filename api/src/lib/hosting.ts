@@ -6,6 +6,7 @@ import {
 } from '../db/schema.js';
 import { isDuplicateKey, tenantWhere, withTenant } from './tenant.js';
 import { addMonths } from './billing.js';
+import { balancesFor, CHASE_MIN } from './balances.js';
 import { decryptSecret } from './secretbox.js';
 import { appUrl, emailBrandFor, sendBusinessMail } from './mailer.js';
 import { renderEmail, renderEmailText } from './emailLayout.js';
@@ -613,18 +614,22 @@ export async function runHostingSuspensions(): Promise<string> {
 }
 
 /** Days past due on the oldest unpaid invoice for this subscription, or null if paid up. */
-async function oldestOverdueDays(
+export async function oldestOverdueDays(
   accountId: number, subscriptionId: number, today: string,
 ): Promise<number | null> {
-  const rows = await db.select({ dueDate: documents.dueDate }).from(documents)
+  const rows = await db.select({ id: documents.id, total: documents.total, dueDate: documents.dueDate }).from(documents)
     .where(and(
       tenantWhere(documents, accountId, eq(documents.subscriptionId, subscriptionId)),
       eq(documents.type, 'invoice'),
       eq(documents.status, 'sent'),
     ));
+  // An invoice the money already covers is not overdue, whatever its status says.
+  // This decides whether a client's website is taken down.
+  const bal = await balancesFor(accountId, rows);
   let worst: number | null = null;
   for (const r of rows) {
     if (!r.dueDate) continue;
+    if ((bal.get(r.id)?.outstanding ?? Number(r.total)) < CHASE_MIN) continue;
     const days = Math.floor(
       (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${r.dueDate}T00:00:00Z`)) / 86400000,
     );
