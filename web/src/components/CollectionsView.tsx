@@ -19,7 +19,17 @@ interface Item {
   hasPhone: boolean;
   businessId: number | null; folderId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
+  remindersPaused?: boolean; nextReminder?: string | null;
 }
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const sayDay = (d: string) => `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]}`;
+/** Last chased, and what happens next: the same plan the daily run follows. */
+function reminderLine(i: Item): string {
+  const last = i.lastReminderOn ? `last ${sayDay(i.lastReminderOn)}` : 'not chased yet';
+  const next = i.remindersPaused ? 'paused' : i.nextReminder ? `next ${sayDay(i.nextReminder)}` : 'none scheduled';
+  return `${last}, ${next}`;
+}
+
 interface Collections {
   items: Item[];
   summary: {
@@ -175,7 +185,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                       <th className="px-3 py-2">Client</th>
                       <th className="px-3 py-2 text-right">Outstanding</th>
                       <th className="px-3 py-2 text-right">Overdue</th>
-                      <th className="px-3 py-2">Last reminder</th>
+                      <th className="px-3 py-2">Reminders</th>
                       <th className="px-3 py-2"></th>
                     </tr>
                   </thead>
@@ -214,7 +224,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                         <td className="px-3 py-2.5 text-right num">
                           <span className={i.daysOverdue >= 14 ? 'text-red-300' : 'text-amber-300'}>{i.daysOverdue}d</span>
                         </td>
-                        <td className="px-3 py-2.5 num text-[11px] text-slate-500">{i.lastReminderOn ?? 'never'}</td>
+                        <td className="px-3 py-2.5 text-[11px] text-slate-500">{reminderLine(i)}</td>
                         <td className="px-3 py-2.5 text-right">
                           <div className="flex justify-end gap-1.5">
                             {i.folderId && (
@@ -274,7 +284,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                         <div className="truncate text-sm text-slate-400">{i.clientName}</div>
                         <div className="num mt-0.5 text-[11px] text-slate-500">
                           <span className={i.daysOverdue >= 14 ? 'text-red-300' : 'text-amber-300'}>{i.daysOverdue}d overdue</span>
-                          {', last reminder '}{i.lastReminderOn ?? 'never'}
+                          {', '}{reminderLine(i)}
                         </div>
                       </div>
                       <div className="shrink-0 text-right">

@@ -423,6 +423,8 @@ export const folders = mysqlTable('folders', {
      * workspace does. Zero is a real value and means on receipt.
      */
     paymentTermsDays: int('payment_terms_days', { unsigned: true }),
+    /** Never chase this client automatically: an arrangement, a dispute, a friend. */
+    remindersPaused: boolean('reminders_paused').default(false).notNull(),
     /** What they are trusted with. Informational, in the client's currency. */
     creditLimit: decimal('credit_limit', { precision: 12, scale: 2 }),
     /**
@@ -817,6 +819,13 @@ export const documents = mysqlTable('documents', {
     status: mysqlEnum('status', ['draft', 'sent', 'accepted', 'paid', 'void']).default('draft').notNull(),
     // Last date a payment reminder went out, so chasing does not repeat daily.
     lastReminderOn: date('last_reminder_on', { mode: 'string' }),
+    /** No automatic reminders for this invoice until someone turns them back on. */
+    remindersPaused: boolean('reminders_paused').default(false).notNull(),
+    /**
+     * The next reminder moved by hand ("not until the 15th"). Wins over the schedule
+     * once; cleared when that reminder goes out, and the schedule carries on after it.
+     */
+    nextReminderOn: date('next_reminder_on', { mode: 'string' }),
     // Set when the final "service at risk / suspended" notice went out, after the
     // business's suspend threshold. Drives the Collections list's flagged state.
     suspendedAt: datetime('suspended_at'),
@@ -2108,5 +2117,27 @@ export const supportMessages = mysqlTable('support_messages', {
     createdAt: createdAt(),
 }, (t) => [
     index('idx_support_messages_request').on(t.accountId, t.requestId),
+]);
+/**
+ * Every reminder that went to a client, automatic or by hand.
+ *
+ * lastReminderOn only ever held the latest date, so "when did we last chase
+ * them, and how" had no answer past yesterday. One row per invoice per send.
+ */
+export const invoiceReminders = mysqlTable('invoice_reminders', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    documentId: int('document_id', { unsigned: true }).notNull()
+        .references(() => documents.id, { onDelete: 'cascade' }),
+    kind: mysqlEnum('kind', ['reminder', 'final', 'chase']).notNull(),
+    /** "email", "email, sms": what actually went. */
+    channels: varchar('channels', { length: 60 }).notNull(),
+    sentTo: varchar('sent_to', { length: 150 }),
+    amount: decimal('amount', { precision: 12, scale: 2 }),
+    sentBy: int('sent_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_invoice_reminders_doc').on(t.accountId, t.documentId),
 ]);
 //# sourceMappingURL=schema.js.map

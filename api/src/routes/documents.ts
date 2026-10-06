@@ -1,11 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { money } from '../lib/money.js';
 import { DEFAULT_CURRENCY, formatMoney, roundMoney } from '../lib/currency.js';
 import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts, invoiceReminders, users } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { balanceOf, balancesFor, CHASE_MIN } from '../lib/balances.js';
@@ -16,9 +16,10 @@ import { renderEmail, renderEmailText } from '../lib/emailLayout.js';
 import { payLinkFor } from '../lib/paylink.js';
 import { settleIfCovered } from '../lib/settle.js';
 import { documentWording } from '../lib/documentWording.js';
+import { logReminder, channelsOf, planReminder, reminderConfigFor } from '../lib/reminders.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
-import { nextNumberFor } from '../lib/numbering.js';
+import { nextNumberFor, IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { addDays, clientBillingFor } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
@@ -169,6 +170,8 @@ export async function documentRoutes(app: FastifyInstance) {
       folderId: documents.folderId,
       currency: documents.currency, total: documents.total, dueDate: documents.dueDate,
       lastReminderOn: documents.lastReminderOn, suspendedAt: documents.suspendedAt,
+      status: documents.status, seq: documents.seq,
+      remindersPaused: documents.remindersPaused, nextReminderOn: documents.nextReminderOn,
     }).from(documents)
       .where(tenantWhere(documents, accountId,
         eq(documents.type, 'invoice'),
@@ -211,15 +214,22 @@ export async function documentRoutes(app: FastifyInstance) {
     // not one per row.
     const folderIds = [...new Set(rows.map((r) => r.folderId).filter((x): x is number => x != null))];
     const phoned = new Set<number>();
+    const pausedClients = new Set<number>();
     if (folderIds.length) {
-      const fRows = await db.select({ id: folders.id, phone: folders.billingPhone }).from(folders)
+      const fRows = await db.select({ id: folders.id, phone: folders.billingPhone, paused: folders.remindersPaused }).from(folders)
         .where(tenantWhere(folders, accountId, inArray(folders.id, folderIds)));
-      for (const f of fRows) if (normalizePhone(f.phone)) phoned.add(f.id);
+      for (const f of fRows) {
+        if (normalizePhone(f.phone)) phoned.add(f.id);
+        if (f.paused) pausedClients.add(f.id);
+      }
       const cRows = await db.select({ folderId: contacts.folderId, phone: contacts.phone }).from(contacts)
         .where(tenantWhere(contacts, accountId, inArray(contacts.folderId, folderIds), isNotNull(contacts.phone)));
       for (const c of cRows) if (c.folderId != null && normalizePhone(c.phone)) phoned.add(c.folderId);
     }
 
+    // When each will be chased next, by the rule the daily run uses.
+    const cfgs = new Map<number | null, Awaited<ReturnType<typeof reminderConfigFor>>>();
+    for (const b of new Set(rows.map((r) => r.businessId))) cfgs.set(b, await reminderConfigFor(b));
     const items = rows
       .map((r) => ({
         id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
@@ -229,6 +239,12 @@ export async function documentRoutes(app: FastifyInstance) {
         outstanding: round(Number(r.total) - (paidBy.get(r.id) ?? 0) - (creditedBy.get(r.id) ?? 0)),
         dueDate: r.dueDate, daysOverdue: r.dueDate ? days(r.dueDate) : 0,
         lastReminderOn: r.lastReminderOn, suspended: !!r.suspendedAt,
+        remindersPaused: r.remindersPaused || (r.folderId != null && pausedClients.has(r.folderId)),
+        nextReminder: planReminder({ ...r, type: 'invoice' }, cfgs.get(r.businessId)!, {
+          today, chaseMin: CHASE_MIN, imported: r.seq >= IMPORTED_SEQ_BASE,
+          owing: Number(r.total) - (paidBy.get(r.id) ?? 0) - (creditedBy.get(r.id) ?? 0),
+          clientPaused: r.folderId != null && pausedClients.has(r.folderId),
+        }).next,
       }))
       // A fully credited or fully paid invoice is not a collections problem.
       .filter((i) => i.outstanding > 0.001);
@@ -272,7 +288,11 @@ export async function documentRoutes(app: FastifyInstance) {
     const parsed = z.object({
       ids: z.array(z.number().int().positive()).max(500).optional(),
       businessId: z.number().int().positive().optional(),
+      // Chasing ONE invoice by hand is a decision about that invoice, so it goes
+      // even when its reminders are paused. Chase all never does.
+      force: z.boolean().optional(),
     }).safeParse(req.body ?? {});
+    const { userId } = authOf(req);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
 
     const today = new Date().toISOString().slice(0, 10);
@@ -280,7 +300,7 @@ export async function documentRoutes(app: FastifyInstance) {
       id: documents.id, number: documents.number, clientName: documents.clientName,
       clientEmail: documents.clientEmail, businessId: documents.businessId,
       folderId: documents.folderId, currency: documents.currency,
-      total: documents.total, dueDate: documents.dueDate,
+      total: documents.total, dueDate: documents.dueDate, remindersPaused: documents.remindersPaused,
     }).from(documents)
       .where(tenantWhere(documents, accountId,
         eq(documents.type, 'invoice'),
@@ -294,19 +314,40 @@ export async function documentRoutes(app: FastifyInstance) {
     if (!rows.length) return { sent: 0, covered: 0, skipped: 0, detail: 'Nothing overdue matched.' };
 
     const balances = await balancesFor(accountId, rows);
-    const owedRows = rows.filter((r) => (balances.get(r.id)?.outstanding ?? Number(r.total)) >= CHASE_MIN);
+    // Paused, for the invoice or the whole client, means nobody chases it in bulk.
+    const pausedFolders = new Set(parsed.data.force ? [] : (await db.select({ id: folders.id }).from(folders)
+      .where(tenantWhere(folders, accountId, eq(folders.remindersPaused, true),
+        inArray(folders.id, [...new Set(rows.map((r) => r.folderId).filter((n): n is number => n != null)), 0])))).map((f) => f.id));
+    const isPaused = (r: { remindersPaused: boolean; folderId: number | null }) =>
+      !parsed.data.force && (r.remindersPaused || (r.folderId != null && pausedFolders.has(r.folderId)));
+    const pausedCount = rows.filter(isPaused).length;
+    const owedRows = rows.filter((r) => !isPaused(r) && (balances.get(r.id)?.outstanding ?? Number(r.total)) >= CHASE_MIN);
 
     // One email per (client, currency). Grouped by folder when the invoice knows
     // its client record, otherwise by the email address on the invoice.
+    // Reachable means the client record has an address NOW, or the invoice kept one.
+    // Grouping on the invoice's copy alone skipped every client whose invoice was
+    // made before they had an email on file, while the daily run (which reads the
+    // client) chased them happily.
+    const liveEmail = new Map<number, string>();
+    const chaseFolders = [...new Set(owedRows.map((r) => r.folderId).filter((n): n is number => n != null))];
+    if (chaseFolders.length) {
+      for (const f of await db.select({ id: folders.id, email: folders.billingEmail }).from(folders)
+        .where(tenantWhere(folders, accountId, inArray(folders.id, chaseFolders)))) {
+        if (f.email) liveEmail.set(f.id, f.email);
+      }
+    }
+    const reachable = (r: { folderId: number | null; clientEmail: string | null }) =>
+      !!r.clientEmail || (r.folderId != null && liveEmail.has(r.folderId));
     const groups = new Map<string, typeof owedRows>();
     for (const r of owedRows) {
-      if (!r.clientEmail) continue;
+      if (!reachable(r)) continue;
       const key = `${r.folderId ?? r.clientEmail}:${r.currency}`;
       const g = groups.get(key) ?? [];
       g.push(r);
       groups.set(key, g);
     }
-    const skipped = owedRows.filter((r) => !r.clientEmail).length;
+    const skipped = owedRows.filter((r) => !reachable(r)).length;
 
     let sent = 0;
     let covered = 0;
@@ -368,7 +409,7 @@ export async function documentRoutes(app: FastifyInstance) {
       try {
         await sendBusinessMail({
           accountId, businessId: first.businessId, purpose: 'invoice',
-          to: chaseTo?.email ?? first.clientEmail!,
+          to: chaseTo?.email ?? first.clientEmail ?? liveEmail.get(first.folderId!)!,
           subject: content.heading,
           text: renderEmailText(emailBrand, content),
           html: renderEmail(emailBrand, content),
@@ -382,10 +423,11 @@ export async function documentRoutes(app: FastifyInstance) {
         // message per client, like the email: the oldest invoice named, the
         // total owed, one pay link.
         const phone = await phoneForClient(accountId, first.folderId);
+        let out: { sms?: string; whatsapp?: string } | undefined;
         if (phone) {
           const oldest = [...group].sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? ''))[0]!;
           const firstLink = links[0]?.replace(/^Pay [^:]+: /, '') ?? null;
-          await sendReminderMessage(accountId, first.businessId, phone, {
+          out = await sendReminderMessage(accountId, first.businessId, phone, {
             clientName: first.clientName,
             number: group.length === 1 ? first.number : `${oldest.number} and ${group.length - 1} more`,
             amount: formatMoney(owedTotal, first.currency),
@@ -393,9 +435,13 @@ export async function documentRoutes(app: FastifyInstance) {
             link: firstLink, brand: emailBrand.name,
           }, { kind: 'chase', docId: first.id });
         }
+        await logReminder(accountId, group.map((r) => ({
+          documentId: r.id, kind: 'chase' as const, channels: channelsOf(true, out),
+          sentTo: chaseTo?.email ?? first.clientEmail, amount: balances.get(r.id)?.outstanding ?? Number(r.total), sentBy: userId,
+        })));
       } catch { /* one bad address must not stop the rest */ }
     }
-    return { sent, covered, skipped };
+    return { sent, covered, skipped, paused: pausedCount };
   });
 
   /**
@@ -493,6 +539,99 @@ export async function documentRoutes(app: FastifyInstance) {
   });
 
   // One document with its line items.
+  // ---- Reminders on one invoice ------------------------------------------------
+  /**
+   * When this invoice was chased, by what, and when it will be chased next.
+   * The "next" comes from planReminder, the same function the daily run uses, so
+   * the date on screen is the date it goes.
+   */
+  const reminderState = async (accountId: number, doc: typeof documents.$inferSelect) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const [client] = doc.folderId ? await db.select({ paused: folders.remindersPaused, name: folders.name }).from(folders)
+      .where(tenantWhere(folders, accountId, eq(folders.id, doc.folderId))).limit(1) : [];
+    const bal = await balanceOf(accountId, doc.id, Number(doc.total));
+    const cfg = await reminderConfigFor(doc.businessId);
+    const plan = planReminder(doc, cfg, {
+      today, owing: bal.outstanding, chaseMin: CHASE_MIN, clientPaused: !!client?.paused,
+      imported: doc.seq >= IMPORTED_SEQ_BASE,
+    });
+    const history = await db.select({
+      id: invoiceReminders.id, kind: invoiceReminders.kind, channels: invoiceReminders.channels,
+      sentTo: invoiceReminders.sentTo, amount: invoiceReminders.amount, createdAt: invoiceReminders.createdAt,
+      by: users.name,
+    }).from(invoiceReminders).leftJoin(users, eq(users.id, invoiceReminders.sentBy))
+      .where(tenantWhere(invoiceReminders, accountId, eq(invoiceReminders.documentId, doc.id)))
+      .orderBy(desc(invoiceReminders.createdAt), desc(invoiceReminders.id)).limit(50);
+    return {
+      plan, history,
+      lastReminderOn: doc.lastReminderOn,
+      paused: doc.remindersPaused, clientPaused: !!client?.paused, clientName: client?.name ?? doc.clientName,
+      nextReminderOn: doc.nextReminderOn,
+      schedule: { enabled: cfg.enabled, offsets: cfg.offsets, finalAfter: cfg.suspendAfter },
+    };
+  };
+  const ownInvoice = async (req: FastifyRequest, reply: FastifyReply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) { await reply.code(400).send({ error: 'Bad id.' }); return null; }
+    const [doc] = await db.select().from(documents)
+      .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+    if (!doc || (doc.businessId && !(await canSeeBusiness(req, doc.businessId)))) {
+      await reply.code(404).send({ error: 'Not found.' });
+      return null;
+    }
+    return doc;
+  };
+
+  app.get('/api/v1/documents/:id/reminders', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const doc = await ownInvoice(req, reply);
+    if (!doc) return;
+    return reminderState(accountId, doc);
+  });
+
+  /** Pause or resume this invoice's reminders, or move the next one. */
+  app.patch('/api/v1/documents/:id/reminders', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const parsed = z.object({
+      paused: z.boolean().optional(),
+      nextReminderOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    }).safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Bad request.' });
+    const doc = await ownInvoice(req, reply);
+    if (!doc) return;
+    if (doc.businessId && !(await assertMaybeBusiness(req, reply, doc.businessId))) return;
+    if (doc.type !== 'invoice') return reply.code(400).send({ error: 'Only invoices have reminders.' });
+    const today = new Date().toISOString().slice(0, 10);
+    if (parsed.data.nextReminderOn && parsed.data.nextReminderOn < today) {
+      return reply.code(400).send({ error: 'Pick today or a later date. To send one now, use Chase.' });
+    }
+    const patch: Partial<typeof documents.$inferInsert> = {};
+    if (parsed.data.paused !== undefined) patch.remindersPaused = parsed.data.paused;
+    if (parsed.data.nextReminderOn !== undefined) patch.nextReminderOn = parsed.data.nextReminderOn;
+    // Choosing a date is a request to chase on it, so it un-pauses as well.
+    if (parsed.data.nextReminderOn && parsed.data.paused === undefined) patch.remindersPaused = false;
+    if (Object.keys(patch).length) {
+      await db.update(documents).set(patch).where(tenantWhere(documents, accountId, eq(documents.id, doc.id)));
+    }
+    const [fresh] = await db.select().from(documents).where(tenantWhere(documents, accountId, eq(documents.id, doc.id))).limit(1);
+    return reminderState(accountId, fresh!);
+  });
+
+  /** Never chase this client automatically, or start again. */
+  app.patch('/api/v1/clients/:id/reminders', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    const parsed = z.object({ paused: z.boolean() }).safeParse(req.body);
+    if (!id || !parsed.success) return reply.code(400).send({ error: 'Bad request.' });
+    const [f] = await db.select({ id: folders.id, businessId: folders.businessId }).from(folders)
+      .where(tenantWhere(folders, accountId, eq(folders.id, id))).limit(1);
+    if (!f || (f.businessId && !(await canSeeBusiness(req, f.businessId)))) return reply.code(404).send({ error: 'Not found.' });
+    if (f.businessId && !(await assertMaybeBusiness(req, reply, f.businessId))) return;
+    await db.update(folders).set({ remindersPaused: parsed.data.paused }).where(tenantWhere(folders, accountId, eq(folders.id, id)));
+    return { ok: true, paused: parsed.data.paused };
+  });
+
   app.get('/api/v1/documents/:id', async (req, reply) => {
     const { accountId } = authOf(req);
     const id = intId(req);

@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, MessageCircle, Phone, Mail, MapPin, Pencil, FileText, Receipt, Users, Search,
   KanbanSquare, Target, AlertTriangle, Plus,
 } from 'lucide-react';
 import { ClientMessages, EmailComposer } from './ClientTalk';
-import { apiGet } from '../lib/api';
+import { apiGet, apiPatch } from '../lib/api';
 import { money, moneyRound } from '../lib/money';
 import { navigateTo, takeUrlParam } from '../lib/urlAction';
 import { useAuth } from '../lib/auth';
 import { PageHeader } from './PageHeader';
 import { ClientDetails } from './ClientDetails';
+import { notify } from './ConfirmDialog';
 import { Card, EmptyState, Skeleton, btnPrimary, btnSecondary, fieldClass, fieldInlineClass } from './ui';
 import type { BusinessSelection } from './BusinessSwitcher';
 import type { Business, Folder } from '../lib/types';
@@ -42,7 +43,7 @@ interface ClientPageData {
     billingEmail: string | null; billingPhone: string | null; billingAddress: string | null;
     billingVatNumber: string | null; hourlyRate: string | null; legalName: string | null;
     regNumber: string | null; companyType: string | null; website: string | null;
-    paymentTermsDays: number | null; createdAt: string;
+    paymentTermsDays: number | null; createdAt: string; remindersPaused?: boolean;
   };
   money: { owed: PerCur; overdue: PerCur; openInvoices: number; lateCount: number };
   documents: DocRow[];
@@ -247,6 +248,7 @@ type Tab = 'overview' | 'money' | 'work' | 'people' | 'messages';
 
 function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
   const { account } = useAuth();
+  const qc = useQueryClient();
   const word = account?.folderLabelPlural || 'Clients';
   const biz = useBusinesses();
   const { data, isLoading, error } = useQuery({
@@ -288,6 +290,14 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
   const wa = waLink(phone);
   const folder = folders.data?.folders.find((f) => f.id === id);
   const newDoc = (type: 'invoice' | 'quote') => navigateTo('billing', { new: type, folder: String(id) });
+  const toggleReminders = async (paused: boolean) => {
+    try {
+      await apiPatch(`/clients/${id}/reminders`, { paused });
+      void qc.invalidateQueries({ queryKey: ['client', id] });
+      void qc.invalidateQueries({ queryKey: ['collections'] });
+      notify(paused ? `No more automatic reminders to ${c.name}. Chase still works when you press it.` : `Reminders to ${c.name} are back on.`, 'ok');
+    } catch (e) { notify(e instanceof Error ? e.message : 'That did not save.', 'error'); }
+  };
   const openDoc = (d: DocRow) => navigateTo('billing', { open: String(d.id), doctype: d.type });
   const openBoard = (boardId: number) => navigateTo('board', { board: String(boardId) });
 
@@ -393,6 +403,16 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
                     {c.paymentTermsDays != null ? `${c.paymentTermsDays} days` : <span className="text-slate-500">{b?.defaultDueDays ?? 14} days, from {b?.name ?? 'the business'} terms</span>}
                   </Row>
                   {c.billingVatNumber && <Row label="Their VAT number"><span className="num">{c.billingVatNumber}</span></Row>}
+                  <Row label="Reminders">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className={c.remindersPaused ? 'text-amber-300' : 'text-slate-200'}>
+                        {c.remindersPaused ? 'Paused. Nothing is sent to them automatically.' : 'Sent automatically when an invoice is due or late'}
+                      </span>
+                      <button className="text-xs text-[var(--accent)]" onClick={() => toggleReminders(!c.remindersPaused)}>
+                        {c.remindersPaused ? 'Turn back on' : 'Pause for this client'}
+                      </button>
+                    </span>
+                  </Row>
                 </dl>
               </Card>
 

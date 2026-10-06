@@ -7,6 +7,7 @@ import { navigateTo } from '../lib/urlAction';
 import { Modal } from './Modal';
 import { notify } from './ConfirmDialog';
 import { PaymentsModal } from './PaymentsModal';
+import { ReminderPanel } from './ReminderPanel';
 import { PrintView } from './InvoicePrintView';
 import { DocActionSheet, useMoneyRefresh, type DocAction } from './DocActionSheet';
 import { Skeleton, btnPrimary, btnSecondary } from './ui';
@@ -205,6 +206,10 @@ export function DocumentView({ id, onClose, onEdit, onOpen }: {
               </div>
             </section>
           ) : null}
+
+          {isInvoice && d.status !== 'draft' && d.status !== 'void' && (
+            <ReminderPanel docId={d.id} currency={d.currency} folderId={d.folderId ?? null} />
+          )}
 
           {d.notes && (
             <section>

@@ -109,7 +109,7 @@ export async function clientRoutes(app) {
             billingVatNumber: folders.billingVatNumber, hourlyRate: folders.hourlyRate,
             monthlyHoursBudget: folders.monthlyHoursBudget, legalName: folders.legalName, regNumber: folders.regNumber,
             companyType: folders.companyType, country: folders.country, taxNumber: folders.taxNumber,
-            industry: folders.industry, website: folders.website, paymentTermsDays: folders.paymentTermsDays,
+            industry: folders.industry, website: folders.website, paymentTermsDays: folders.paymentTermsDays, remindersPaused: folders.remindersPaused,
             createdAt: folders.createdAt,
         }).from(folders)
             .where(tenantWhere(folders, accountId, eq(folders.id, id), isNull(folders.deletedAt))).limit(1);

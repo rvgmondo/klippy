@@ -20,6 +20,7 @@ import { runRecurringExpenses } from './recurringExpenses.js';
 import { IMPORTED_SEQ_BASE } from './numbering.js';
 import { balancesFor, CHASE_MIN } from './balances.js';
 import { settleIfCovered } from './settle.js';
+import { planReminder, reminderConfigFor, logReminder, channelsOf, type ReminderConfig } from './reminders.js';
 
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -598,7 +599,7 @@ export async function runDealFollowUps(): Promise<string> {
 }
 
 /** The reminder schedule to use when a business has not set its own. */
-export const DEFAULT_REMINDER_OFFSETS = [-3, 0, 7];
+export { DEFAULT_REMINDER_OFFSETS } from './reminders.js';
 
 const daysBetween = (a: string, b: string) =>
   Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86400000);
@@ -636,7 +637,7 @@ export async function runInvoiceReminders(): Promise<string> {
   ));
 
   /**
-   * Never chase a client who is in the Trash.
+   * Never chase a client who is in the Trash, or one somebody has said not to chase.
    *
    * This does not only email: it sends SMS and WhatsApp to the number on the client
    * record. Texting somebody the founder believes they have deleted is the same harm
@@ -645,31 +646,19 @@ export async function runInvoiceReminders(): Promise<string> {
    * invoice is still owed.
    */
   const chaseFolderIds = [...new Set(rows.map((r) => r.folderId).filter((n): n is number => n != null))];
-  const trashedClients = new Set(chaseFolderIds.length
-    ? (await db.select({ id: folders.id }).from(folders)
-      .where(and(inArray(folders.id, chaseFolderIds), isNotNull(folders.deletedAt)))).map((f) => f.id)
-    : []);
+  const clientRows = chaseFolderIds.length
+    ? await db.select({ id: folders.id, deletedAt: folders.deletedAt, paused: folders.remindersPaused })
+      .from(folders).where(inArray(folders.id, chaseFolderIds))
+    : [];
+  const trashedClients = new Set(clientRows.filter((f) => f.deletedAt).map((f) => f.id));
+  const pausedClients = new Set(clientRows.filter((f) => f.paused).map((f) => f.id));
 
-  // Each invoice is chased on its own business's schedule, so cache the schedule
-  // per business rather than re-reading it for every invoice.
-  const bizCache = new Map<number, { enabled: boolean; offsets: number[]; suspendAfter: number | null; brand: string }>();
-  async function scheduleFor(businessId: number | null) {
-    if (businessId == null) return { enabled: true, offsets: DEFAULT_REMINDER_OFFSETS, suspendAfter: null, brand: 'Accounts' };
-    const cached = bizCache.get(businessId);
-    if (cached) return cached;
-    const [b] = await db.select({
-      remindersEnabled: businesses.remindersEnabled, reminderOffsets: businesses.reminderOffsets,
-      suspendAfterDays: businesses.suspendAfterDays, brandName: businesses.brandName, name: businesses.name,
-    }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-    const cfg = {
-      enabled: b?.remindersEnabled ?? true,
-      offsets: (b?.reminderOffsets && b.reminderOffsets.length ? b.reminderOffsets : DEFAULT_REMINDER_OFFSETS),
-      suspendAfter: b?.suspendAfterDays ?? null,
-      brand: b?.brandName || b?.name || 'Accounts',
-    };
-    bizCache.set(businessId, cfg);
-    return cfg;
-  }
+  // Each invoice is chased on its own business's schedule.
+  const bizCache = new Map<number | null, ReminderConfig>();
+  const scheduleFor = async (businessId: number | null) => {
+    if (!bizCache.has(businessId)) bizCache.set(businessId, await reminderConfigFor(businessId));
+    return bizCache.get(businessId)!;
+  };
 
   // What each invoice really still owes: payments and credit notes taken off, by
   // the same rule every screen uses. Per account, because balances are tenant-scoped.
@@ -696,81 +685,43 @@ export async function runInvoiceReminders(): Promise<string> {
       } catch { /* chasing nothing is the safe outcome either way */ }
       continue;
     }
-    if (left < CHASE_MIN) continue;
+    const cfg = await scheduleFor(doc.businessId);
+    // The same plan the screens show as "next reminder", so what they promise is
+    // what this does.
+    const plan = planReminder(doc, cfg, {
+      today, owing: left, chaseMin: CHASE_MIN,
+      clientPaused: doc.folderId != null && pausedClients.has(doc.folderId),
+    });
+    if (!plan.next || plan.next > today) continue;
+
     const owed = formatMoney(left, doc.currency);
     const partPaid = left < Number(doc.total) - 0.001;
-    const cfg = await scheduleFor(doc.businessId);
-    if (!cfg.enabled) continue;
-    if (doc.lastReminderOn === today) continue; // never twice in a day
-
     const overdueBy = -daysBetween(doc.dueDate!, today); // >0 means overdue
     // A chase with a button that takes the payment is worth far more than one
     // asking them to go and find the invoice. Null when PayFast is not set up.
-    // Lazy on purpose: this used to run a full settings + signing round-trip for
-    // EVERY open invoice system-wide, before checking whether any reminder was due
-    // at all. Now it costs something only for the handful actually being sent.
-    const getPayLink = () => payLinkFor(doc.accountId, doc.id).catch(() => null);
-
-    // Suspension supersedes a normal reminder: once far enough overdue and not yet
-    // flagged, send the final notice and mark it, so the Collections list shows it.
-    if (cfg.suspendAfter != null && overdueBy >= cfg.suspendAfter && !doc.suspendedAt) {
-      const payLink = await getPayLink();
-      const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
-      const content = {
-        heading: `Invoice ${doc.number} is ${overdueBy} days overdue`,
-        body: [
-          `Hi ${doc.clientName},`,
-          `Invoice ${doc.number} has not been paid and is now ${overdueBy} days past its due date.`,
-          'To avoid any interruption to your service, please settle it as soon as possible.',
-        ],
-        facts: [
-          [partPaid ? 'Still to pay' : 'Amount', owed] as [string, string],
-          ['Was due', doc.dueDate!] as [string, string],
-          ['Days overdue', String(overdueBy)] as [string, string],
-        ],
-        ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),
-        note: 'If you have already paid, please let us know so we can update our records.',
-      };
-      try {
-        const phone = await phoneForClient(doc.accountId, doc.folderId);
-        const email = await reminderEmailFor(doc);
-        if (!email && !phone) continue;
-        if (email) {
-          await sendBusinessMail({
-            accountId: doc.accountId, businessId: doc.businessId, purpose: 'invoice',
-            to: email, subject: `Action needed: invoice ${doc.number} overdue`,
-            text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
-          });
-        }
-        // The same notice by SMS/WhatsApp when those channels are on: the email
-        // that gets ignored is exactly the one this exists to back up.
-        await sendReminderMessage(doc.accountId, doc.businessId, phone, {
-          clientName: doc.clientName, number: doc.number,
-          amount: owed,
-          whenPhrase: `was due on ${doc.dueDate} (${overdueBy} days ago)`,
-          link: payLink, brand: cfg.brand,
-        }, { kind: 'suspension', docId: doc.id });
-        await db.update(documents).set({ lastReminderOn: today, suspendedAt: new Date() })
-          .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
-        suspended++;
-      } catch { /* retry next run */ }
-      continue;
-    }
-
-    // A normal reminder is due when today has reached one of the scheduled dates
-    // (dueDate + offset) that we have not already passed. Using "<= today and later
-    // than the last reminder" means a missed day is caught up rather than skipped.
-    const scheduledDates = cfg.offsets.map((o) => addDays(doc.dueDate!, o)).sort();
-    const dueNow = scheduledDates.filter((d) => daysBetween(d, today) <= 0
-      && (!doc.lastReminderOn || daysBetween(doc.lastReminderOn, d) > 0));
-    if (dueNow.length === 0) continue;
-
-    const subject = overdueBy > 0 ? `Overdue: invoice ${doc.number}`
-      : overdueBy === 0 ? `Invoice ${doc.number} is due today`
-        : `Reminder: invoice ${doc.number} is due soon`;
-    const payLink = await getPayLink();
+    const payLink = await payLinkFor(doc.accountId, doc.id).catch(() => null);
     const emailBrand = await emailBrandFor(doc.accountId, doc.businessId);
-    const content = {
+    const isFinal = plan.kind === 'final';
+
+    const subject = isFinal ? `Action needed: invoice ${doc.number} overdue`
+      : overdueBy > 0 ? `Overdue: invoice ${doc.number}`
+        : overdueBy === 0 ? `Invoice ${doc.number} is due today`
+          : `Reminder: invoice ${doc.number} is due soon`;
+    const content = isFinal ? {
+      heading: `Invoice ${doc.number} is ${overdueBy} days overdue`,
+      body: [
+        `Hi ${doc.clientName},`,
+        `Invoice ${doc.number} has not been paid and is now ${overdueBy} days past its due date.`,
+        'To avoid any interruption to your service, please settle it as soon as possible.',
+      ],
+      facts: [
+        [partPaid ? 'Still to pay' : 'Amount', owed] as [string, string],
+        ['Was due', doc.dueDate!] as [string, string],
+        ['Days overdue', String(overdueBy)] as [string, string],
+      ],
+      ...(payLink ? { button: { label: 'Pay now', url: payLink } } : {}),
+      note: 'If you have already paid, please let us know so we can update our records.',
+    } : {
       heading: subject,
       body: [
         `Hi ${doc.clientName},`,
@@ -797,21 +748,31 @@ export async function runInvoiceReminders(): Promise<string> {
           text: renderEmailText(emailBrand, content), html: renderEmail(emailBrand, content),
         });
       }
-      await sendReminderMessage(doc.accountId, doc.businessId, phone, {
-        clientName: doc.clientName, number: doc.number,
-        amount: owed,
+      // The same by SMS/WhatsApp when those channels are on: the email that gets
+      // ignored is exactly the one this exists to back up.
+      const out = await sendReminderMessage(doc.accountId, doc.businessId, phone, {
+        clientName: doc.clientName, number: doc.number, amount: owed,
         whenPhrase: overdueBy > 0
           ? `was due on ${doc.dueDate} (${overdueBy} day${overdueBy === 1 ? '' : 's'} ago)`
           : overdueBy === 0 ? 'is due today' : `is due on ${doc.dueDate}`,
         link: payLink, brand: cfg.brand,
-      }, { kind: 'reminder', docId: doc.id });
-      await db.update(documents).set({ lastReminderOn: today })
-        .where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
-      sent++;
+      }, { kind: isFinal ? 'suspension' : 'reminder', docId: doc.id });
+      await db.update(documents).set({
+        lastReminderOn: today,
+        // A date moved by hand is used once; the schedule carries on after it.
+        nextReminderOn: null,
+        ...(isFinal ? { suspendedAt: new Date() } : {}),
+      }).where(and(eq(documents.accountId, doc.accountId), eq(documents.id, doc.id)));
+      await logReminder(doc.accountId, [{
+        documentId: doc.id, kind: isFinal ? 'final' : 'reminder',
+        channels: channelsOf(!!email, out), sentTo: email ?? phone, amount: left,
+      }]);
+      if (isFinal) suspended++; else sent++;
     } catch { /* try again on the next run */ }
   }
   return `${sent} chased, ${suspended} flagged, of ${rows.length} unpaid${settledNow ? `, ${settledNow} found already paid and marked paid` : ''}`;
 }
+
 
 /** dateStr + n days, as YYYY-MM-DD. */
 

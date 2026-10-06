@@ -297,7 +297,7 @@ export async function importAccountData(
         companyType: f.companyType ?? null, country: f.country ?? null,
         taxNumber: f.taxNumber ?? null, industry: f.industry ?? null,
         website: f.website ?? null, bbbeeLevel: f.bbbeeLevel ?? null,
-        financialYearEnd: f.financialYearEnd ?? null, paymentTermsDays: f.paymentTermsDays ?? null,
+        financialYearEnd: f.financialYearEnd ?? null, paymentTermsDays: f.paymentTermsDays ?? null, remindersPaused: !!f.remindersPaused,
         creditLimit: f.creditLimit ?? null, currency: f.currency ?? null,
         clientStatus: f.clientStatus ?? 'active', clientSince: f.clientSince ?? null,
         source: f.source ?? null,
@@ -506,6 +506,7 @@ export async function importAccountData(
         depositType: d.depositType ?? 'none', depositValue: d.depositValue ?? '0.00',
         depositAmount: d.depositAmount ?? '0.00',
         total: d.total ?? '0.00', status: d.status ?? 'draft', notes: d.notes ?? null,
+        remindersPaused: !!d.remindersPaused, nextReminderOn: d.nextReminderOn ?? null, lastReminderOn: d.lastReminderOn ?? null,
         createdBy: importerUserId,
       });
     }

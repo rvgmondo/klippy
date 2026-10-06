@@ -33,7 +33,7 @@ export interface DocRef {
 export function useMoneyRefresh() {
   const qc = useQueryClient();
   return () => {
-    for (const k of ['documents', 'document', 'collections', 'home', 'client', 'clients', 'payments', 'cashflow']) {
+    for (const k of ['documents', 'document', 'collections', 'home', 'client', 'clients', 'payments', 'cashflow', 'reminders']) {
       qc.invalidateQueries({ queryKey: [k] });
     }
   };
@@ -73,7 +73,7 @@ export function DocActionSheet({ doc, action, onClose }: { doc: DocRef; action: 
     setBusy('email');
     try {
       if (action === 'chase') {
-        const r = await apiPost<{ sent: number; skipped?: unknown[] }>('/collections/chase', { ids: [doc.id] });
+        const r = await apiPost<{ sent: number; skipped?: unknown[] }>('/collections/chase', { ids: [doc.id], force: true });
         if (!r.sent) throw new Error('No email went out. Check they have an email address on their client record.');
         notify(`Chased by email, with their statement. ${doc.number} is marked as chased today.`);
       } else {
