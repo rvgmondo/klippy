@@ -19,7 +19,7 @@ import { documentWording } from '../lib/documentWording.js';
 import { logReminder, channelsOf, planReminder, reminderConfigFor } from '../lib/reminders.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
-import { nextNumberFor, IMPORTED_SEQ_BASE } from '../lib/numbering.js';
+import { nextNumberFor, IMPORTED_SEQ_BASE, withFreshNumber } from '../lib/numbering.js';
 import { addDays, clientBillingFor } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
@@ -128,6 +128,7 @@ function computeTotals(
 // Numbering (prefix + where the count is) lives in lib/numbering.ts so every path
 // that issues a document follows the same rule.
 const nextNumber = nextNumberFor;
+void nextNumber;
 
 export async function documentRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.requireAuth);
@@ -743,8 +744,11 @@ export async function documentRoutes(app: FastifyInstance) {
       return reply.code(403).send({ error: 'You do not have access to that business.' });
     }
     // Numbering is per business + type.
-    const { seq, number } = await nextNumber(accountId, businessId, d.type);
-    const docId = await db.transaction(async (tx) => {
+    // Numbered by withFreshNumber below, which retries if the number is taken.
+    let seq = 0; let number = '';
+    const docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
+      ({ seq, number } = fresh);
+      return db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
         type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
         clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
@@ -767,6 +771,7 @@ export async function documentRoutes(app: FastifyInstance) {
         })));
       }
       return newId;
+    });
     });
 
     if (d.type === 'invoice' && d.fromTime) {
@@ -1011,7 +1016,8 @@ export async function documentRoutes(app: FastifyInstance) {
     const lines = await db.select().from(documentLines)
       .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
 
-    const { seq, number } = await nextNumber(accountId, quote.businessId, 'invoice');
+    // Numbered by withFreshNumber below, which retries if the number is taken.
+    let seq = 0; let number = '';
     const today = new Date().toISOString().slice(0, 10);
     // A quote-born invoice used to have NO due date, so it never appeared on
     // Collections, never triggered a reminder, and never counted toward hosting
@@ -1022,7 +1028,9 @@ export async function documentRoutes(app: FastifyInstance) {
     const billTo = await clientBillingFor(accountId, quote.folderId, quote.businessId, quote.clientName);
     const dueDate = addDays(today, billTo.dueDays);
 
-    const newId = await db.transaction(async (tx) => {
+    const newId = await withFreshNumber(accountId, quote.businessId, 'invoice', (fresh) => {
+      ({ seq, number } = fresh);
+      return db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
         type: 'invoice' as const, seq, number, businessId: quote.businessId, folderId: quote.folderId,
         /**
@@ -1058,6 +1066,7 @@ export async function documentRoutes(app: FastifyInstance) {
         })));
       }
       return iid;
+    });
     });
     await db.update(documents).set({ status: 'accepted' })
       .where(tenantWhere(documents, accountId, eq(documents.id, id)));
@@ -1112,10 +1121,13 @@ export async function documentRoutes(app: FastifyInstance) {
       });
     }
 
-    const { seq, number } = await nextNumber(accountId, inv.businessId, 'credit_note');
+    // Numbered by withFreshNumber below, which retries if the number is taken.
+    let seq = 0; let number = '';
     const issueDate = parsed.data.issueDate ?? new Date().toISOString().slice(0, 10);
 
-    const newId = await db.transaction(async (tx) => {
+    const newId = await withFreshNumber(accountId, inv.businessId, 'credit_note', (fresh) => {
+      ({ seq, number } = fresh);
+      return db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
         type: 'credit_note' as const, seq, number, businessId: inv.businessId,
         sourceDocumentId: inv.id, folderId: inv.folderId,
@@ -1134,6 +1146,7 @@ export async function documentRoutes(app: FastifyInstance) {
         amount: money(totals.priced[i]?.amount ?? 0), position: i,
       })));
       return cid;
+    });
     });
 
     /**
@@ -1203,6 +1216,15 @@ export async function documentRoutes(app: FastifyInstance) {
       .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
     if (!doc) return reply.code(404).send({ error: 'Not found.' });
     if (!(await assertMaybeBusiness(req, reply, doc.businessId))) return;
+    // Money is paid against an invoice. A payment on a quote or credit note would
+    // turn it "paid" and count as income twice once it became an invoice.
+    if (doc.type !== 'invoice') {
+      return reply.code(400).send({ error: 'Payments are recorded on invoices. Make the invoice from this quote first.' });
+    }
+    // A cancelled invoice is not owed; only a refund (negative) can be recorded on it.
+    if (doc.status === 'void' && parsed.data.amount > 0) {
+      return reply.code(400).send({ error: 'This invoice is cancelled, so nothing is owed on it.' });
+    }
 
     await db.insert(payments).values(withTenant(accountId, {
       documentId: id, amount: money(parsed.data.amount), paidOn: parsed.data.paidOn,

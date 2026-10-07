@@ -348,6 +348,12 @@ export async function paymentRoutes(app) {
             return page('Not found', 'We could not find that invoice.');
         if (doc.status === 'paid')
             return page('Already paid', `Invoice ${doc.number} is already paid. Thank you.`);
+        // A link outlives the invoice it was sent for. A cancelled invoice is not owed,
+        // and taking a card payment for it means a refund and an apology.
+        if (doc.status === 'void')
+            return page('Invoice cancelled', `Invoice ${doc.number} was cancelled, so there is nothing to pay. If you think this is wrong, please get in touch.`);
+        if (doc.status === 'draft')
+            return page('Not ready yet', `Invoice ${doc.number} is not ready to be paid yet.`);
         const creds = await credsFor(doc.accountId, doc.businessId, doc.currency);
         // A client is reading this page, so the wording stays plain and points at the
         // thing they can actually do rather than at our gateway's limitations.

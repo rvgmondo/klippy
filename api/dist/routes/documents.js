@@ -18,7 +18,7 @@ import { documentWording } from '../lib/documentWording.js';
 import { logReminder, channelsOf, planReminder, reminderConfigFor } from '../lib/reminders.js';
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
-import { nextNumberFor, IMPORTED_SEQ_BASE } from '../lib/numbering.js';
+import { nextNumberFor, IMPORTED_SEQ_BASE, withFreshNumber } from '../lib/numbering.js';
 import { addDays, clientBillingFor } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
@@ -115,6 +115,7 @@ function computeTotals(lines, taxRate, discountType = 'none', discountValue = 0,
 // Numbering (prefix + where the count is) lives in lib/numbering.ts so every path
 // that issues a document follows the same rule.
 const nextNumber = nextNumberFor;
+void nextNumber;
 export async function documentRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
     // List (summary), optionally filtered by type.
@@ -723,30 +724,35 @@ export async function documentRoutes(app) {
             return reply.code(403).send({ error: 'You do not have access to that business.' });
         }
         // Numbering is per business + type.
-        const { seq, number } = await nextNumber(accountId, businessId, d.type);
-        const docId = await db.transaction(async (tx) => {
-            const ins = await tx.insert(documents).values(withTenant(accountId, {
-                type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
-                clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
-                clientVatNumber: d.clientVatNumber || null,
-                issueDate: d.issueDate, dueDate, currency,
-                discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
-                depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
-                taxRate: money(taxRate), subtotal: money(totals.subtotal),
-                taxAmount: money(totals.taxAmount), total: money(totals.total),
-                notes: d.notes ?? null, createdBy: userId,
-            }));
-            const newId = Number(ins[0].insertId);
-            if (d.lines.length) {
-                await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
-                    documentId: newId, description: l.description, detail: l.detail || null,
-                    quantity: money(l.quantity),
-                    unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
-                    amount: money(totals.priced[i]?.amount ?? 0), position: i,
-                    offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
-                })));
-            }
-            return newId;
+        // Numbered by withFreshNumber below, which retries if the number is taken.
+        let seq = 0;
+        let number = '';
+        const docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
+            ({ seq, number } = fresh);
+            return db.transaction(async (tx) => {
+                const ins = await tx.insert(documents).values(withTenant(accountId, {
+                    type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
+                    clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
+                    clientVatNumber: d.clientVatNumber || null,
+                    issueDate: d.issueDate, dueDate, currency,
+                    discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
+                    depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
+                    taxRate: money(taxRate), subtotal: money(totals.subtotal),
+                    taxAmount: money(totals.taxAmount), total: money(totals.total),
+                    notes: d.notes ?? null, createdBy: userId,
+                }));
+                const newId = Number(ins[0].insertId);
+                if (d.lines.length) {
+                    await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
+                        documentId: newId, description: l.description, detail: l.detail || null,
+                        quantity: money(l.quantity),
+                        unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+                        amount: money(totals.priced[i]?.amount ?? 0), position: i,
+                        offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
+                    })));
+                }
+                return newId;
+            });
         });
         if (d.type === 'invoice' && d.fromTime) {
             const { folderId: ftFolder, from: ftFrom, to: ftTo } = d.fromTime;
@@ -992,7 +998,9 @@ export async function documentRoutes(app) {
             return;
         const lines = await db.select().from(documentLines)
             .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
-        const { seq, number } = await nextNumber(accountId, quote.businessId, 'invoice');
+        // Numbered by withFreshNumber below, which retries if the number is taken.
+        let seq = 0;
+        let number = '';
         const today = new Date().toISOString().slice(0, 10);
         // A quote-born invoice used to have NO due date, so it never appeared on
         // Collections, never triggered a reminder, and never counted toward hosting
@@ -1002,42 +1010,45 @@ export async function documentRoutes(app) {
         // here too rather than only when somebody raises the invoice by hand.
         const billTo = await clientBillingFor(accountId, quote.folderId, quote.businessId, quote.clientName);
         const dueDate = addDays(today, billTo.dueDays);
-        const newId = await db.transaction(async (tx) => {
-            const ins = await tx.insert(documents).values(withTenant(accountId, {
-                type: 'invoice', seq, number, businessId: quote.businessId, folderId: quote.folderId,
-                /**
-                 * The client as they are TODAY, not as they were when the quote was written.
-                 *
-                 * A quote froze these the day it was typed. Between then and acceptance a
-                 * client registers for VAT, or moves offices, and corrects it in their own
-                 * portal; converting used to hand them an invoice with the old address and no
-                 * VAT number, which they cannot claim against, while their recurring invoice
-                 * that same month carried the right details. One client, billed two ways.
-                 *
-                 * Only when the quote is attached to a client. An ad-hoc quote typed for
-                 * somebody with no folder keeps exactly what was typed, or converting it
-                 * would blank the only record of who it was for.
-                 */
-                clientName: quote.folderId ? billTo.name : quote.clientName,
-                clientEmail: (quote.folderId ? billTo.email : null) ?? quote.clientEmail,
-                clientAddress: (quote.folderId ? billTo.address : null) ?? quote.clientAddress,
-                clientVatNumber: (quote.folderId ? billTo.vatNumber : null) ?? quote.clientVatNumber,
-                issueDate: today, dueDate, currency: quote.currency, taxRate: quote.taxRate,
-                discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
-                // The deposit was part of what the client accepted, so it comes across
-                // with the numbers rather than being retyped from memory.
-                depositType: quote.depositType, depositValue: quote.depositValue, depositAmount: quote.depositAmount,
-                subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
-                notes: quote.notes, createdBy: userId,
-            }));
-            const iid = Number(ins[0].insertId);
-            if (lines.length) {
-                await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
-                    documentId: iid, description: l.description, detail: l.detail,
-                    quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, position: i,
-                })));
-            }
-            return iid;
+        const newId = await withFreshNumber(accountId, quote.businessId, 'invoice', (fresh) => {
+            ({ seq, number } = fresh);
+            return db.transaction(async (tx) => {
+                const ins = await tx.insert(documents).values(withTenant(accountId, {
+                    type: 'invoice', seq, number, businessId: quote.businessId, folderId: quote.folderId,
+                    /**
+                     * The client as they are TODAY, not as they were when the quote was written.
+                     *
+                     * A quote froze these the day it was typed. Between then and acceptance a
+                     * client registers for VAT, or moves offices, and corrects it in their own
+                     * portal; converting used to hand them an invoice with the old address and no
+                     * VAT number, which they cannot claim against, while their recurring invoice
+                     * that same month carried the right details. One client, billed two ways.
+                     *
+                     * Only when the quote is attached to a client. An ad-hoc quote typed for
+                     * somebody with no folder keeps exactly what was typed, or converting it
+                     * would blank the only record of who it was for.
+                     */
+                    clientName: quote.folderId ? billTo.name : quote.clientName,
+                    clientEmail: (quote.folderId ? billTo.email : null) ?? quote.clientEmail,
+                    clientAddress: (quote.folderId ? billTo.address : null) ?? quote.clientAddress,
+                    clientVatNumber: (quote.folderId ? billTo.vatNumber : null) ?? quote.clientVatNumber,
+                    issueDate: today, dueDate, currency: quote.currency, taxRate: quote.taxRate,
+                    discountType: quote.discountType, discountValue: quote.discountValue, discountAmount: quote.discountAmount,
+                    // The deposit was part of what the client accepted, so it comes across
+                    // with the numbers rather than being retyped from memory.
+                    depositType: quote.depositType, depositValue: quote.depositValue, depositAmount: quote.depositAmount,
+                    subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
+                    notes: quote.notes, createdBy: userId,
+                }));
+                const iid = Number(ins[0].insertId);
+                if (lines.length) {
+                    await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
+                        documentId: iid, description: l.description, detail: l.detail,
+                        quantity: l.quantity, unitPrice: l.unitPrice, amount: l.amount, position: i,
+                    })));
+                }
+                return iid;
+            });
         });
         await db.update(documents).set({ status: 'accepted' })
             .where(tenantWhere(documents, accountId, eq(documents.id, id)));
@@ -1091,27 +1102,32 @@ export async function documentRoutes(app) {
                 error: `That credits ${formatMoney(totals.total, inv.currency)} but only ${formatMoney(bal.outstanding, inv.currency)} is outstanding.`,
             });
         }
-        const { seq, number } = await nextNumber(accountId, inv.businessId, 'credit_note');
+        // Numbered by withFreshNumber below, which retries if the number is taken.
+        let seq = 0;
+        let number = '';
         const issueDate = parsed.data.issueDate ?? new Date().toISOString().slice(0, 10);
-        const newId = await db.transaction(async (tx) => {
-            const ins = await tx.insert(documents).values(withTenant(accountId, {
-                type: 'credit_note', seq, number, businessId: inv.businessId,
-                sourceDocumentId: inv.id, folderId: inv.folderId,
-                clientName: inv.clientName, clientEmail: inv.clientEmail, clientAddress: inv.clientAddress,
-                clientVatNumber: inv.clientVatNumber,
-                issueDate, dueDate: null, currency: inv.currency, status: 'sent',
-                taxRate: inv.taxRate, subtotal: money(totals.subtotal),
-                taxAmount: money(totals.taxAmount), total: money(totals.total),
-                notes: parsed.data.reason ?? `Credit against invoice ${inv.number}.`, createdBy: userId,
-            }));
-            const cid = Number(ins[0].insertId);
-            await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
-                documentId: cid, description: l.description, detail: l.detail,
-                quantity: money(l.quantity),
-                unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
-                amount: money(totals.priced[i]?.amount ?? 0), position: i,
-            })));
-            return cid;
+        const newId = await withFreshNumber(accountId, inv.businessId, 'credit_note', (fresh) => {
+            ({ seq, number } = fresh);
+            return db.transaction(async (tx) => {
+                const ins = await tx.insert(documents).values(withTenant(accountId, {
+                    type: 'credit_note', seq, number, businessId: inv.businessId,
+                    sourceDocumentId: inv.id, folderId: inv.folderId,
+                    clientName: inv.clientName, clientEmail: inv.clientEmail, clientAddress: inv.clientAddress,
+                    clientVatNumber: inv.clientVatNumber,
+                    issueDate, dueDate: null, currency: inv.currency, status: 'sent',
+                    taxRate: inv.taxRate, subtotal: money(totals.subtotal),
+                    taxAmount: money(totals.taxAmount), total: money(totals.total),
+                    notes: parsed.data.reason ?? `Credit against invoice ${inv.number}.`, createdBy: userId,
+                }));
+                const cid = Number(ins[0].insertId);
+                await tx.insert(documentLines).values(lines.map((l, i) => withTenant(accountId, {
+                    documentId: cid, description: l.description, detail: l.detail,
+                    quantity: money(l.quantity),
+                    unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+                    amount: money(totals.priced[i]?.amount ?? 0), position: i,
+                })));
+                return cid;
+            });
         });
         /**
          * Settle the invoice if the credit clears whatever was left.
@@ -1182,6 +1198,15 @@ export async function documentRoutes(app) {
             return reply.code(404).send({ error: 'Not found.' });
         if (!(await assertMaybeBusiness(req, reply, doc.businessId)))
             return;
+        // Money is paid against an invoice. A payment on a quote or credit note would
+        // turn it "paid" and count as income twice once it became an invoice.
+        if (doc.type !== 'invoice') {
+            return reply.code(400).send({ error: 'Payments are recorded on invoices. Make the invoice from this quote first.' });
+        }
+        // A cancelled invoice is not owed; only a refund (negative) can be recorded on it.
+        if (doc.status === 'void' && parsed.data.amount > 0) {
+            return reply.code(400).send({ error: 'This invoice is cancelled, so nothing is owed on it.' });
+        }
         await db.insert(payments).values(withTenant(accountId, {
             documentId: id, amount: money(parsed.data.amount), paidOn: parsed.data.paidOn,
             method: parsed.data.method ?? null, note: parsed.data.note ?? null, createdBy: userId,

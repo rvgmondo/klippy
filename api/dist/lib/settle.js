@@ -33,10 +33,13 @@ import { onInvoicePaid } from './hosting.js';
 export async function settleIfCovered(accountId, docId, total, currentStatus) {
     const bal = await balanceOf(accountId, docId, total);
     const settled = bal.outstanding <= 0.001;
-    if (!settled || currentStatus === 'paid')
+    // A cancelled invoice stays cancelled, even if money arrives against it (an old
+    // pay link): reviving it would count it as income again and set up whatever it
+    // was for. The payment is still recorded, so it can be refunded.
+    if (!settled || currentStatus === 'paid' || currentStatus === 'void')
         return { bal, settled, flipped: false };
     const claim = await db.update(documents).set({ status: 'paid' })
-        .where(and(tenantWhere(documents, accountId, eq(documents.id, docId)), ne(documents.status, 'paid')));
+        .where(and(tenantWhere(documents, accountId, eq(documents.id, docId)), ne(documents.status, 'paid'), ne(documents.status, 'void')));
     const flipped = !!claim[0].affectedRows;
     if (flipped && bal.paid > 0.001)
         await onInvoicePaid(accountId, docId);

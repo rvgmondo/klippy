@@ -26,6 +26,24 @@ export async function cronRoutes(app: FastifyInstance) {
     return safeEqual(given, secret) ? 'ok' : 'bad';
   };
 
+  /**
+   * The one cron to set up: run whatever is due, exactly as the app does when awake.
+   *
+   * On cPanel the app is put to sleep when nobody is using it, and a sleeping app
+   * runs nothing: no reminders, no monthly invoices, until someone opens Klippy.
+   * A server cron calling this every 15 minutes keeps it moving. Safe to call as
+   * often as you like: each job runs at most once a day, after its hour, through
+   * the same atomic claim. (The per-job endpoints below run a job EVERY time they
+   * are called, so they are for a one-off run, not for a schedule.)
+   */
+  app.post('/api/v1/cron/tick', async (req, reply) => {
+    const auth = bySecret(req as never);
+    if (auth === 'unset') return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
+    if (auth === 'bad') return reply.code(401).send({ error: 'Bad cron key.' });
+    await runDueJobs();
+    return { ok: true };
+  });
+
   for (const job of JOBS) {
     app.post(`/api/v1/cron/${job.name}`, async (req, reply) => {
       const auth = bySecret(req as never);

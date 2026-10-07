@@ -1,7 +1,7 @@
 import { eq, lt, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
 import { documents, businesses } from '../db/schema.js';
-import { tenantWhere } from './tenant.js';
+import { tenantWhere, isDuplicateKey } from './tenant.js';
 
 /**
  * Document numbering.
@@ -79,4 +79,29 @@ export async function nextNumberFor(
   const seq = Math.max(highestUsed + 1, start ?? 1);
   const prefix = prefixFor(business, type);
   return { seq, number: formatNumber(prefix, seq), prefix, highestUsed };
+}
+
+/**
+ * Take the next number and write the document, and if another document took that
+ * number in the meantime, take the following one and try again.
+ *
+ * The number is max + 1, read before the insert, so two documents raised in the
+ * same instant (two tabs, the monthly billing run while somebody types an
+ * invoice, a double click) both pick it. The unique index refuses the second;
+ * without this the person saw an error and had to start again. The write must be
+ * a transaction, so a refused attempt leaves nothing behind.
+ */
+export async function withFreshNumber<T>(
+  accountId: number, businessId: number | null, type: DocType,
+  write: (n: { seq: number; number: string }) => Promise<T>,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    const n = await nextNumberFor(accountId, businessId, type);
+    try {
+      return await write(n);
+    } catch (err) {
+      if (attempt < 4 && isDuplicateKey(err)) continue;
+      throw err;
+    }
+  }
 }
