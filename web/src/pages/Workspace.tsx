@@ -11,6 +11,7 @@ import { ReportsView } from '../components/ReportsView';
 import { BillingView } from '../components/BillingView';
 import { CollectionsView } from '../components/CollectionsView';
 import { SubscriptionsView } from '../components/SubscriptionsView';
+import { TasksView } from '../components/TasksView';
 import { CashflowView } from '../components/CashflowView';
 import { BrandThemeSync } from '../components/BrandThemeSync';
 import { TodayView } from '../components/TodayView';
@@ -32,7 +33,7 @@ import { WorkspaceSwitcher } from '../components/WorkspaceSwitcher';
 import { apiGet } from '../lib/api';
 import { BusinessSwitcher, type BusinessSelection } from '../components/BusinessSwitcher';
 
-type View = 'home' | 'clients' | 'today' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'subscriptions' | 'collections' | 'cashflow' | 'settings';
+type View = 'home' | 'clients' | 'today' | 'tasks' | 'pipeline' | 'contacts' | 'board' | 'calendar' | 'files' | 'offerings' | 'expenses' | 'takings' | 'social' | 'reports' | 'billing' | 'subscriptions' | 'collections' | 'cashflow' | 'settings';
 
 
 function loadBusiness(): BusinessSelection {
@@ -42,7 +43,7 @@ function loadBusiness(): BusinessSelection {
   return Number.isFinite(n) && n > 0 ? n : 'all';
 }
 
-const ALL_VIEWS: View[] = ['home', 'clients', 'today', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings', 'social',
+const ALL_VIEWS: View[] = ['home', 'clients', 'today', 'tasks', 'pipeline', 'contacts', 'board', 'calendar', 'files', 'takings', 'social',
   'offerings', 'expenses', 'reports', 'billing', 'subscriptions', 'collections', 'cashflow', 'settings'];
 
 /**
@@ -274,6 +275,7 @@ export function Workspace() {
           {view === 'pipeline' && <PipelineView businessId={businessId} onOpenClient={openClient} />}
           {view === 'contacts' && <ContactsView businessId={businessId} />}
           {view === 'board' && <BoardView boardId={boardId} onNavigate={(v) => setView(v as View)} />}
+          {view === 'tasks' && <TasksView businessId={businessId} />}
           {view === 'calendar' && <CalendarView businessId={businessId} />}
           {view === 'files' && <FilesView />}
           {view === 'offerings' && <OfferingsView businessId={businessId} />}

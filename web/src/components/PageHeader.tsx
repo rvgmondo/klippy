@@ -53,6 +53,9 @@ export function PageHeader({ view, title, subtitle, actions, children }: {
     .map((k) => ({ key: k, label: labelOf(k) }));
   // Contacts is not a module (the people behind deals are always there), so it
   // rides along with Sales exactly as it does in the rail.
+  if (area.key === 'work') {
+    tabs.splice(tabs.findIndex((t) => t.key === 'today') + 1, 0, { key: 'tasks', label: 'Tasks' });
+  }
   if (area.key === 'money' && (enabled.size === 0 || enabled.has('billing'))) {
     tabs.splice(tabs.findIndex((t) => t.key === 'billing') + 1, 0, { key: 'subscriptions', label: 'Subscriptions' });
   }

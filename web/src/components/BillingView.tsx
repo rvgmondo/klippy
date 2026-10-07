@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { confirmDialog, promptDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Pencil, Clock, DollarSign, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Plus, X, Pencil, Clock, DollarSign, MoreHorizontal, Trash2, Search, Download, ArrowUp, ArrowDown } from 'lucide-react';
 import { apiGet, apiPost, apiPut, apiPatch, apiDelete } from '../lib/api';
 import { ClientPicker } from './ClientPicker';
 // iso() builds a date from LOCAL parts. toISOString() converts to UTC first, so
@@ -43,6 +43,47 @@ function statusOptions(type: string, current: Status): Status[] {
     ? (current === 'draft' ? ['draft', 'sent', 'accepted'] : ['sent', 'accepted'])
     : (current === 'draft' ? ['draft', 'sent'] : ['sent']);
   return allowed.includes(current) ? allowed : [current, ...allowed];
+}
+
+type StateFilter = 'all' | 'draft' | 'waiting' | 'late' | 'paid' | 'accepted' | 'declined' | 'expired' | 'void';
+type Period = 'all' | 'month' | 'lastmonth' | 'quarter' | 'year' | 'lastyear' | 'custom';
+type SortKey = 'date' | 'number' | 'client' | 'total';
+const INVOICE_STATES: StateFilter[] = ['all', 'draft', 'waiting', 'late', 'paid', 'void'];
+const QUOTE_STATES: StateFilter[] = ['all', 'draft', 'waiting', 'accepted', 'declined', 'expired', 'void'];
+const STATE_LABEL: Record<StateFilter, string> = {
+  all: 'All', draft: 'Drafts', waiting: 'Waiting', late: 'Late', paid: 'Paid',
+  accepted: 'Accepted', declined: 'Declined', expired: 'Expired', void: 'Cancelled',
+};
+const PERIOD_LABEL: Record<Period, string> = {
+  all: 'Any date', month: 'This month', lastmonth: 'Last month', quarter: 'This quarter',
+  year: 'This year', lastyear: 'Last year', custom: 'Pick dates',
+};
+/** Where a document stands, in the words the filter uses. */
+function docState(d: DocSummary, today: string): StateFilter {
+  if (d.status === 'void') return 'void';
+  if (d.status === 'draft') return 'draft';
+  if (d.type === 'quote') {
+    if (d.status === 'accepted' || d.decision === 'accepted') return 'accepted';
+    if (d.decision === 'declined') return 'declined';
+    if (d.dueDate && d.dueDate < today) return 'expired';
+    return 'waiting';
+  }
+  if (d.status === 'paid' || (d.outstanding !== undefined && d.outstanding <= 0.001)) return 'paid';
+  return d.dueDate && d.dueDate < today ? 'late' : 'waiting';
+}
+function periodRange(p: Period, from: string, to: string): { from: string; to: string } {
+  const now = new Date();
+  const y = now.getFullYear(); const m = now.getMonth();
+  const d = (yy: number, mm: number, dd: number) => iso(new Date(yy, mm, dd));
+  switch (p) {
+    case 'month': return { from: d(y, m, 1), to: d(y, m + 1, 0) };
+    case 'lastmonth': return { from: d(y, m - 1, 1), to: d(y, m, 0) };
+    case 'quarter': { const qs = Math.floor(m / 3) * 3; return { from: d(y, qs, 1), to: d(y, qs + 3, 0) }; }
+    case 'year': return { from: d(y, 0, 1), to: d(y, 11, 31) };
+    case 'lastyear': return { from: d(y - 1, 0, 1), to: d(y - 1, 11, 31) };
+    case 'custom': return { from, to };
+    default: return { from: '', to: '' };
+  }
 }
 
 export function BillingView({ businessId }: { businessId: BusinessSelection }) {
@@ -87,8 +128,77 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
     queryKey: ['documents', tab, businessId],
     queryFn: () => apiGet<{ documents: DocSummary[] }>(`/documents?type=${tab}${bizParam}`),
   });
-  const docs = data?.documents ?? [];
+  const allDocs = data?.documents ?? [];
   const invalidate = () => qc.invalidateQueries({ queryKey: ['documents'] });
+
+  // ---- finding things in the list ----
+  // The list used to be every document, newest first, and nothing else. These
+  // answer the everyday questions: what is late, what did Acme get this year,
+  // which quotes are waiting, what did we bill last month.
+  const [q, setQ] = useState('');
+  const [state, setState] = useState<StateFilter>('all');
+  const [clientFilter, setClientFilter] = useState('');
+  const [period, setPeriod] = useState<Period>('all');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [hideOld, setHideOld] = useState(false);
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'date', dir: -1 });
+  useEffect(() => { setState('all'); }, [tab]);
+  const today0 = new Date().toISOString().slice(0, 10);
+  const range = periodRange(period, from, to);
+  const stateOf = (d: DocSummary) => docState(d, today0);
+  const needle = q.trim().toLowerCase();
+  const docs = allDocs
+    .filter((d) => !needle || `${d.number} ${d.clientName}`.toLowerCase().includes(needle))
+    .filter((d) => state === 'all' || stateOf(d) === state)
+    .filter((d) => !clientFilter || d.clientName === clientFilter)
+    .filter((d) => !hideOld || !d.imported)
+    .filter((d) => (!range.from || d.issueDate >= range.from) && (!range.to || d.issueDate <= range.to))
+    .sort((a, b) => {
+      const v = sort.key === 'number' ? a.number.localeCompare(b.number, undefined, { numeric: true })
+        : sort.key === 'client' ? a.clientName.localeCompare(b.clientName)
+          : sort.key === 'total' ? Number(a.total) - Number(b.total)
+            : a.issueDate.localeCompare(b.issueDate) || a.id - b.id;
+      return v * sort.dir;
+    });
+  const clientNames = [...new Set(allDocs.map((d) => d.clientName))].sort((a, b) => a.localeCompare(b));
+  const stateCounts = new Map<StateFilter, number>();
+  for (const d of allDocs) stateCounts.set(stateOf(d), (stateCounts.get(stateOf(d)) ?? 0) + 1);
+  const sumBy = (pick: (d: DocSummary) => number) => {
+    const m = new Map<string, number>();
+    for (const d of docs) if (d.status !== 'void') m.set(d.currency, (m.get(d.currency) ?? 0) + pick(d));
+    return [...m.entries()].filter(([, v]) => Math.abs(v) > 0.001).map(([c, v]) => money(v, c)).join(' and ');
+  };
+  const filtered = !!(needle || state !== 'all' || clientFilter || hideOld || period !== 'all');
+  const clearFilters = () => { setQ(''); setState('all'); setClientFilter(''); setHideOld(false); setPeriod('all'); setFrom(''); setTo(''); };
+  const sortBy = (key: SortKey) => setSort((s0) => (s0.key === key ? { key, dir: (s0.dir * -1) as 1 | -1 } : { key, dir: key === 'date' || key === 'total' ? -1 : 1 }));
+  const sortMark = (key: SortKey) => (sort.key !== key ? null : sort.dir === 1 ? <ArrowUp size={11} className="inline" /> : <ArrowDown size={11} className="inline" />);
+
+  /** The filtered list as a spreadsheet, for the accountant or a quick check. */
+  const exportCsv = () => {
+    const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const head = ['Number', 'Client', 'Date', tab === 'quote' ? 'Valid until' : 'Due', 'Status', 'Currency', 'Total', ...(tab === 'invoice' ? ['Still owed'] : [])];
+    const rows = docs.map((d) => [d.number, d.clientName, d.issueDate, d.dueDate ?? '', STATE_LABEL[stateOf(d)], d.currency, Number(d.total).toFixed(2),
+      ...(tab === 'invoice' ? [(d.outstanding ?? 0).toFixed(2)] : [])]);
+    const csv = [head, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `${tab === 'quote' ? 'quotes' : 'invoices'}-${today0}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const duplicate = useMutation({
+    mutationFn: (v: { id: number; as?: DocType }) => apiPost<{ document: { id: number; number: string; type: DocType } }>(`/documents/${v.id}/duplicate`, v.as ? { as: v.as } : {}),
+    onSuccess: (r) => {
+      invalidate();
+      setTab(r.document.type);
+      setViewing(null);
+      setEditing(r.document.id);
+      notify(`${r.document.number} made as a draft copy. Change what you need, then send it.`);
+    },
+    onError: (e: Error) => notify(e.message || 'Could not copy that document.', 'error'),
+  });
 
   // Only offer "Pay online" when PayFast is actually switched on for what is on screen.
   // This used to read only the workspace gateway, so a business with a PayFast account of
@@ -227,22 +337,79 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
           </p>
         )}
 
+        {!isLoading && allDocs.length > 0 && (
+          <div className="mb-3 space-y-2">
+            <div className="flex flex-wrap gap-1">
+              {(tab === 'invoice' ? INVOICE_STATES : QUOTE_STATES).map((k) => (
+                <button key={k} onClick={() => setState(k)} aria-pressed={state === k}
+                  className={`rounded-lg px-3 py-1.5 text-sm ${state === k ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}>
+                  {STATE_LABEL[k]}
+                  <span className={`num ml-1.5 text-xs ${k === 'late' && stateCounts.get(k) ? 'text-red-300' : 'text-slate-500'}`}>
+                    {k === 'all' ? allDocs.length : stateCounts.get(k) ?? 0}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative w-full sm:w-56">
+                <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Number or client" aria-label="Find a document" className={`${fieldClass} pl-8`} />
+              </label>
+              <select value={clientFilter} onChange={(e) => setClientFilter(e.target.value)} aria-label="Client" className={`${fieldClass} w-full sm:w-48`}>
+                <option value="">Every client</option>
+                {clientNames.map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              <select value={period} onChange={(e) => setPeriod(e.target.value as Period)} aria-label="Dates" className={`${fieldClass} w-full sm:w-40`}>
+                {(Object.keys(PERIOD_LABEL) as Period[]).map((k) => <option key={k} value={k}>{PERIOD_LABEL[k]}</option>)}
+              </select>
+              {period === 'custom' && (
+                <>
+                  <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="From" className={`${fieldClass} w-full sm:w-40`} />
+                  <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-label="To" className={`${fieldClass} w-full sm:w-40`} />
+                </>
+              )}
+              {allDocs.some((d) => d.imported) && (
+                <label className="flex items-center gap-1.5 text-sm text-slate-400">
+                  <input type="checkbox" checked={hideOld} onChange={(e) => setHideOld(e.target.checked)} /> Hide old system
+                </label>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                {filtered && <button onClick={clearFilters} className="text-xs text-[var(--accent)]">Clear filters</button>}
+                <button onClick={exportCsv} disabled={docs.length === 0} className={`${btnSecondary} inline-flex items-center gap-1.5 px-3 py-1.5`}>
+                  <Download size={14} /> Export
+                </button>
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">
+              {docs.length} {tab === 'quote' ? (docs.length === 1 ? 'quote' : 'quotes') : (docs.length === 1 ? 'invoice' : 'invoices')}
+              {docs.length > 0 && <>, {sumBy((d) => Number(d.total)) || money(0, docs[0]!.currency)} in total</>}
+              {tab === 'invoice' && sumBy((d) => d.outstanding ?? 0) && <span className="text-amber-300">, {sumBy((d) => d.outstanding ?? 0)} still owed</span>}
+              {filtered ? ', filtered.' : '.'}
+            </p>
+          </div>
+        )}
+
         {isLoading && <Skeleton className="h-56" />}
         {!isLoading && (<>
         <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
           <table className="w-full text-sm">
             <thead className="bg-slate-900/50 text-left text-xs text-slate-500">
               <tr>
-                <th className="px-3 py-2 font-medium">Number</th>
-                <th className="px-3 py-2 font-medium">Client</th>
-                <th className="hidden px-3 py-2 font-medium sm:table-cell">Date</th>
+                <th className="px-3 py-2 font-medium"><button onClick={() => sortBy('number')} className="hover:text-slate-200">Number {sortMark('number')}</button></th>
+                <th className="px-3 py-2 font-medium"><button onClick={() => sortBy('client')} className="hover:text-slate-200">Client {sortMark('client')}</button></th>
+                <th className="hidden px-3 py-2 font-medium sm:table-cell"><button onClick={() => sortBy('date')} className="hover:text-slate-200">Date {sortMark('date')}</button></th>
                 <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 text-right font-medium">Total</th>
+                <th className="px-3 py-2 text-right font-medium"><button onClick={() => sortBy('total')} className="hover:text-slate-200">Total {sortMark('total')}</button></th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {docs.length === 0 && (
+              {docs.length === 0 && allDocs.length > 0 && (
+                <tr><td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
+                  Nothing matches these filters. <button onClick={clearFilters} className="text-[var(--accent)]">Clear them</button>
+                </td></tr>
+              )}
+              {docs.length === 0 && allDocs.length === 0 && (
                 <tr><td colSpan={6} className="px-3 py-4">
                   <EmptyState
                     title={tab === 'invoice' ? 'No invoices yet' : 'No quotes yet'}
@@ -263,7 +430,10 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                       <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">Expired</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-slate-300">{d.clientName}</td>
+                  <td className="px-3 py-2 text-slate-300">
+                    {d.clientName}
+                    {d.imported && <span className="ml-2 rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-400" title="Brought over from your old system">Old system</span>}
+                  </td>
                   <td className="hidden px-3 py-2 text-slate-400 sm:table-cell">{d.issueDate}</td>
                   <td className="px-3 py-2">
                     {d.status === 'paid' || d.status === 'void' ? (
@@ -278,7 +448,12 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                       </select>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right num text-slate-100">{money(d.total, d.currency)}</td>
+                  <td className="px-3 py-2 text-right num text-slate-100">
+                    {money(d.total, d.currency)}
+                    {d.type === 'invoice' && (d.outstanding ?? 0) > 0.001 && (d.outstanding ?? 0) < Number(d.total) - 0.001 && (
+                      <span className="block text-[11px] text-amber-300">{money(d.outstanding!, d.currency)} left</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     {/* Seven bare 15px icons, 4px apart, two destructive, was an
                         accessibility failure and a fat-finger trap on a phone. The
@@ -295,6 +470,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                         trigger={<span className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
                         items={[
                           { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
+                          { label: 'Duplicate', onClick: () => duplicate.mutate({ id: d.id }) },
+                          { label: d.type === 'quote' ? 'Duplicate as an invoice' : 'Duplicate as a quote', onClick: () => duplicate.mutate({ id: d.id, as: d.type === 'quote' ? 'invoice' : 'quote' }) },
                           { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
                           ...(d.status !== 'draft' && d.status !== 'void' ? [{ label: 'Send via WhatsApp', onClick: () => whatsapp(d.id) }] : []),
                           ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
@@ -318,7 +495,10 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
             icon strips was the single worst screen to run a business from; a card
             per document gives the number, the money and finger-sized actions. */}
         <div className="overflow-hidden rounded-xl border border-slate-800 sm:hidden">
-          {docs.length === 0 && (
+          {docs.length === 0 && allDocs.length > 0 && (
+            <p className="px-3 py-6 text-center text-sm text-slate-500">Nothing matches these filters. <button onClick={clearFilters} className="text-[var(--accent)]">Clear them</button></p>
+          )}
+          {docs.length === 0 && allDocs.length === 0 && (
             <div className="px-3 py-6">
               <EmptyState
                 title={tab === 'invoice' ? 'No invoices yet' : 'No quotes yet'}
@@ -358,6 +538,8 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                   trigger={<span className="tap text-slate-400 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={17} /></span>}
                   items={[
                     { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
+                    { label: 'Duplicate', onClick: () => duplicate.mutate({ id: d.id }) },
+                    { label: d.type === 'quote' ? 'Duplicate as an invoice' : 'Duplicate as a quote', onClick: () => duplicate.mutate({ id: d.id, as: d.type === 'quote' ? 'invoice' : 'quote' }) },
                     { label: 'Email to client', onClick: async () => { const m = await promptDialog('Optional message to include (blank for default):', ''); if (m !== null) email.mutate({ id: d.id, message: m || undefined }); } },
                     ...(d.status !== 'draft' && d.status !== 'void' ? [{ label: 'Send via WhatsApp', onClick: () => whatsapp(d.id) }] : []),
                     ...(d.type === 'invoice' && d.status !== 'paid' && payfastOn
@@ -916,7 +1098,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
                   <button onClick={() => setShowTime(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500">
-                  Adds one line per board with logged time, using the client's hourly rate. Set a rate on the client (sidebar ⋯ menu) first.
+                  Adds one line per board with logged time, using the client's hourly rate. Set an hourly rate on the client page first, under Edit.
                 </p>
               </div>
             )}

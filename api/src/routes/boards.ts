@@ -6,7 +6,7 @@ import { boards, boardColumns, tasks, folders, taskLabels, labels } from '../db/
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
-import { assertBoardAccess, assertMaybeBusiness } from '../lib/access.js';
+import { assertBoardAccess, assertMaybeBusiness, businessScope } from '../lib/access.js';
 import { BOARD_TEMPLATES, boardTemplate, columnsFor } from '../lib/boardTemplates.js';
 
 const createSchema = z.object({
@@ -31,6 +31,22 @@ export async function boardRoutes(app: FastifyInstance) {
   app.addHook('preHandler', app.requireAuth);
 
   // Boards in a folder.
+  /** Every live board, with its client and first open column, for "add a task to...". */
+  app.get('/api/v1/boards/all', async (req) => {
+    const { accountId } = authOf(req);
+    const scope = await businessScope(req, folders.businessId);
+    const rows = await db.select({
+      id: boards.id, name: boards.name, folderId: folders.id, folderName: folders.name, businessId: folders.businessId,
+    }).from(boards).innerJoin(folders, eq(folders.id, boards.folderId))
+      .where(tenantWhere(boards, accountId, eq(boards.isArchived, false), isNull(boards.deletedAt), isNull(folders.deletedAt), scope))
+      .orderBy(asc(folders.name), asc(boards.position));
+    const cols = rows.length ? await db.select({ id: boardColumns.id, boardId: boardColumns.boardId, isDone: boardColumns.isDoneColumn })
+      .from(boardColumns).where(tenantWhere(boardColumns, accountId)).orderBy(asc(boardColumns.position), asc(boardColumns.id)) : [];
+    const first = new Map<number, number>();
+    for (const c of cols) if (!c.isDone && !first.has(c.boardId)) first.set(c.boardId, c.id);
+    return { boards: rows.filter((b) => first.has(b.id)).map((b) => ({ ...b, firstColumnId: first.get(b.id)! })) };
+  });
+
   app.get('/api/v1/boards', async (req, reply) => {
     const { accountId } = authOf(req);
     const q = z.object({ folderId: z.coerce.number().int().positive() }).safeParse(req.query);

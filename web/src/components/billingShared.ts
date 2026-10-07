@@ -14,6 +14,9 @@ export type Status = 'draft' | 'sent' | 'accepted' | 'paid' | 'void';
 export interface DocSummary {
   id: number; type: DocType; number: string; clientName: string;
   issueDate: string; dueDate: string | null; status: Status; currency: string; total: string;
+  /** From the list: what is still owed (invoices), and where it came from. */
+  outstanding?: number; imported?: boolean; folderId?: number | null; businessId?: number | null;
+  decision?: 'accepted' | 'declined' | null;
 }
 export interface Line {
   description: string; quantity: number; unitPrice: number;

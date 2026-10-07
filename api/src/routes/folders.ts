@@ -110,7 +110,14 @@ export async function folderRoutes(app: FastifyInstance) {
       .where(tenantWhere(folders, accountId, isNull(folders.deletedAt)))
       .orderBy(asc(folders.parentId), asc(folders.position));
     const allowed = await accessibleBusinessIds(req);
-    return { folders: allowed ? rows.filter((f) => f.businessId == null || allowed.has(f.businessId)) : rows };
+    // How many live boards each folder has, so the Work tree can show only the
+    // clients there is actually work for. One grouped query, not one per folder.
+    const counts = await db.select({ folderId: boards.folderId, n: sql<number>`COUNT(*)` }).from(boards)
+      .where(tenantWhere(boards, accountId, eq(boards.isArchived, false), isNull(boards.deletedAt)))
+      .groupBy(boards.folderId);
+    const boardCount = new Map(counts.map((c) => [c.folderId, Number(c.n)]));
+    const visible = allowed ? rows.filter((f) => f.businessId == null || allowed.has(f.businessId)) : rows;
+    return { folders: visible.map((f) => ({ ...f, boardCount: boardCount.get(f.id) ?? 0 })) };
   });
 
   app.post('/api/v1/folders', async (req, reply) => {

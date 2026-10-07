@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { X, Pencil, Printer, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { X, Pencil, Printer, AlertTriangle, CheckCircle2, Clock, Copy } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { money } from '../lib/money';
 import { navigateTo } from '../lib/urlAction';
@@ -226,6 +226,21 @@ export function DocumentView({ id, onClose, onEdit, onOpen }: {
           {d.status !== 'void' && (
             <button onClick={() => onEdit(d.id, d.type)} className={`${btnSecondary} inline-flex min-h-10 items-center gap-1.5`}>
               <Pencil size={14} /> Edit
+            </button>
+          )}
+          {docType !== 'credit_note' && (
+            <button disabled={busy} onClick={async () => {
+              setBusy(true);
+              try {
+                const r = await apiPost<{ document: { id: number; number: string; type: string } }>(`/documents/${d.id}/duplicate`, {});
+                refresh();
+                notify(`${r.document.number} made as a draft copy. Change what you need, then send it.`);
+                onEdit(r.document.id, r.document.type);
+              } catch (e) {
+                notify(e instanceof Error ? e.message : 'Could not copy that document.', 'error');
+              } finally { setBusy(false); }
+            }} className={`${btnSecondary} inline-flex min-h-10 items-center gap-1.5`}>
+              <Copy size={14} /> Duplicate
             </button>
           )}
         </div>

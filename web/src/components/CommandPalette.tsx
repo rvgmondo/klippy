@@ -5,7 +5,7 @@ import {
   Home, Target, Wallet, Settings, Users, Receipt, Package,
   CalendarDays, CalendarCheck, BarChart3, HardDrive, AlertTriangle, TrendingUp,
   Plus, Building2, SquareKanban, FileText, Search, type LucideIcon,
-  Repeat,
+  Repeat, ListChecks,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import { setUrlParams, navigateTo } from '../lib/urlAction';
@@ -78,7 +78,7 @@ export function CommandPalette({ open, onClose, onNavigate, onSelectBoard, onBus
     const matches = (label: string) => !term || label.toLowerCase().includes(term);
 
     const goto: [string, string, LucideIcon][] = [
-      ['home', 'Home', Home], ['clients', 'Clients', Users], ['today', 'Today', CalendarCheck],
+      ['home', 'Home', Home], ['clients', 'Clients', Users], ['today', 'Today', CalendarCheck], ['tasks', 'Tasks', ListChecks],
       ['calendar', 'Calendar', CalendarDays], ['reports', 'Reports', BarChart3], ['files', 'Files', HardDrive],
       ['pipeline', 'Deals', Target], ['offerings', 'Price list', Package], ['contacts', 'People', Users],
       ['billing', 'Quotes and invoices', Receipt], ['subscriptions', 'Subscriptions', Repeat], ['collections', 'Owed to you', AlertTriangle],

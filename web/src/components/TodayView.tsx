@@ -7,7 +7,7 @@ import {
 } from '@dnd-kit/core';
 import { ChevronLeft, ChevronRight, X, AlertTriangle, CalendarPlus, Play, Square, Plus, Maximize2, Users, Check } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
-import type { Priority, Folder as TFolder } from '../lib/types';
+import type { Priority } from '../lib/types';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { CardDetail } from './CardDetail';
 import { ErrorNote } from './ErrorNote';
@@ -502,18 +502,12 @@ function QuickAdd({ businessId }: { businessId: BusinessSelection }) {
   const [boardId, setBoardId] = useState<number | null>(null);
   const [showPicker, setShowPicker] = useState(false);
 
-  const folders = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
-  const scoped = (folders.data?.folders ?? []).filter((f) => businessId === 'all' || f.businessId === businessId);
+  // Every board in one request. This used to ask once per client, which after an
+  // import was fifty requests before the box could say where a task would go.
   const boardsQ = useQuery({
-    queryKey: ['quickadd-boards', scoped.map((f) => f.id).join(',')],
-    enabled: scoped.length > 0,
-    queryFn: async () => {
-      const lists = await Promise.all(scoped.map(async (f) => {
-        const res = await apiGet<{ boards: { id: number; name: string }[] }>(`/boards?folderId=${f.id}`);
-        return res.boards.map((b) => ({ id: b.id, name: b.name, folderName: f.name }));
-      }));
-      return lists.flat() as BoardOption[];
-    },
+    queryKey: ['boards-all'],
+    queryFn: () => apiGet<{ boards: (BoardOption & { businessId: number | null; firstColumnId: number })[] }>('/boards/all'),
+    select: (d) => d.boards.filter((b) => businessId === 'all' || b.businessId === businessId),
   });
   const boards = boardsQ.data ?? [];
 
@@ -523,9 +517,8 @@ function QuickAdd({ businessId }: { businessId: BusinessSelection }) {
   const add = useMutation({
     mutationFn: async (t: string) => {
       if (!target) throw new Error('No board to add to yet.');
-      // A card needs a column, so use the board's first one.
-      const full = await apiGet<{ columns: { id: number }[] }>(`/boards/${target}/full`);
-      const columnId = full.columns[0]?.id;
+      // A card needs a column: the board's first one that is not "done".
+      const columnId = boards.find((b) => b.id === target)?.firstColumnId;
       if (!columnId) throw new Error('That board has no columns.');
       return apiPost('/tasks', { boardId: target, columnId, title: t });
     },
@@ -534,6 +527,7 @@ function QuickAdd({ businessId }: { businessId: BusinessSelection }) {
       if (target) localStorage.setItem('klippy.quickAddBoard', String(target));
       qc.invalidateQueries({ queryKey: ['day'] });
       qc.invalidateQueries({ queryKey: ['board'] });
+      qc.invalidateQueries({ queryKey: ['tasks-all'] });
     },
   });
 

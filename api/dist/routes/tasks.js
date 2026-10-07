@@ -95,6 +95,48 @@ export async function taskRoutes(app) {
      * Optional ?businessId scopes it like the rest of the app; ?mine=1 limits to
      * cards assigned to you (or unassigned).
      */
+    /**
+     * Every task, across every board and client, for the Tasks list.
+     *
+     * There was no way to see all open work in one place: Today shows what is
+     * planned and a slice of the rest, a board shows one board. Filtering (client,
+     * person, due, priority) happens in the browser, so this returns the lot, capped.
+     * Done tasks only from the last 30 days, so the list stays about what is current.
+     */
+    app.get('/api/v1/tasks/all', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const q = z.object({
+            businessId: z.coerce.number().int().positive().optional(),
+            done: z.coerce.boolean().optional(),
+        }).safeParse(req.query);
+        if (!q.success)
+            return reply.code(400).send({ error: 'Bad filter.' });
+        const scopes = [
+            eq(tasks.isArchived, false), isNull(boards.deletedAt), eq(boards.isArchived, false), isNull(folders.deletedAt),
+            q.data.done
+                ? and(eq(tasks.isCompleted, true), gte(tasks.completedAt, new Date(Date.now() - 30 * 86400000)))
+                : eq(tasks.isCompleted, false),
+        ];
+        if (q.data.businessId)
+            scopes.push(eq(folders.businessId, q.data.businessId));
+        const scope = await businessScope(req, folders.businessId);
+        if (scope)
+            scopes.push(scope);
+        const rows = await db.select({
+            id: tasks.id, title: tasks.title, priority: tasks.priority, dueDate: tasks.dueDate,
+            boardId: tasks.boardId, columnId: tasks.columnId, isCompleted: tasks.isCompleted, completedAt: tasks.completedAt,
+            estimateMinutes: tasks.estimateMinutes, assignedTo: tasks.assignedTo, createdAt: tasks.createdAt,
+            boardName: boards.name, folderId: folders.id, folderName: folders.name, businessId: folders.businessId,
+            pillar: folders.pillar, columnName: boardColumns.name,
+        }).from(tasks)
+            .innerJoin(boards, eq(boards.id, tasks.boardId))
+            .innerJoin(folders, eq(folders.id, boards.folderId))
+            .leftJoin(boardColumns, eq(boardColumns.id, tasks.columnId))
+            .where(tenantWhere(tasks, accountId, ...scopes))
+            .orderBy(sql `${tasks.dueDate} IS NULL`, asc(tasks.dueDate), desc(tasks.createdAt))
+            .limit(2000);
+        return { tasks: rows };
+    });
     app.get('/api/v1/tasks/day', async (req, reply) => {
         const { accountId, userId } = authOf(req);
         const q = z.object({

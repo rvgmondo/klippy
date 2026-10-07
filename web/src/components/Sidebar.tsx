@@ -6,7 +6,7 @@ import {
   Home, Briefcase, Target, Wallet, Settings, Users,
   CalendarDays, CalendarCheck, HardDrive, BarChart3, Receipt, Package, AlertTriangle, TrendingUp,
   type LucideIcon, CreditCard, Share2,
-  Repeat,
+  Repeat, ListChecks,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { FolderList } from './FolderTree';
@@ -49,7 +49,7 @@ export const AREAS: {
   { key: 'clients', label: 'Clients', icon: Users, blurb: 'Everyone you work for', defaultView: 'clients', views: ['clients', 'contacts'], modules: [] },
   {
     key: 'work', label: 'Work', icon: Briefcase, blurb: 'Do the work',
-    defaultView: 'today', views: ['today', 'board', 'calendar', 'social', 'files'],
+    defaultView: 'today', views: ['today', 'tasks', 'board', 'calendar', 'social', 'files'],
     modules: ['today', 'calendar', 'social', 'files'],
   },
   {
@@ -110,6 +110,42 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   useUrlAction('new-client', () => setQuickNewClient(true));
   const { data } = useQuery({ queryKey: ['folders'], queryFn: () => apiGet<{ folders: TFolder[] }>('/folders') });
   const folders = data?.folders ?? [];
+  /**
+   * The Work tree, trimmed. After importing a client list it held every client,
+   * most with no boards, and had no search. "With work" shows only folders that
+   * have a board somewhere inside them (remembered); the search keeps a match and
+   * the folders above it, so it can be found where it lives.
+   */
+  const [treeQuery, setTreeQuery] = useState('');
+  const [onlyWork, setOnlyWorkState] = useState(() => {
+    try { return localStorage.getItem('klippy.treeOnlyWork') !== '0'; } catch { return true; }
+  });
+  const setOnlyWork = (v: boolean) => {
+    setOnlyWorkState(v);
+    try { localStorage.setItem('klippy.treeOnlyWork', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  const treeFolders = (() => {
+    const q = treeQuery.trim().toLowerCase();
+    if (!q && !onlyWork) return folders;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    const keep = new Set<number>();
+    for (const f of folders) {
+      const hit = (!q || f.name.toLowerCase().includes(q)) && (!onlyWork || (f.boardCount ?? 0) > 0);
+      if (!hit) continue;
+      // Keep the match, everything above it, and (for a name match) everything under it.
+      for (let p: typeof f | undefined = f; p; p = p.parentId != null ? byId.get(p.parentId) : undefined) keep.add(p.id);
+    }
+    if (q) {
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const f of folders) {
+          if (!keep.has(f.id) && f.parentId != null && keep.has(f.parentId) && f.name.toLowerCase().includes(q)) { keep.add(f.id); grew = true; }
+        }
+      }
+    }
+    return folders.filter((f) => keep.has(f.id));
+  })();
   const bizData = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: Business[] }>('/businesses') });
   const businesses = bizData.data?.businesses ?? [];
 
@@ -156,6 +192,11 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
   if (area.key === 'money' && (showAll || enabled.has('billing'))) {
     const at = items.findIndex((i) => i.key === 'billing');
     items.splice(at + 1, 0, { key: 'subscriptions', label: 'Subscriptions', icon: Repeat, hint: 'Everyone who pays you on repeat, and when each bills next.' });
+  }
+  // Tasks is not a module either: every business has cards, so it sits next to Today.
+  if (area.key === 'work') {
+    const at = items.findIndex((i) => i.key === 'today');
+    items.splice(at + 1, 0, { key: 'tasks', label: 'Tasks', icon: ListChecks, hint: 'Every open task, for every client, in one list.' });
   }
   if (area.key === 'clients') {
     items.push({ key: 'clients', label: account?.folderLabelPlural || 'Clients', icon: Users, hint: 'Everyone you work for.' });
@@ -247,15 +288,34 @@ export function Sidebar({ selectedBoardId, businessId, view, onNavigate, onBusin
           <>
             {/* The boards tree lives only inside Work, so the module list and the
                 folder tree stop fighting over one column. */}
-            <div className="shrink-0 px-3.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
-              {account?.folderLabelPlural || 'Clients'} and boards
+            <div className="shrink-0 space-y-1.5 px-3 pb-1 pt-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+                  {account?.folderLabelPlural || 'Clients'} and boards
+                </span>
+                <button onClick={() => setOnlyWork(!onlyWork)} aria-pressed={onlyWork}
+                  title={onlyWork ? 'Showing only those with boards. Show everyone.' : 'Showing everyone. Show only those with boards.'}
+                  className="rounded px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-800 hover:text-slate-300">
+                  {onlyWork ? 'With work' : 'Everyone'}
+                </button>
+              </div>
+              <input value={treeQuery} onChange={(e) => setTreeQuery(e.target.value)}
+                placeholder={`Find a ${(account?.folderLabelSingular || 'client').toLowerCase()}`}
+                aria-label="Find in the tree"
+                className="w-full rounded-md border border-slate-800 bg-slate-900/60 px-2 py-1 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-[var(--accent)]" />
             </div>
             <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
               {shown.length === 0 && (
                 <p className="px-2 py-6 text-center text-[11px] text-slate-500">No businesses yet.</p>
               )}
+              {treeFolders.length === 0 && folders.length > 0 && (
+                <p className="px-2 py-4 text-center text-[11px] text-slate-500">
+                  {treeQuery ? 'Nothing called that.' : 'No boards yet.'}{' '}
+                  {onlyWork && <button onClick={() => setOnlyWork(false)} className="text-[var(--accent)]">Show everyone</button>}
+                </p>
+              )}
               {shown.map((biz, i) => (
-                <BusinessBlock key={biz.id} business={biz} all={folders} showHeader={showHeaders} defaultOpen={i === 0}
+                <BusinessBlock key={biz.id} business={biz} all={treeFolders} showHeader={showHeaders} defaultOpen={i === 0}
                   folderLabelSingular={account?.folderLabelSingular} folderLabelPlural={account?.folderLabelPlural}
                   selectedBoardId={selectedBoardId} onSelectBoard={onSelectBoard} />
               ))}

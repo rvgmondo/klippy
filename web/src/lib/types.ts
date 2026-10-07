@@ -129,6 +129,8 @@ export interface Business {
   position: number;
 }
 export interface Folder {
+  /** Live boards in this folder, from GET /folders. */
+  boardCount?: number;
   id: number;
   accountId: number;
   businessId: number | null;

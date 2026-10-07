@@ -135,12 +135,88 @@ export async function documentRoutes(app) {
             id: documents.id, type: documents.type, number: documents.number,
             clientName: documents.clientName, issueDate: documents.issueDate, dueDate: documents.dueDate,
             status: documents.status, currency: documents.currency, total: documents.total,
+            folderId: documents.folderId, businessId: documents.businessId, decision: documents.decision, seq: documents.seq,
         }).from(documents)
             .where(tenantWhere(documents, accountId, ...conds))
             // By date on the document, so history brought over from another system sits in
             // its own place rather than above everything because it was added today.
             .orderBy(desc(documents.issueDate), desc(documents.createdAt));
-        return { documents: rows };
+        // What is still owed on each invoice, by the rule every screen uses, so the list
+        // can total "owed" for whatever is filtered and show part-paid invoices as such.
+        const bal = await balancesFor(accountId, rows.filter((r) => r.type === 'invoice'));
+        return {
+            documents: rows.map(({ seq, ...r }) => ({
+                ...r,
+                outstanding: r.type === 'invoice' && r.status !== 'void' && r.status !== 'draft'
+                    ? Math.max(0, bal.get(r.id)?.outstanding ?? Number(r.total)) : 0,
+                // From the old system: kept as history, never chased, numbered apart.
+                imported: seq >= IMPORTED_SEQ_BASE,
+            })),
+        };
+    });
+    /**
+     * Copy a quote or invoice into a new draft: same client, lines, tax, discount,
+     * deposit and note; today's date, fresh dates and a new number. Optionally as the
+     * other type ("send this invoice as a quote next month", "quote again for the
+     * same job"). Nothing about what happened to the original comes along: no status,
+     * payments, decision or subscription.
+     */
+    app.post('/api/v1/documents/:id/duplicate', async (req, reply) => {
+        const { accountId, userId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const parsed = z.object({ as: z.enum(['invoice', 'quote']).optional() }).safeParse(req.body ?? {});
+        if (!parsed.success)
+            return reply.code(400).send({ error: 'Bad request.' });
+        const [src] = await db.select().from(documents).where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
+        if (!src || (src.businessId && !(await canSeeBusiness(req, src.businessId))))
+            return reply.code(404).send({ error: 'Not found.' });
+        if (src.type === 'credit_note')
+            return reply.code(400).send({ error: 'Credit notes are made from the invoice they correct.' });
+        if (src.businessId && !(await assertMaybeBusiness(req, reply, src.businessId)))
+            return;
+        const type = parsed.data.as ?? src.type;
+        const lines = await db.select().from(documentLines)
+            .where(tenantWhere(documentLines, accountId, eq(documentLines.documentId, id))).orderBy(documentLines.position);
+        const today = new Date().toISOString().slice(0, 10);
+        const [biz] = src.businessId ? await db.select().from(businesses)
+            .where(tenantWhere(businesses, accountId, eq(businesses.id, src.businessId))).limit(1) : [];
+        let dueDate = null;
+        if (type === 'invoice') {
+            const terms = src.folderId ? (await clientBillingFor(accountId, src.folderId, src.businessId, src.clientName)).dueDays : (biz?.defaultDueDays ?? 14);
+            dueDate = addDays(today, terms);
+        }
+        else if (biz?.quoteValidDays) {
+            dueDate = addDays(today, biz.quoteValidDays);
+        }
+        let seq = 0;
+        let number = '';
+        const newId = await withFreshNumber(accountId, src.businessId, type, (fresh) => {
+            ({ seq, number } = fresh);
+            return db.transaction(async (tx) => {
+                const ins = await tx.insert(documents).values(withTenant(accountId, {
+                    type, seq, number, businessId: src.businessId, folderId: src.folderId,
+                    clientName: src.clientName, clientEmail: src.clientEmail, clientAddress: src.clientAddress,
+                    clientVatNumber: src.clientVatNumber, issueDate: today, dueDate, status: 'draft', currency: src.currency,
+                    discountType: src.discountType, discountValue: src.discountValue, discountAmount: src.discountAmount,
+                    depositType: src.depositType, depositValue: src.depositValue, depositAmount: src.depositAmount,
+                    taxRate: src.taxRate, subtotal: src.subtotal, taxAmount: src.taxAmount, total: src.total,
+                    notes: src.notes, createdBy: userId,
+                }));
+                const nid = Number(ins[0].insertId);
+                if (lines.length) {
+                    await tx.insert(documentLines).values(lines.map((l) => withTenant(accountId, {
+                        documentId: nid, description: l.description, detail: l.detail, quantity: l.quantity,
+                        unitPrice: l.unitPrice, amount: l.amount, position: l.position, offeringId: l.offeringId,
+                        recurringMonths: l.recurringMonths,
+                    })));
+                }
+                return nid;
+            });
+        });
+        void seq;
+        return reply.code(201).send({ document: { id: newId, number, type } });
     });
     // Collections: unpaid invoices that are past due, worst first. Scoped to the
     // businesses the user can see. `suspended` marks the ones the schedule has already
