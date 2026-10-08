@@ -103,7 +103,9 @@ createRoot(document.getElementById('root')!).render(
 );
 
 // Register the service worker (makes Klippy installable + enables push).
-if ('serviceWorker' in navigator) {
+// Built app only: on the dev server it held stale copies of files the dev server
+// serves fresh, and a restart left a blank page until it was cleared by hand.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* non-fatal */ });
   });

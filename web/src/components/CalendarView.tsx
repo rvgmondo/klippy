@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss } from 'lucide-react';
-import { apiGet } from '../lib/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss, Banknote } from 'lucide-react';
+import { apiGet, apiPatch } from '../lib/api';
+import { money } from '../lib/money';
+import { navigateTo } from '../lib/urlAction';
 import { Skeleton } from './ui';
 import { notify } from './ConfirmDialog';
 import type { CalendarTask, Priority } from '../lib/types';
@@ -73,6 +75,50 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
     return m;
   }, [tasks]);
 
+  // Money dates beside the work: invoices falling due (with what is still owed)
+  // and quotes about to lapse. A switch, remembered, for anyone who wants the
+  // calendar to be about work only.
+  const [showMoney, setShowMoneyState] = useState(() => {
+    try { return localStorage.getItem('klippy.calMoney') !== '0'; } catch { return true; }
+  });
+  const setShowMoney = (v: boolean) => {
+    setShowMoneyState(v);
+    try { localStorage.setItem('klippy.calMoney', v ? '1' : '0'); } catch { /* ignore */ }
+  };
+  const docBiz = businessId === 'all' ? '' : `&businessId=${businessId}`;
+  const invoicesQ = useQuery({
+    queryKey: ['documents', 'invoice', businessId],
+    queryFn: () => apiGet<{ documents: MoneyDoc[] }>(`/documents?type=invoice${docBiz}`),
+    enabled: showMoney,
+  });
+  const quotesQ = useQuery({
+    queryKey: ['documents', 'quote', businessId],
+    queryFn: () => apiGet<{ documents: MoneyDoc[] }>(`/documents?type=quote${docBiz}`),
+    enabled: showMoney,
+  });
+  const moneyByDay = useMemo(() => {
+    const m = new Map<string, MoneyDoc[]>();
+    if (!showMoney) return m;
+    const add = (d: MoneyDoc) => { if (d.dueDate) (m.get(d.dueDate) ?? m.set(d.dueDate, []).get(d.dueDate)!).push(d); };
+    for (const d of invoicesQ.data?.documents ?? []) if (d.status === 'sent' && (d.outstanding ?? 0) > 0.001 && !d.imported) add(d);
+    for (const d of quotesQ.data?.documents ?? []) if (d.status === 'sent' && !d.decision) add(d);
+    return m;
+  }, [showMoney, invoicesQ.data, quotesQ.data]);
+
+  // Drag a task to another day to move its due date.
+  const qc = useQueryClient();
+  const move = useMutation({
+    mutationFn: (v: { id: number; dueDate: string }) => apiPatch(`/tasks/${v.id}`, { dueDate: v.dueDate }),
+    onSuccess: (_r, v) => {
+      void qc.invalidateQueries({ queryKey: ['calendar'] });
+      void qc.invalidateQueries({ queryKey: ['tasks-all'] });
+      void qc.invalidateQueries({ queryKey: ['home'] });
+      notify(`Moved to ${new Date(`${v.dueDate}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}.`);
+    },
+    onError: (e) => notify(e instanceof Error ? e.message : 'That did not move.', 'error'),
+  });
+  const onMove = (id: number, dueDate: string) => move.mutate({ id, dueDate });
+
   function shift(dir: number) {
     if (view === 'day') setCursor(addDays(cursor, dir));
     else if (view === 'week') setCursor(addDays(cursor, dir * 7));
@@ -88,6 +134,11 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
             <button onClick={() => shift(-1)} title="Previous" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronLeft size={16} /></button>
             <button onClick={() => shift(1)} title="Next" className="grid h-10 w-10 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9"><ChevronRight size={16} /></button>
             <button onClick={() => setCursor(new Date())} className="grid min-h-10 place-items-center rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">Today</button>
+            <button onClick={() => setShowMoney(!showMoney)} aria-pressed={showMoney}
+              title={showMoney ? 'Hide invoice and quote dates' : 'Show when invoices fall due and quotes expire'}
+              className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-xs sm:min-h-9 ${showMoney ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}>
+              <Banknote size={14} /> Money
+            </button>
             <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
               className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9">
               <Rss size={13} />
@@ -115,9 +166,9 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
           </div>
         )}
         {!isLoading && (<>
-        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
-        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
-        {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'year' && <YearGrid cursor={cursor} byDay={byDay} onPick={(d) => { setCursor(d); setView('month'); }} />}
         </>)}
       </div>
@@ -131,14 +182,54 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
 }
 
 type OpenFn = (t: { id: number; boardId: number }) => void;
+type MoveFn = (id: number, dueDate: string) => void;
+interface MoneyDoc {
+  id: number; type: 'invoice' | 'quote'; number: string; clientName: string; dueDate: string | null;
+  status: string; currency: string; total: string; outstanding?: number; imported?: boolean; decision?: string | null;
+}
+type MoneyMap = Map<string, MoneyDoc[]>;
+const todayIso = () => iso(new Date());
+
+/** Lets a day take a task dropped on it. */
+const dropProps = (day: string, onMove?: MoveFn) => (onMove ? {
+  onDragOver: (e: React.DragEvent) => { if (e.dataTransfer.types.includes('text/klippy-task')) { e.preventDefault(); e.currentTarget.classList.add('ring-1', 'ring-[var(--accent)]'); } },
+  onDragLeave: (e: React.DragEvent) => e.currentTarget.classList.remove('ring-1', 'ring-[var(--accent)]'),
+  onDrop: (e: React.DragEvent) => {
+    e.currentTarget.classList.remove('ring-1', 'ring-[var(--accent)]');
+    const id = Number(e.dataTransfer.getData('text/klippy-task'));
+    const from = e.dataTransfer.getData('text/klippy-from');
+    if (id && from !== day) onMove(id, day);
+  },
+} : {});
 
 function TaskPill({ t, onOpen }: { t: CalendarTask; onOpen: OpenFn }) {
+  // Late is the one thing that should jump out of a month of dots.
+  const late = !t.isCompleted && t.dueDate < todayIso();
+  const color = late ? '#ef4444' : PRIORITY_COLOR[t.priority];
   return (
-    <button onClick={() => onOpen({ id: t.id, boardId: t.boardId })}
-      className="flex w-full items-center gap-1.5 truncate rounded px-1.5 py-0.5 text-left text-[11px] hover:brightness-125"
-      style={{ background: `${PRIORITY_COLOR[t.priority]}22`, color: PRIORITY_COLOR[t.priority] }}>
-      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: PRIORITY_COLOR[t.priority] }} />
+    <button onClick={() => onOpen({ id: t.id, boardId: t.boardId })} draggable
+      onDragStart={(e) => { e.dataTransfer.setData('text/klippy-task', String(t.id)); e.dataTransfer.setData('text/klippy-from', t.dueDate); e.dataTransfer.effectAllowed = 'move'; }}
+      title={late ? `${t.title}: late. Drag to another day to move it.` : `${t.title}. Drag to another day to move it.`}
+      className="flex w-full cursor-grab items-center gap-1.5 truncate rounded px-1.5 py-0.5 text-left text-[11px] hover:brightness-125 active:cursor-grabbing"
+      style={{ background: `${color}22`, color }}>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
       <span className={`truncate ${t.isCompleted ? 'line-through opacity-70' : ''}`}>{t.title}</span>
+    </button>
+  );
+}
+
+/** An invoice falling due, or a quote about to lapse. Opens the document. */
+function MoneyPill({ d }: { d: MoneyDoc }) {
+  const late = d.type === 'invoice' && !!d.dueDate && d.dueDate < todayIso();
+  const label = d.type === 'invoice'
+    ? `${d.number} ${late ? 'late' : 'due'}, ${money(d.outstanding ?? Number(d.total), d.currency)}`
+    : `${d.number} expires`;
+  return (
+    <button onClick={() => navigateTo('billing', { open: String(d.id), doctype: d.type })}
+      title={`${d.clientName}: ${label}`}
+      className={`flex w-full items-center gap-1.5 truncate rounded px-1.5 py-0.5 text-left text-[11px] hover:brightness-125 ${late ? 'bg-red-500/10 text-red-300' : 'bg-emerald-500/10 text-emerald-300'}`}>
+      <Banknote size={10} className="shrink-0" />
+      <span className="truncate">{label}</span>
     </button>
   );
 }
@@ -156,7 +247,7 @@ function EventPill({ e, onOpen }: { e: CalendarEvent; onOpen: (e: CalendarEvent)
   );
 }
 
-function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function MonthGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(first);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -172,9 +263,10 @@ function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curs
         const inMonth = d.getMonth() === cursor.getMonth();
         const list = byDay.get(iso(d)) ?? [];
         const evs = events.get(iso(d)) ?? [];
-        const max = Math.max(0, 3 - evs.length);
+        const docs = moneyMap.get(iso(d)) ?? [];
+        const max = Math.max(0, 3 - evs.length - Math.min(docs.length, 2));
         return (
-          <div key={i} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
+          <div key={i} {...dropProps(iso(d), onMove)} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
             <div className="mb-1 flex items-center justify-between">
               <button onClick={() => onAdd(iso(d))} title="Add a task on this day"
                 className="grid h-5 w-5 place-items-center rounded text-slate-500 opacity-0 hover:bg-slate-800 hover:text-violet-300 focus:opacity-100 group-hover/day:opacity-100">
@@ -184,8 +276,9 @@ function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curs
             </div>
             <div className="space-y-1">
               {evs.slice(0, 3).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
+              {docs.slice(0, 2).map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
               {list.slice(0, max).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
-              {list.length > max && <div className="px-1 text-[10px] text-slate-500">+{list.length - max} more</div>}
+              {(list.length > max || docs.length > 2) && <div className="px-1 text-[10px] text-slate-500">+{Math.max(0, list.length - max) + Math.max(0, docs.length - 2)} more</div>}
             </div>
           </div>
         );
@@ -194,7 +287,7 @@ function MonthGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curs
   );
 }
 
-function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function WeekGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = new Date();
@@ -203,7 +296,7 @@ function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curso
       {days.map((d, i) => {
         const list = byDay.get(iso(d)) ?? [];
         return (
-          <div key={i} className="min-h-24 rounded-xl border border-slate-800 p-2 lg:min-h-64">
+          <div key={i} {...dropProps(iso(d), onMove)} className="min-h-24 rounded-xl border border-slate-800 p-2 lg:min-h-64">
             <div className="mb-2 flex items-center justify-between">
               <span className={`text-xs ${sameDay(d, today) ? 'font-bold text-violet-400' : 'text-slate-400'}`}>{DOW[i]} {d.getDate()}</span>
               <button onClick={() => onAdd(iso(d))} title="Add a task on this day"
@@ -213,6 +306,7 @@ function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curso
             </div>
             <div className="space-y-1">
               {(events.get(iso(d)) ?? []).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
+              {(moneyMap.get(iso(d)) ?? []).map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
               {list.map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
             </div>
           </div>
@@ -222,9 +316,10 @@ function WeekGrid({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { curso
   );
 }
 
-function DayList({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function DayList({ cursor, byDay, events, money: moneyMap, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const list = byDay.get(iso(cursor)) ?? [];
   const evs = events.get(iso(cursor)) ?? [];
+  const docs = moneyMap.get(iso(cursor)) ?? [];
   return (
     <div className="mx-auto max-w-2xl space-y-2">
       <button onClick={() => onAdd(iso(cursor))}
@@ -249,7 +344,8 @@ function DayList({ cursor, byDay, events, onOpen, onOpenEvent, onAdd }: { cursor
           </span>
         </button>
       ))}
-      {list.length === 0 && evs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing on this day.</p>}
+      {docs.map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
+      {list.length === 0 && evs.length === 0 && docs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing on this day.</p>}
       {list.map((t) => (
         <button key={t.id} onClick={() => onOpen({ id: t.id, boardId: t.boardId })}
           className="flex w-full items-center gap-3 rounded-xl border border-slate-800 p-3 text-left hover:bg-slate-900">

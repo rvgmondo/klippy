@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { boards, boardColumns, tasks, folders, taskLabels, labels } from '../db/schema.js';
+import { boards, boardColumns, tasks, folders, taskLabels, labels, taskSubtasks, taskComments } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -83,7 +83,23 @@ export async function boardRoutes(app) {
             .innerJoin(labels, eq(labels.id, taskLabels.labelId))
             .innerJoin(tasks, eq(tasks.id, taskLabels.taskId))
             .where(tenantWhere(taskLabels, accountId, eq(tasks.boardId, id)));
-        return { board, columns, tasks: cards, cardLabels };
+        // What is on each card, so the board shows checklist progress and talk
+        // without opening every card. Two grouped queries for the whole board.
+        const subRows = await db.select({
+            taskId: taskSubtasks.taskId, total: sql `COUNT(*)`, done: sql `SUM(${taskSubtasks.isCompleted})`,
+        }).from(taskSubtasks).innerJoin(tasks, eq(tasks.id, taskSubtasks.taskId))
+            .where(tenantWhere(taskSubtasks, accountId, eq(tasks.boardId, id))).groupBy(taskSubtasks.taskId);
+        const comRows = await db.select({ taskId: taskComments.taskId, n: sql `COUNT(*)` })
+            .from(taskComments).innerJoin(tasks, eq(tasks.id, taskComments.taskId))
+            .where(tenantWhere(taskComments, accountId, eq(tasks.boardId, id))).groupBy(taskComments.taskId);
+        const sub = new Map(subRows.map((r) => [r.taskId, { total: Number(r.total), done: Number(r.done ?? 0) }]));
+        const com = new Map(comRows.map((r) => [r.taskId, Number(r.n)]));
+        return {
+            board, columns, cardLabels,
+            tasks: cards.map((t) => ({
+                ...t, subtaskTotal: sub.get(t.id)?.total ?? 0, subtaskDone: sub.get(t.id)?.done ?? 0, commentCount: com.get(t.id) ?? 0,
+            })),
+        };
     });
     app.post('/api/v1/boards', async (req, reply) => {
         const { accountId, userId } = authOf(req);

@@ -192,6 +192,8 @@ export interface Column {
 export type Priority = 'none' | 'low' | 'medium' | 'high' | 'urgent';
 export interface Task {
   id: number;
+  /** From the board: checklist progress and how many comments. */
+  subtaskTotal?: number; subtaskDone?: number; commentCount?: number;
   accountId: number;
   boardId: number;
   columnId: number;

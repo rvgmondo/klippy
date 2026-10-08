@@ -9,7 +9,7 @@ import {
   SortableContext, useSortable, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Flag, MoreHorizontal, GripVertical, Copy } from 'lucide-react';
+import { Plus, Flag, MoreHorizontal, GripVertical, Copy, CheckSquare, MessageSquare, CalendarDays } from 'lucide-react';
 import { setUrlParams } from '../lib/urlAction';
 import { ClientTimeline } from './ClientTimeline';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
@@ -393,22 +393,48 @@ function CardInner({ task, labels, userMap, dragging }: { task: Task; labels: Ca
         </div>
       )}
       <p className={`text-sm text-slate-100 ${task.isCompleted ? 'line-through' : ''}`}>{task.title}</p>
-      {(p || task.dueDate || assignee) && (
-        <div className="mt-2 flex items-center gap-2 text-[11px]">
+      {(p || task.dueDate || assignee || task.subtaskTotal || task.commentCount || task.estimateMinutes) ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           {p && (
             <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5" style={{ background: `${p.color}22`, color: p.color }}>
               <Flag size={10} /> {p.label}
             </span>
           )}
-          {task.dueDate && <span className="text-slate-400">{task.dueDate}</span>}
+          {task.dueDate && <DueChip date={task.dueDate} done={task.isCompleted} />}
+          {!!task.subtaskTotal && (
+            <span className={`inline-flex items-center gap-1 ${task.subtaskDone === task.subtaskTotal ? 'text-emerald-400' : 'text-slate-400'}`} title="Checklist">
+              <CheckSquare size={11} /> {task.subtaskDone}/{task.subtaskTotal}
+            </span>
+          )}
+          {!!task.commentCount && (
+            <span className="inline-flex items-center gap-1 text-slate-400" title="Comments"><MessageSquare size={11} /> {task.commentCount}</span>
+          )}
+          {!!task.estimateMinutes && (
+            <span className="text-slate-500" title="Estimate">{task.estimateMinutes >= 60 ? `${Math.floor(task.estimateMinutes / 60)}h${task.estimateMinutes % 60 ? ` ${task.estimateMinutes % 60}m` : ''}` : `${task.estimateMinutes}m`}</span>
+          )}
           {assignee && (
             <span className="ml-auto grid h-5 w-5 place-items-center rounded-full bg-violet-600/30 text-[9px] font-semibold text-violet-200" title={assignee.name}>
               {initials(assignee.name)}
             </span>
           )}
         </div>
-      )}
+      ) : null}
     </div>
+  );
+}
+
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "29 Sep", red once late, amber on the day. */
+function DueChip({ date, done }: { date: string; done: boolean }) {
+  const n = new Date();
+  const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+  const late = !done && date < today;
+  const isToday = !done && date === today;
+  return (
+    <span className={`inline-flex items-center gap-1 ${late ? 'text-red-300' : isToday ? 'text-amber-300' : 'text-slate-400'}`}
+      title={late ? 'Late' : isToday ? 'Due today' : 'Due'}>
+      <CalendarDays size={11} /> {isToday ? 'Today' : `${Number(date.slice(8, 10))} ${MON[Number(date.slice(5, 7)) - 1]}`}{late ? ', late' : ''}
+    </span>
   );
 }
 

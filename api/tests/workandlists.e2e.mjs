@@ -82,6 +82,16 @@ const theirs = (await B('GET', '/tasks/all')).body.tasks ?? [];
 ok(!theirs.some((t) => t.id === t2.id), 'another account never sees these tasks');
 ok(!((await B('GET', '/boards/all')).body.boards ?? []).some((b) => b.id === boardId), 'or these boards');
 
+// ---- what each card carries on the board ---------------------------------------------
+await A('POST', '/subtasks', { taskId: t2.id, title: 'One' });
+const st = (await A('POST', '/subtasks', { taskId: t2.id, title: 'Two' })).body;
+const subId = st.subtask?.id ?? st.id;
+if (subId) await A('PATCH', `/subtasks/${subId}`, { isCompleted: true });
+await A('POST', '/comments', { taskId: t2.id, comment: 'Noted' });
+const full = (await A('GET', `/boards/${boardId}/full`)).body;
+const card = full.tasks?.find((t) => t.id === t2.id);
+ok(card?.subtaskTotal === 2 && card?.commentCount === 1, 'a board card says how much of its checklist is done and how many comments it has', `${card?.subtaskDone}/${card?.subtaskTotal}, ${card?.commentCount}`);
+
 // ---- duplicating documents ---------------------------------------------------------------------
 const inv = (await A('POST', '/documents', {
   type: 'invoice', businessId: biz.id, folderId: acme, clientName: 'Acme Work', issueDate: '2026-01-15',

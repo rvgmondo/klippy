@@ -7,19 +7,25 @@ export interface FilterState {
   assignee: number | 'any';
   priority: Priority | 'any';
   due: 'any' | 'overdue' | 'today' | 'week' | 'none';
+  /** Words in the card's title or description. */
+  text?: string;
 }
 
-export const EMPTY_FILTERS: FilterState = { assignee: 'any', priority: 'any', due: 'any' };
+export const EMPTY_FILTERS: FilterState = { assignee: 'any', priority: 'any', due: 'any', text: '' };
 export const isFiltering = (f: FilterState) =>
-  f.assignee !== 'any' || f.priority !== 'any' || f.due !== 'any';
+  f.assignee !== 'any' || f.priority !== 'any' || f.due !== 'any' || !!f.text?.trim();
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+// The local date, not UTC: between midnight and 2am in South Africa the UTC date
+// is still yesterday, so "due today" showed yesterday's cards.
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /** Apply the active filters to a board's cards. */
 export function applyFilters(tasks: Task[], f: FilterState): Task[] {
   const today = iso(new Date());
   const weekAhead = iso(new Date(Date.now() + 7 * 86400000));
+  const words = (f.text ?? '').trim().toLowerCase();
   return tasks.filter((t) => {
+    if (words && !`${t.title} ${t.description ?? ''}`.toLowerCase().includes(words)) return false;
     if (f.assignee !== 'any' && t.assignedTo !== f.assignee) return false;
     if (f.priority !== 'any' && t.priority !== f.priority) return false;
     if (f.due !== 'any') {
@@ -44,6 +50,9 @@ export function BoardFilters({ value, onChange }: { value: FilterState; onChange
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="flex items-center gap-1 text-xs text-slate-500"><Filter size={13} /> Filter</span>
+
+      <input className={`${sel} w-40`} value={value.text ?? ''} placeholder="Find a card" aria-label="Find a card"
+        onChange={(e) => onChange({ ...value, text: e.target.value })} />
 
       <select className={sel} value={String(value.assignee)}
         onChange={(e) => onChange({ ...value, assignee: e.target.value === 'any' ? 'any' : Number(e.target.value) })}>
