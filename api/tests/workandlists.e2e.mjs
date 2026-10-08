@@ -41,11 +41,11 @@ const signup = async (email) => {
     const res = await fetch(API + p, { method, headers: { ...(b ? { 'content-type': 'application/json' } : {}), cookie }, body: b ? JSON.stringify(b) : undefined });
     return { status: res.status, body: await res.json().catch(() => ({})) };
   };
-  return { A, account };
+  return { A, account, cookie };
 };
 const today = new Date().toISOString().slice(0, 10);
 
-const { A, account } = await signup(`work.${tag}@test.local`);
+const { A, account, cookie: cookieOfA } = await signup(`work.${tag}@test.local`);
 const biz = (await A('GET', '/businesses')).body.businesses[0];
 const acme = (await A('POST', '/folders', { name: 'Acme Work', businessId: biz.id })).body.folder.id;
 const empty = (await A('POST', '/folders', { name: 'Nothing Yet', businessId: biz.id })).body.folder.id;
@@ -91,6 +91,23 @@ await A('POST', '/comments', { taskId: t2.id, comment: 'Noted' });
 const full = (await A('GET', `/boards/${boardId}/full`)).body;
 const card = full.tasks?.find((t) => t.id === t2.id);
 ok(card?.subtaskTotal === 2 && card?.commentCount === 1, 'a board card says how much of its checklist is done and how many comments it has', `${card?.subtaskDone}/${card?.subtaskTotal}, ${card?.commentCount}`);
+
+// ---- files: search the drive, find what is attached to cards ---------------------------
+const formPost = async (cookie, path, name) => {
+  const fd = new FormData();
+  fd.append('file', new Blob(['hello'], { type: 'text/plain' }), name);
+  const r = await fetch(API + path, { method: 'POST', headers: { cookie }, body: fd });
+  return r.status;
+};
+const upDrive = await formPost(cookieOfA, '/storage/upload', `brief-${tag}.txt`);
+const upCard = await formPost(cookieOfA, `/tasks/${t2.id}/files`, `logo-${tag}.txt`);
+const foundDrive = (await A('GET', `/storage/search?q=brief-${tag}`)).body.items ?? [];
+ok(upDrive < 300 && foundDrive.length === 1, 'a file in the drive can be found by name', `${upDrive}, ${foundDrive.length}`);
+const atts = (await A('GET', '/files/attachments')).body.files ?? [];
+const att = atts.find((f) => f.name === `logo-${tag}.txt`);
+ok(upCard < 300 && att?.clientName === 'Acme Work' && att?.taskTitle === 'Undated thing', 'a file on a card is listed with its client and card', JSON.stringify(att ?? upCard));
+ok(((await B('GET', `/storage/search?q=brief-${tag}`)).body.items ?? []).length === 0, 'another account cannot find it');
+ok(!((await B('GET', '/files/attachments')).body.files ?? []).some((f) => f.name === `logo-${tag}.txt`), 'or see the card attachment');
 
 // ---- duplicating documents ---------------------------------------------------------------------
 const inv = (await A('POST', '/documents', {

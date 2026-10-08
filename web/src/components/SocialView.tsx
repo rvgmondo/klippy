@@ -52,15 +52,19 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
 
   // `bid` filters the lists and stays on the raw selection. `createBid` is who a new post
   // or a connection is for, which a one-business workspace answers under "All" too.
-  const bid = businessId === 'all' ? null : Number(businessId);
+  // Under "All businesses" the page used to stop at "pick one business above".
+  // It now asks right here, without switching the whole app to that business.
+  const [picked, setPicked] = useState<number | null>(null);
+  const bizList = useQuery({ queryKey: ['businesses'], queryFn: () => apiGet<{ businesses: { id: number; name: string; color: string }[] }>('/businesses') });
   const acting = useActingBusiness(businessId);
-  const createBid = acting.id;
+  const bid = businessId === 'all' ? (acting.id ?? picked) : Number(businessId);
+  const createBid = acting.id ?? (businessId === 'all' ? picked : null);
   const days = mode === 'month' ? monthGrid(cursor) : weekDays(cursor);
   const from = iso(days[0]!);
   const to = iso(days[days.length - 1]!);
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['social-posts', from, to, businessId],
+    queryKey: ['social-posts', from, to, businessId, bid],
     queryFn: () => apiGet<{ posts: SocialPostListItem[]; timezone: string }>(
       `/social/posts?from=${from}&to=${to}${bid ? `&businessId=${bid}` : ''}`),
   });
@@ -68,7 +72,7 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
   // The queue and the asks are not bounded by the visible dates: something waiting on
   // a photo three weeks out still needs chasing today.
   const all = useQuery({
-    queryKey: ['social-posts-all', businessId],
+    queryKey: ['social-posts-all', businessId, bid],
     queryFn: () => apiGet<{ posts: SocialPostListItem[] }>(
       `/social/posts?from=2000-01-01&to=2100-01-01${bid ? `&businessId=${bid}` : ''}`),
   });
@@ -125,7 +129,7 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
   return (
     <Page>
       <PageHeader
-        view="social" title="Social"
+        view="social" title="Posts"
         subtitle="Plan the month, get it signed off, and put it out on time."
         actions={createBid ? (
           <button onClick={() => create.mutate(null)} className={btnPrimary + ' flex items-center gap-1.5'}>
@@ -134,8 +138,22 @@ export function SocialView({ businessId }: { businessId: BusinessSelection }) {
         ) : undefined} />
       <PageBody>
         {!createBid && !acting.loading && (
-          <p className="mb-4 rounded-xl border border-dashed border-slate-700 p-4 text-center text-sm text-slate-400">
-            Pick one business above to plan its posts.
+          <div className="mb-4 rounded-xl border border-dashed border-slate-700 p-4 text-center text-sm text-slate-400">
+            <p className="mb-2">Which business are these posts for?</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {(bizList.data?.businesses ?? []).map((b) => (
+                <button key={b.id} onClick={() => setPicked(b.id)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-slate-800">
+                  <span className="h-2 w-2 rounded-full" style={{ background: b.color }} /> {b.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {businessId === 'all' && picked && !acting.id && (
+          <p className="mb-3 text-xs text-slate-500">
+            Posts for {bizList.data?.businesses.find((b) => b.id === picked)?.name}.{' '}
+            <button onClick={() => setPicked(null)} className="text-[var(--accent)]">Change</button>
           </p>
         )}
 

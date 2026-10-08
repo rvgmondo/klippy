@@ -70,6 +70,22 @@ export async function storageRoutes(app: FastifyInstance) {
   });
 
   // Contents of one folder, plus the breadcrumb path to it.
+  /** Find files and folders by name anywhere in the drive. */
+  app.get('/api/v1/storage/search', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const q = z.object({ q: z.string().trim().min(1).max(100) }).safeParse(req.query);
+    if (!q.success) return reply.code(400).send({ error: 'Type something to find.' });
+    // %, _ and \ typed in a name are matched literally, not as wildcards.
+    const like = `%${q.data.q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const items = await db.select({
+      id: storageNodes.id, kind: storageNodes.kind, name: storageNodes.name, parentId: storageNodes.parentId,
+      size: storageNodes.size, mimeType: storageNodes.mimeType, updatedAt: storageNodes.updatedAt, uploaderName: users.name,
+    }).from(storageNodes).leftJoin(users, eq(users.id, storageNodes.uploadedBy))
+      .where(tenantWhere(storageNodes, accountId, sql`${storageNodes.name} LIKE ${like}`))
+      .orderBy(asc(storageNodes.kind), asc(storageNodes.name)).limit(200);
+    return { items };
+  });
+
   app.get('/api/v1/storage', async (req, reply) => {
     const { accountId } = authOf(req);
     const q = z.object({ parentId: z.coerce.number().int().positive().optional() }).safeParse(req.query);

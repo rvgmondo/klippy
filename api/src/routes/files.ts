@@ -4,13 +4,13 @@ import { mkdir, unlink, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { eq } from 'drizzle-orm';
+import { desc, eq, isNull } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { taskFiles, tasks } from '../db/schema.js';
+import { taskFiles, tasks, boards, folders } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
-import { assertTaskAccess } from '../lib/access.js';
+import { assertTaskAccess, businessScope } from '../lib/access.js';
 
 export const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15MB, mirrors v1
 
@@ -88,6 +88,27 @@ export async function fileRoutes(app: FastifyInstance) {
   });
 
   // Download (auth + tenant checked; nothing served from disk directly).
+  /**
+   * Every file attached to a card, across every board, for the Files screen.
+   * Attachments lived only inside their card, so "where is the logo Johan sent"
+   * meant remembering which card it went on. Business-scoped like the boards.
+   */
+  app.get('/api/v1/files/attachments', async (req) => {
+    const { accountId } = authOf(req);
+    const scope = await businessScope(req, folders.businessId);
+    const rows = await db.select({
+      id: taskFiles.id, name: taskFiles.originalName, size: taskFiles.filesize, mimeType: taskFiles.mimeType,
+      uploadedAt: taskFiles.uploadedAt, taskId: tasks.id, taskTitle: tasks.title, boardId: boards.id,
+      boardName: boards.name, clientName: folders.name,
+    }).from(taskFiles)
+      .innerJoin(tasks, eq(tasks.id, taskFiles.taskId))
+      .innerJoin(boards, eq(boards.id, tasks.boardId))
+      .innerJoin(folders, eq(folders.id, boards.folderId))
+      .where(tenantWhere(taskFiles, accountId, isNull(boards.deletedAt), isNull(folders.deletedAt), scope))
+      .orderBy(desc(taskFiles.uploadedAt)).limit(1000);
+    return { files: rows };
+  });
+
   app.get('/api/v1/files/:id/download', async (req, reply) => {
     const { accountId } = authOf(req);
     const id = intId(req);
