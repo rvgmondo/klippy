@@ -811,6 +811,19 @@ export async function documentRoutes(app: FastifyInstance) {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
+
+    // A retry of a create that already happened gets that document back. See
+    // documents.createKey for why. Anything that is not a sane key is ignored.
+    const rawKey = req.headers['idempotency-key'];
+    const createKey = typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(rawKey) ? rawKey : null;
+    const replay = async () => {
+      if (!createKey) return null;
+      const [prior] = await db.select().from(documents)
+        .where(tenantWhere(documents, accountId, eq(documents.createKey, createKey))).limit(1);
+      return prior ?? null;
+    };
+    const prior = await replay();
+    if (prior) return reply.code(200).send({ document: prior, replayed: true });
     await keepOwnOfferings(accountId, d.lines);
 
     const which = await businessForDocument(accountId, d.businessId, d.folderId);
@@ -870,7 +883,9 @@ export async function documentRoutes(app: FastifyInstance) {
     // Numbering is per business + type.
     // Numbered by withFreshNumber below, which retries if the number is taken.
     let seq = 0; let number = '';
-    const docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
+    let docId: number;
+    try {
+    docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
       ({ seq, number } = fresh);
       return db.transaction(async (tx) => {
       const ins = await tx.insert(documents).values(withTenant(accountId, {
@@ -882,7 +897,7 @@ export async function documentRoutes(app: FastifyInstance) {
         depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
         taxRate: money(taxRate), subtotal: money(totals.subtotal),
         taxAmount: money(totals.taxAmount), total: money(totals.total),
-        notes: d.notes ?? null, createdBy: userId, dealId: d.dealId ?? null,
+        notes: d.notes ?? null, createdBy: userId, dealId: d.dealId ?? null, createKey,
       }));
       const newId = Number(ins[0].insertId);
       if (d.lines.length) {
@@ -897,6 +912,13 @@ export async function documentRoutes(app: FastifyInstance) {
       return newId;
     });
     });
+    } catch (err) {
+      // Two copies of the same create racing: the second loses on the key, and
+      // gets the first one's document rather than an error.
+      const again = await replay();
+      if (again) return reply.code(200).send({ document: again, replayed: true });
+      throw err;
+    }
 
     if (d.type === 'invoice' && d.fromTime) {
       const { folderId: ftFolder, from: ftFrom, to: ftTo } = d.fromTime;

@@ -804,6 +804,20 @@ export async function documentRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
+        // A retry of a create that already happened gets that document back. See
+        // documents.createKey for why. Anything that is not a sane key is ignored.
+        const rawKey = req.headers['idempotency-key'];
+        const createKey = typeof rawKey === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(rawKey) ? rawKey : null;
+        const replay = async () => {
+            if (!createKey)
+                return null;
+            const [prior] = await db.select().from(documents)
+                .where(tenantWhere(documents, accountId, eq(documents.createKey, createKey))).limit(1);
+            return prior ?? null;
+        };
+        const prior = await replay();
+        if (prior)
+            return reply.code(200).send({ document: prior, replayed: true });
         await keepOwnOfferings(accountId, d.lines);
         const which = await businessForDocument(accountId, d.businessId, d.folderId);
         if ('error' in which)
@@ -861,33 +875,44 @@ export async function documentRoutes(app) {
         // Numbered by withFreshNumber below, which retries if the number is taken.
         let seq = 0;
         let number = '';
-        const docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
-            ({ seq, number } = fresh);
-            return db.transaction(async (tx) => {
-                const ins = await tx.insert(documents).values(withTenant(accountId, {
-                    type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
-                    clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
-                    clientVatNumber: d.clientVatNumber || null,
-                    issueDate: d.issueDate, dueDate, currency,
-                    discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
-                    depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
-                    taxRate: money(taxRate), subtotal: money(totals.subtotal),
-                    taxAmount: money(totals.taxAmount), total: money(totals.total),
-                    notes: d.notes ?? null, createdBy: userId, dealId: d.dealId ?? null,
-                }));
-                const newId = Number(ins[0].insertId);
-                if (d.lines.length) {
-                    await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
-                        documentId: newId, description: l.description, detail: l.detail || null,
-                        quantity: money(l.quantity),
-                        unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
-                        amount: money(totals.priced[i]?.amount ?? 0), position: i,
-                        offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
-                    })));
-                }
-                return newId;
+        let docId;
+        try {
+            docId = await withFreshNumber(accountId, businessId, d.type, (fresh) => {
+                ({ seq, number } = fresh);
+                return db.transaction(async (tx) => {
+                    const ins = await tx.insert(documents).values(withTenant(accountId, {
+                        type: d.type, seq, number, businessId, folderId: d.folderId ?? null,
+                        clientName: d.clientName, clientEmail: d.clientEmail || null, clientAddress: d.clientAddress ?? null,
+                        clientVatNumber: d.clientVatNumber || null,
+                        issueDate: d.issueDate, dueDate, currency,
+                        discountType, discountValue: money(discountValue), discountAmount: money(totals.discountAmount),
+                        depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
+                        taxRate: money(taxRate), subtotal: money(totals.subtotal),
+                        taxAmount: money(totals.taxAmount), total: money(totals.total),
+                        notes: d.notes ?? null, createdBy: userId, dealId: d.dealId ?? null, createKey,
+                    }));
+                    const newId = Number(ins[0].insertId);
+                    if (d.lines.length) {
+                        await tx.insert(documentLines).values(d.lines.map((l, i) => withTenant(accountId, {
+                            documentId: newId, description: l.description, detail: l.detail || null,
+                            quantity: money(l.quantity),
+                            unitPrice: money(totals.priced[i]?.unitPrice ?? 0),
+                            amount: money(totals.priced[i]?.amount ?? 0), position: i,
+                            offeringId: l.offeringId ?? null, recurringMonths: l.recurringMonths ?? null,
+                        })));
+                    }
+                    return newId;
+                });
             });
-        });
+        }
+        catch (err) {
+            // Two copies of the same create racing: the second loses on the key, and
+            // gets the first one's document rather than an error.
+            const again = await replay();
+            if (again)
+                return reply.code(200).send({ document: again, replayed: true });
+            throw err;
+        }
         if (d.type === 'invoice' && d.fromTime) {
             const { folderId: ftFolder, from: ftFrom, to: ftTo } = d.fromTime;
             // The same subtree walk the from-time preview used, so the stamped set is

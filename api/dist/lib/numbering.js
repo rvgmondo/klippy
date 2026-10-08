@@ -73,6 +73,18 @@ export async function nextNumberFor(accountId, businessId, type) {
  * without this the person saw an error and had to start again. The write must be
  * a transaction, so a refused attempt leaves nothing behind.
  */
+/** The duplicate was on documents.create_key. The driver's text is on a wrapped cause. */
+function onCreateKey(err) {
+    for (let e = err, depth = 0; e && depth < 5; depth++) {
+        // The database's own words only ("for key 'uniq_doc_create_key'"). The wrapper's
+        // message quotes the whole INSERT, which names the column on every clash.
+        const c = e;
+        if ((c.sqlMessage ?? '').includes('uniq_doc_create_key'))
+            return true;
+        e = c.cause;
+    }
+    return false;
+}
 export async function withFreshNumber(accountId, businessId, type, write) {
     for (let attempt = 0;; attempt++) {
         const n = await nextNumberFor(accountId, businessId, type);
@@ -80,7 +92,9 @@ export async function withFreshNumber(accountId, businessId, type, write) {
             return await write(n);
         }
         catch (err) {
-            if (attempt < 4 && isDuplicateKey(err))
+            // Only a clash on the NUMBER is worth another number. A clash on a create key
+            // means this exact document already exists, and the caller handles that.
+            if (attempt < 4 && isDuplicateKey(err) && !onCreateKey(err))
                 continue;
             throw err;
         }

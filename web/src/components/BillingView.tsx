@@ -610,14 +610,15 @@ function Editor({ id, type, businessId, initialFolderId, fromDeal, onClose, onSa
    *
    * Once this is set, every save updates this document instead of creating one.
    *
-   * KNOWN GAP, recorded rather than claimed fixed: if the create request commits on the
-   * server but its response never reaches the browser (a proxy timeout mid-request), the
-   * id is never learned and a retry still duplicates. Closing that needs an idempotency
-   * key on POST /documents.
+   * The other half, a create that committed but whose reply never arrived, is closed
+   * by createKey: the retry sends the same key and the server hands back the first.
    *
    * Named savedDoc, not saved: the save mutation already has a local called saved, and
    * reading this before that local's declaration would throw at runtime.
    */
+  // One key for this editor's "create", kept across retries. See savedDoc below for
+  // the case where the reply DID arrive; this covers the one where it did not.
+  const [createKey] = useState(() => (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, ''));
   const [savedDoc, setSavedDoc] = useState<{
     id: number; number: string; currency: string; status: string;
   } | null>(null);
@@ -894,7 +895,9 @@ function Editor({ id, type, businessId, initialFolderId, fromDeal, onClose, onSa
       type Doc = { id: number; number: string; currency: string; status: string; dueDate: string | null };
       let doc: Doc;
       if (creating) {
-        doc = (await apiPost<{ document: Doc }>('/documents', body)).document;
+        // The same key on every retry from this editor, so a create whose reply was
+        // lost hands back the document it made instead of making a second one.
+        doc = (await apiPost<{ document: Doc }>('/documents', body, { 'Idempotency-Key': createKey })).document;
         // Recorded BEFORE the send, which is the whole point: if the send fails, a retry
         // now finds this document instead of creating a second one.
         setSavedDoc({ id: doc.id, number: doc.number, currency: doc.currency, status: doc.status });

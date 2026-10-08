@@ -848,6 +848,15 @@ export const documents = mysqlTable('documents', {
   // needs twice over: to ask PayFast for a reusable token when the client pays this
   // one by hand, and to know which stored token to charge for the next cycle.
   subscriptionId: int('subscription_id', { unsigned: true }),
+  /**
+   * The one-time key the editor sends with "create this document".
+   *
+   * When the reply to a create was lost (a proxy timeout, a phone dropping signal)
+   * the document existed but the browser never learned it, so pressing Save again
+   * made a second invoice with the next number. A retry with the same key gets the
+   * first document back instead. Unique per workspace; null for everything else.
+   */
+  createKey: varchar('create_key', { length: 64 }),
   // The deal this quote (or invoice) was made for, so the pipeline can see that a
   // quote went out and hear when it is accepted. Set only when made from a deal.
   dealId: int('deal_id', { unsigned: true }),
@@ -907,6 +916,7 @@ export const documents = mysqlTable('documents', {
   // businessId is nullable; MySQL allows multiple NULLs here, so legacy business-less
   // documents do not collide.
   uniqueIndex('uniq_doc_number').on(t.accountId, t.businessId, t.type, t.seq),
+  uniqueIndex('uniq_doc_create_key').on(t.accountId, t.createKey),
   // The portal reads every document for ONE client, and the hosting flow reads
   // every document for ONE subscription. Neither had an index that fit: both fell
   // back to the account prefix and scanned the rest, which is fine at a hundred
