@@ -26,6 +26,7 @@ import { accountRoutes } from './routes/account.js';
 import { importNinjaRoutes } from './routes/importNinja.js';
 import { talkRoutes } from './routes/talk.js';
 import { outsideCalendarRoutes } from './routes/calendarFeeds.js';
+import { bankStatementRoutes } from './routes/bankStatement.js';
 import { userRoutes, invitationRoutes } from './routes/users.js';
 import { searchRoutes } from './routes/search.js';
 import { tokenRoutes } from './routes/tokens.js';
@@ -190,6 +191,7 @@ export function buildServer() {
   app.register(importNinjaRoutes);
   app.register(talkRoutes);
   app.register(outsideCalendarRoutes);
+  app.register(bankStatementRoutes);
   app.register(userRoutes);
   app.register(invitationRoutes);
   app.register(searchRoutes);

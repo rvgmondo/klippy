@@ -3,7 +3,8 @@ import { PaymentsModal } from './PaymentsModal';
 import { navigateTo, useUrlAction } from '../lib/urlAction';
 import type { DocSummary } from './billingShared';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, AlertTriangle, FileText, MessageCircle, Search } from 'lucide-react';
+import { Mail, AlertTriangle, FileText, MessageCircle, Search, Landmark } from 'lucide-react';
+import { BankMatchModal } from './BankMatchModal';
 import { apiGet, apiPost } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
@@ -66,6 +67,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   const qc = useQueryClient();
   const [statementFor, setStatementFor] = useState<number | null>(null);
   const [paying, setPaying] = useState<DocSummary | null>(null);
+  const [matching, setMatching] = useState(false);
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data, error, isLoading, refetch } = useQuery({
     queryKey: ['collections', businessId],
@@ -162,7 +164,13 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   return (
     <Page>
       <PageHeader view="collections" title="Owed to you"
-        subtitle="Overdue invoices, and who has been flagged for non-payment." />
+        subtitle="Overdue invoices, and who has been flagged for non-payment."
+        actions={(
+          <button onClick={() => setMatching(true)} title="Read your bank's CSV and record the EFTs that paid invoices"
+            className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-3 text-sm text-slate-200 hover:bg-slate-800 sm:min-h-9">
+            <Landmark size={15} /> Match bank statement
+          </button>
+        )} />
       <PageBody className="space-y-5">
         {error && <ErrorNote error={error} onRetry={() => refetch()} />}
 
@@ -460,6 +468,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
           </>
         )}
       </PageBody>
+      {matching && <BankMatchModal businessId={businessId === 'all' ? undefined : businessId} onClose={() => setMatching(false)} />}
       {statementFor && <StatementView folderId={statementFor} onClose={() => setStatementFor(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); for (const k of ['collections', 'documents', 'home', 'client', 'clients']) qc.invalidateQueries({ queryKey: [k] }); }} />}
     </Page>
