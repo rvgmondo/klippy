@@ -1,3 +1,4 @@
+import { quoteAccepted } from '../lib/dealLink.js';
 import { money } from '../lib/money.js';
 import { z } from 'zod';
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
@@ -583,6 +584,8 @@ export async function portalRoutes(app) {
             .where(and(eq(documents.id, id), eq(documents.accountId, c.user.accountId), eq(documents.folderId, c.user.folderId)));
         if (!res[0].affectedRows)
             return reply.code(409).send({ error: 'That quote was just updated. Reload and try again.' });
+        if (parsed.data.decision === 'accepted')
+            await quoteAccepted(c.user.accountId, id, who).catch(() => { });
         // Tell the business. A quote accepted at 11pm that nobody hears about until
         // someone happens to look is a quote that loses its own momentum.
         await notifyAdmins(c.user.accountId, {

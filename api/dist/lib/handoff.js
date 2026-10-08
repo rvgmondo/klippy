@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, isNull, ne, or, sql } from 'drizzle-orm';
 import { money } from './money.js';
 import { currencyFor } from './currencyFor.js';
 import { taxRateFor } from './taxRateFor.js';
@@ -69,6 +69,13 @@ on('deal.won', 'draft-opening-invoice', async (p, ctx) => {
     const [deal] = await db.select({ clientFolderId: deals.clientFolderId }).from(deals)
         .where(tenantWhere(deals, accountId, eq(deals.id, p.dealId))).limit(1);
     const folderId = deal?.clientFolderId ?? null;
+    // A quote made from this deal already says what is being billed, and converting
+    // it is how it becomes the invoice. A second draft from the deal value would bill
+    // the same work twice. Void and declined quotes do not count.
+    const [quoted] = await db.select({ number: documents.number }).from(documents)
+        .where(tenantWhere(documents, accountId, eq(documents.dealId, p.dealId), ne(documents.status, 'void'), or(isNull(documents.decision), ne(documents.decision, 'declined')))).limit(1);
+    if (quoted)
+        return { outcome: `${quoted.number} was made for this deal, so no second invoice was drafted`, ok: true };
     // If this deal already produced an invoice, do not raise another.
     if (folderId) {
         const [existing] = await db.select({ id: documents.id, number: documents.number }).from(documents)

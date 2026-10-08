@@ -331,7 +331,7 @@ function ColumnLane({ column, boardId, taskIds, taskMap, labelsByTask, userMap, 
         <span className="h-2.5 w-2.5 rounded-full" style={{ background: column.color }} />
         <span className="text-sm font-medium text-slate-200">{column.name}</span>
         <span className="ml-auto text-xs text-slate-500">{taskIds.length}</span>
-        <Menu align="right"
+        <Menu align="right" label={`More for ${column.name}`}
           trigger={<span className="text-slate-500 opacity-0 hover:text-slate-200 group-hover/col:opacity-100"><MoreHorizontal size={15} /></span>}
           items={[
             { label: 'Rename column', onClick: async () => { const n = await promptDialog('Rename column', column.name); if (n?.trim()) renameCol.mutate(n.trim()); } },

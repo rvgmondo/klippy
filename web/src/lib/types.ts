@@ -64,6 +64,8 @@ export interface Offering {
   provisioning?: 'none' | 'cpanel';
   whmPackage?: string | null;
   position: number;
+  /** Who is on it now and what it brought in over the last 12 months. */
+  usage?: { subscribers: number; followPrice: number; sold12m: number; revenue12m: number; everUsed: boolean };
 }
 export interface Expense {
   id: number;

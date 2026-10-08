@@ -10,7 +10,8 @@ export interface MenuItem {
 }
 
 /** Lightweight click-to-open dropdown. Closes on outside click or Escape. */
-export function Menu({ trigger, items, align = 'right', fullWidth }: { trigger: ReactNode; items: MenuItem[]; align?: 'left' | 'right'; fullWidth?: boolean }) {
+/** `label` names an icon-only trigger for screen readers and voice control. */
+export function Menu({ trigger, items, align = 'right', fullWidth, label }: { trigger: ReactNode; items: MenuItem[]; align?: 'left' | 'right'; fullWidth?: boolean; label?: string }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -25,7 +26,8 @@ export function Menu({ trigger, items, align = 'right', fullWidth }: { trigger: 
 
   return (
     <div ref={ref} className={`relative ${fullWidth ? 'w-full' : ''}`}>
-      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className={`flex items-center ${fullWidth ? 'w-full' : ''}`}>
+      <button onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }} className={`flex items-center ${fullWidth ? 'w-full' : ''}`}
+        aria-label={label} aria-haspopup="menu" aria-expanded={open}>
         {trigger}
       </button>
       {open && (

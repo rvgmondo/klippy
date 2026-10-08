@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { money } from '../lib/money.js';
 import { z } from 'zod';
-import { asc, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { offerings, subscriptions } from '../db/schema.js';
+import { offerings, subscriptions, documents, documentLines } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
@@ -50,7 +50,51 @@ export async function offeringRoutes(app: FastifyInstance) {
     // the price list as if it were revenue: ten clients on one retainer counted
     // once, and nobody on it counted the same.
     const mrr = await mrrByCurrency(accountId, [bizFilter, await businessScope(req, subscriptions.businessId)]);
-    return { offerings: rows, mrr };
+
+    /**
+     * What each item actually does for the business.
+     *
+     * The list showed prices and nothing about whether anyone buys them, so the
+     * question "what sells" was answered from memory. Per item: who is on it now,
+     * how many of those follow the list price (and so move when it changes), and
+     * what it brought in on issued invoices over the last 12 months.
+     */
+    const ids = rows.map((o) => o.id);
+    const usage = new Map<number, { subscribers: number; followPrice: number; sold12m: number; revenue12m: number; everUsed: boolean }>();
+    const get = (id: number) => usage.get(id) ?? usage.set(id, { subscribers: 0, followPrice: 0, sold12m: 0, revenue12m: 0, everUsed: false }).get(id)!;
+    if (ids.length) {
+      const subs = await db.select({ offeringId: subscriptions.offeringId, status: subscriptions.status, price: subscriptions.price })
+        .from(subscriptions).where(tenantWhere(subscriptions, accountId, inArray(subscriptions.offeringId, ids)));
+      for (const x of subs) {
+        const u = get(x.offeringId);
+        u.everUsed = true;
+        if (x.status === 'active') { u.subscribers += 1; if (x.price == null) u.followPrice += 1; }
+      }
+      const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+      // Invoices raised by a subscription did not record their item until October
+      // 2026, so for those the item comes from the subscription instead.
+      const item = sql<number>`COALESCE(${documentLines.offeringId}, ${subscriptions.offeringId})`;
+      const sold = await db.select({
+        offeringId: item,
+        qty: sql<string>`SUM(${documentLines.quantity})`,
+        amount: sql<string>`SUM(${documentLines.amount})`,
+      }).from(documentLines)
+        .innerJoin(documents, and(eq(documents.id, documentLines.documentId), eq(documents.accountId, accountId)))
+        .leftJoin(subscriptions, and(eq(subscriptions.id, documents.subscriptionId), eq(subscriptions.accountId, accountId)))
+        .where(tenantWhere(documentLines, accountId, inArray(item, ids),
+          eq(documents.type, 'invoice'), inArray(documents.status, ['sent', 'paid']), gte(documents.issueDate, since)))
+        .groupBy(item);
+      for (const x of sold) {
+        if (x.offeringId == null) continue;
+        const u = get(Number(x.offeringId));
+        u.sold12m = Math.round(Number(x.qty) * 100) / 100;
+        u.revenue12m = Math.round(Number(x.amount) * 100) / 100;
+      }
+    }
+    const shaped = rows.map((o) => ({
+      ...o, usage: usage.get(o.id) ?? { subscribers: 0, followPrice: 0, sold12m: 0, revenue12m: 0, everUsed: false },
+    }));
+    return { offerings: shaped, mrr };
   });
 
   app.post('/api/v1/offerings', async (req, reply) => {
@@ -107,8 +151,26 @@ export async function offeringRoutes(app: FastifyInstance) {
     // provisioned on the real server. One click, no Trash, no 30 days to change your
     // mind, so this is the only thing standing between a mis-click and a live client
     // site that can never be billed again.
-    const subs = await db.select({ id: subscriptions.id }).from(subscriptions)
+    const subs = await db.select({ id: subscriptions.id, status: subscriptions.status }).from(subscriptions)
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.offeringId, id)));
+    /**
+     * Subscriptions are deleted WITH the offering (the foreign key cascades), so
+     * deleting an item somebody pays for every month quietly stopped billing them:
+     * no invoice next month, no error, nothing on Subscriptions to say they had
+     * ever been on it. Archive keeps every subscription and simply takes the item
+     * off the menu for new work, so that is the way out while anyone is on it.
+     */
+    const onIt = subs.filter((x) => x.status !== 'canceled').length;
+    if (onIt) {
+      return reply.code(409).send({
+        error: `${onIt} subscription${onIt === 1 ? ' is' : 's are'} on this, so deleting it would stop that billing. Archive it instead: it leaves the price list for new work and the subscriptions keep running.`,
+      });
+    }
+    if (subs.length) {
+      return reply.code(409).send({
+        error: 'Past subscriptions were on this, and deleting it would delete their history. Archive it instead.',
+      });
+    }
     const live = await liveHostingForSubscriptions(accountId, subs.map((s) => s.id));
     if (live.length) {
       const names = [...new Set(live.map((h) => h.domain))].slice(0, 3).join(', ');

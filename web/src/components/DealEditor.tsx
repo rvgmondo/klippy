@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { X, FileText } from 'lucide-react';
+import { navigateTo } from '../lib/urlAction';
+import { moneyRound } from '../lib/money';
 import { apiGet, apiPost, apiPatch } from '../lib/api';
 import { Modal } from './Modal';
 import type { Deal, Contact, Activity } from './pipelineShared';
@@ -165,10 +167,55 @@ export function DealEditor({ deal, businessId, onClose, onSaved }: { deal?: Deal
             {save.isPending ? 'Saving...' : 'Save'}
           </button>
 
+          {!isNew && <DealQuotes dealId={deal!.id} onLeave={onClose} />}
           {!isNew && <DealActivity dealId={deal!.id} />}
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * The quotes and invoices made for this deal, and the way to make one.
+ *
+ * A quote started here already carries the deal's client, title and value, moves
+ * an early deal to Proposal, and puts the deal on the follow-up list when the
+ * client accepts it.
+ */
+function DealQuotes({ dealId, onLeave }: { dealId: number; onLeave: () => void }) {
+  const { data } = useQuery({
+    queryKey: ['deal', dealId],
+    queryFn: () => apiGet<{ documents: { id: number; type: string; number: string; status: string; decision: string | null; total: string; currency: string }[] }>(`/deals/${dealId}`),
+  });
+  const docs = data?.documents ?? [];
+  const word = (d: { type: string; status: string; decision: string | null }) =>
+    d.decision === 'accepted' || d.status === 'accepted' ? 'accepted'
+      : d.decision === 'declined' ? 'declined'
+        : d.status === 'draft' ? 'draft' : d.status === 'void' ? 'void' : d.status === 'paid' ? 'paid' : 'sent';
+  return (
+    <div className="mt-4 border-t border-slate-800 pt-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Quotes</span>
+        <button onClick={() => { onLeave(); navigateTo('billing', { fromdeal: String(dealId) }); }}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-slate-800">
+          <FileText size={12} /> {docs.length ? 'Make another quote' : 'Make a quote'}
+        </button>
+      </div>
+      {docs.length === 0 ? (
+        <p className="text-[11px] text-slate-500">None yet. A quote made here starts with this deal's client, title and value.</p>
+      ) : (
+        <div className="space-y-1">
+          {docs.map((d) => (
+            <button key={d.id} onClick={() => { onLeave(); navigateTo('billing', { open: String(d.id), doctype: d.type }); }}
+              className="flex w-full items-baseline gap-2 rounded-lg px-1.5 py-1 text-left text-xs hover:bg-slate-800/60">
+              <span className="num text-slate-200">{d.number}</span>
+              <span className={word(d) === 'accepted' || word(d) === 'paid' ? 'text-green-300' : word(d) === 'declined' || word(d) === 'void' ? 'text-red-300' : 'text-slate-400'}>{word(d)}</span>
+              <span className="num ml-auto text-slate-300">{moneyRound(d.total, d.currency)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

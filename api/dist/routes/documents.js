@@ -4,7 +4,7 @@ import { currencyFor } from '../lib/currencyFor.js';
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lt, lte, ne, isNotNull, isNull, sql, inArray } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts, invoiceReminders, users } from '../db/schema.js';
+import { documents, documentLines, accounts, businesses, folders, boards, tasks, timeEntries, payments, events, contacts, invoiceReminders, users, offerings } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { balanceOf, balancesFor, CHASE_MIN } from '../lib/balances.js';
@@ -19,6 +19,7 @@ import { logReminder, channelsOf, planReminder, reminderConfigFor } from '../lib
 import { renderDocumentPdf } from '../lib/pdf.js';
 import { businessScope, canSeeBusiness, assertMaybeBusiness } from '../lib/access.js';
 import { nextNumberFor, IMPORTED_SEQ_BASE, withFreshNumber } from '../lib/numbering.js';
+import { dealInAccount, quoteMadeForDeal, quoteAccepted } from '../lib/dealLink.js';
 import { addDays, clientBillingFor } from '../lib/billing.js';
 import { templateDataFor, fillTemplate } from '../lib/template.js';
 import { buildStatement } from '../lib/statement.js';
@@ -66,7 +67,31 @@ const bodySchema = z.object({
     depositValue: z.number().min(0).max(100_000_000).optional(),
     notes: z.string().max(5000).nullable().optional(),
     lines: z.array(lineSchema).max(200),
+    /** Made from a deal. Only read on create; the deal hears about it. */
+    dealId: z.number().int().positive().optional(),
 });
+/**
+ * Keep only the price list links that belong to this workspace.
+ *
+ * A line's offeringId was stored as sent. Paying an invoice turns its recurring
+ * lines into subscriptions, so a made-up id started a subscription on another
+ * workspace's item: its name and price showed in this workspace's MRR, and
+ * deleting that item in its own workspace would have deleted this subscription.
+ *
+ * Dropped rather than refused, so an old invoice whose item has since been
+ * deleted can still be edited. The line keeps its words and price; it just stops
+ * pointing at an item that is not yours.
+ */
+async function keepOwnOfferings(accountId, lines) {
+    const ids = [...new Set(lines.map((l) => l.offeringId).filter((x) => typeof x === 'number'))];
+    if (!ids.length)
+        return;
+    const mine = new Set((await db.select({ id: offerings.id }).from(offerings)
+        .where(tenantWhere(offerings, accountId, inArray(offerings.id, ids)))).map((o) => o.id));
+    for (const l of lines)
+        if (l.offeringId != null && !mine.has(l.offeringId))
+            l.offeringId = null;
+}
 const PREFIX = { quote: 'QUO-', invoice: 'INV-', credit_note: 'CN-' };
 /**
  * Totals with an optional discount taken off the subtotal before tax, so tax is
@@ -750,10 +775,14 @@ export async function documentRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
+        await keepOwnOfferings(accountId, d.lines);
         const which = await businessForDocument(accountId, d.businessId, d.folderId);
         if ('error' in which)
             return reply.code(400).send({ error: which.error });
         const businessId = which.id;
+        if (d.dealId && !(await dealInAccount(accountId, d.dealId))) {
+            return reply.code(400).send({ error: 'That deal was not found.' });
+        }
         /**
          * The business decides what it bills in, unless this client is billed in
          * something else. Settled before the totals, because rounding depends on it, and
@@ -815,7 +844,7 @@ export async function documentRoutes(app) {
                     depositType, depositValue: money(depositValue), depositAmount: money(totals.depositAmount),
                     taxRate: money(taxRate), subtotal: money(totals.subtotal),
                     taxAmount: money(totals.taxAmount), total: money(totals.total),
-                    notes: d.notes ?? null, createdBy: userId,
+                    notes: d.notes ?? null, createdBy: userId, dealId: d.dealId ?? null,
                 }));
                 const newId = Number(ins[0].insertId);
                 if (d.lines.length) {
@@ -854,6 +883,8 @@ export async function documentRoutes(app) {
                     .where(tenantWhere(timeEntries, accountId, and(isNotNull(timeEntries.durationSeconds), isNull(timeEntries.billedDocumentId), sql `${timeEntries.taskId} IN (SELECT id FROM tasks WHERE board_id IN (${sql.join(boardIds.map((b) => sql `${b}`), sql `, `)}))`, gte(timeEntries.startTime, new Date(`${ftFrom}T00:00:00.000Z`)), lte(timeEntries.startTime, new Date(`${ftTo}T23:59:59.999Z`)))));
             }
         }
+        if (d.dealId)
+            await quoteMadeForDeal(accountId, d.dealId, { type: d.type, number }, userId);
         const [created] = await db.select().from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, docId))).limit(1);
         return reply.code(201).send({ document: created });
@@ -868,6 +899,7 @@ export async function documentRoutes(app) {
         if (!parsed.success)
             return reply.code(400).send({ error: parsed.error.issues[0]?.message });
         const d = parsed.data;
+        await keepOwnOfferings(accountId, d.lines);
         const [existing] = await db.select().from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, id))).limit(1);
         if (!existing)
@@ -1022,6 +1054,8 @@ export async function documentRoutes(app) {
             .where(tenantWhere(documents, accountId, eq(documents.id, id)));
         if (!res[0].affectedRows)
             return reply.code(404).send({ error: 'Not found.' });
+        if (parsed.data.status === 'accepted' && own.status !== 'accepted')
+            await quoteAccepted(accountId, id, null);
         return { ok: true };
     });
     app.delete('/api/v1/documents/:id', async (req, reply) => {
@@ -1114,7 +1148,7 @@ export async function documentRoutes(app) {
                     // with the numbers rather than being retyped from memory.
                     depositType: quote.depositType, depositValue: quote.depositValue, depositAmount: quote.depositAmount,
                     subtotal: quote.subtotal, taxAmount: quote.taxAmount, total: quote.total,
-                    notes: quote.notes, createdBy: userId,
+                    notes: quote.notes, createdBy: userId, dealId: quote.dealId,
                 }));
                 const iid = Number(ins[0].insertId);
                 if (lines.length) {
@@ -1128,6 +1162,8 @@ export async function documentRoutes(app) {
         });
         await db.update(documents).set({ status: 'accepted' })
             .where(tenantWhere(documents, accountId, eq(documents.id, id)));
+        if (quote.status !== 'accepted')
+            await quoteAccepted(accountId, id, null);
         const [created] = await db.select().from(documents)
             .where(tenantWhere(documents, accountId, eq(documents.id, newId))).limit(1);
         return reply.code(201).send({ document: created });

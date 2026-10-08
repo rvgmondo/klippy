@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   DndContext, useDraggable, useDroppable, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent,
 } from '@dnd-kit/core';
-import { Plus, MoreHorizontal, ArrowRightLeft } from 'lucide-react';
+import { Plus, MoreHorizontal, ArrowRightLeft, Search, FileText } from 'lucide-react';
 import { apiGet, apiPost, apiDelete } from '../lib/api';
 import { Skeleton } from './ui';
 import { Menu } from './Menu';
@@ -13,7 +13,7 @@ import { DealEditor } from './DealEditor';
 import {} from './Modal';
 import type { BusinessSelection } from './BusinessSwitcher';
 import { moneyRound } from '../lib/money';
-import { useUrlAction } from '../lib/urlAction';
+import { useUrlAction, navigateTo } from '../lib/urlAction';
 import { CanvasPage, PageHeader } from './PageHeader';
 import { LeadFormModal } from './LeadFormModal';
 import { useActingBusiness } from '../lib/useActingBusiness';
@@ -42,7 +42,36 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
 
   const bizQ = businessId === 'all' ? '' : `?businessId=${businessId}`;
   const { data, isLoading } = useQuery({ queryKey: ['deals', businessId], queryFn: () => apiGet<{ deals: Deal[]; summary: Summary }>(`/deals${bizQ}`) });
-  const deals = data?.deals ?? [];
+  const allDeals = data?.deals ?? [];
+
+  /**
+   * Finding a deal, and keeping the board about now.
+   *
+   * Won and Lost only ever grew, so after a year the two lanes on the right were a
+   * scroll of history. By default they show the last 90 days; the rest is one tap
+   * away, and still counted in the totals and insights.
+   */
+  const [query, setQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [quietOnly, setQuietOnly] = useState(false);
+  const [showOld, setShowOld] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const cutoff = Date.now() - 90 * 86400000;
+  const sources = [...new Set(allDeals.map((d) => d.source?.trim()).filter(Boolean) as string[])].sort();
+  const q = query.trim().toLowerCase();
+  const isOld = (d: Deal) => (d.stage === 'won' || d.stage === 'lost')
+    && new Date(d.wonAt ?? d.lastTouchAt ?? d.createdAt ?? Date.now()).getTime() < cutoff;
+  const hiddenOld = allDeals.filter(isOld).length;
+  const deals = allDeals.filter((d) => {
+    if (!showOld && isOld(d)) return false;
+    if (sourceFilter && (d.source?.trim() || '') !== sourceFilter) return false;
+    if (quietOnly && !quietDays(d, today)) return false;
+    if (!q) return true;
+    return [d.title, d.company, d.contactName, d.contactEmail, d.notes, d.source]
+      .some((x) => x && x.toLowerCase().includes(q));
+  });
+  const quietCount = allDeals.filter((d) => quietDays(d, today)).length;
+  const filtering = !!q || !!sourceFilter || quietOnly;
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['deals'] });
     // The follow-up strip is a different query over the same data. Without this a
@@ -58,6 +87,16 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   useUrlAction('new', (v) => { if (v === 'deal') setAdding(true); });
   const [editing, setEditing] = useState<Deal | null>(null);
 
+  const makeQuote = (id: number) => navigateTo('billing', { fromdeal: String(id) });
+  const moveTo = async (deal: Deal, stage: Stage) => {
+    if (stage === 'lost') {
+      const reason = await promptDialog('Why was this deal lost? (optional)', '', { confirmLabel: 'Mark lost' });
+      if (reason === null) return;
+      move.mutate({ id: deal.id, stage, lostReason: reason.trim() || null });
+      return;
+    }
+    move.mutate({ id: deal.id, stage });
+  };
   const move = useMutation({
     mutationFn: (v: { id: number; stage: Stage; lostReason?: string | null }) =>
       apiPost(`/deals/${v.id}/move`, { stage: v.stage, position: 99999, lostReason: v.lostReason ?? null }),
@@ -80,7 +119,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
     const over = e.over?.id?.toString() ?? '';
     if (!over.startsWith('stage-')) return;
     const stage = over.slice(6) as Stage;
-    const deal = deals.find((d) => d.id === id);
+    const deal = allDeals.find((d) => d.id === id);
     if (!deal || deal.stage === stage) return;
     // Capture WHY the moment a deal is lost, while the reason is fresh. Blank is
     // allowed; "why we lose" is unlearnable without at least the chance to record it.
@@ -189,9 +228,46 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
         </div>
       )}
 
+      {allDeals.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3 sm:px-6">
+          <label className="relative min-w-0 flex-1 sm:max-w-xs">
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a deal, company or person"
+              aria-label="Find a deal"
+              className="min-h-10 w-full rounded-lg border border-slate-700 bg-slate-900/70 pl-8 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 sm:min-h-9" />
+          </label>
+          {sources.length > 0 && (
+            <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} aria-label="Where the deal came from"
+              className="min-h-10 rounded-lg border border-slate-700 bg-slate-900/70 px-2 text-sm text-slate-200 sm:min-h-9">
+              <option value="">Every source</option>
+              {sources.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          )}
+          {quietCount > 0 && (
+            <button onClick={() => setQuietOnly((v) => !v)} aria-pressed={quietOnly}
+              title="Open deals with nothing logged for two weeks and no follow-up date"
+              className={`min-h-10 rounded-lg border px-3 text-sm sm:min-h-9 ${quietOnly ? 'border-amber-500/60 bg-amber-500/15 text-amber-200' : 'border-slate-700 text-slate-300 hover:bg-slate-800'}`}>
+              Gone quiet ({quietCount})
+            </button>
+          )}
+          {hiddenOld > 0 && (
+            <button onClick={() => setShowOld((v) => !v)}
+              className="min-h-10 rounded-lg px-2 text-xs text-slate-400 hover:text-slate-200 sm:min-h-9">
+              {showOld ? 'Hide old won and lost' : `Show ${hiddenOld} older won and lost`}
+            </button>
+          )}
+          {filtering && (
+            <span className="text-xs text-slate-500">
+              {deals.length} of {allDeals.length} shown.{' '}
+              <button onClick={() => { setQuery(''); setSourceFilter(''); setQuietOnly(false); }} className="text-violet-300 hover:underline">Clear</button>
+            </span>
+          )}
+        </div>
+      )}
+
       <FollowUpStrip businessId={typeof businessId === 'number' ? businessId : undefined}
         onOpen={(dealId) => {
-          const d = deals.find((x) => x.id === dealId);
+          const d = allDeals.find((x) => x.id === dealId);
           if (d) setEditing(d);
         }} />
 
@@ -200,7 +276,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
           {[0, 1, 2].map((i) => <Skeleton key={i} className="h-64 w-72 shrink-0" />)}
         </div>
       )}
-      {!isLoading && data && deals.length === 0 && (
+      {!isLoading && data && allDeals.length === 0 && (
         <div className="mx-4 mt-4 rounded-xl border border-dashed border-slate-700 p-5 text-center">
           <p className="text-sm font-medium text-slate-200">No deals yet</p>
           <p className="mx-auto mt-1 max-w-md text-xs text-slate-500">
@@ -226,7 +302,7 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
         <div className="flex min-h-0 flex-1 snap-x snap-proximity gap-3 overflow-x-auto p-4">
           {STAGES.map((st) => (
             <StageLane key={st.key} stage={st} deals={deals.filter((d) => d.stage === st.key)}
-              money={money} onOpen={setEditing}
+              money={money} onOpen={setEditing} today={today} onMove={moveTo} onQuote={makeQuote}
               onConvert={(id) => convert.mutate(id)} onDelete={(id) => del.mutate(id)} onOpenClient={onOpenClient} />
           ))}
         </div>
@@ -259,7 +335,7 @@ function FollowUpStrip({ businessId, onOpen }: {
       followUps: { id: number; title: string; company: string | null; nextFollowUpAt: string;
         followUpNote: string | null; contactName: string | null }[];
       today: string;
-    }>('/deals/follow-ups'),
+    }>(businessId ? `/deals/follow-ups?businessId=${businessId}` : '/deals/follow-ups'),
   });
   const rows = data?.followUps ?? [];
   if (!rows.length) return null;
@@ -304,8 +380,9 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   );
 }
 
-function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onOpenClient }: {
+function StageLane({ stage, deals, money, today, onMove, onQuote, onOpen, onConvert, onDelete, onOpenClient }: {
   stage: { key: Stage; label: string; color: string }; deals: Deal[]; money: (v: number | string) => string;
+  today: string; onMove: (d: Deal, s: Stage) => void; onQuote: (id: number) => void;
   onOpen: (d: Deal) => void; onConvert: (id: number) => void; onDelete: (id: number) => void; onOpenClient?: (folderId: number) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `stage-${stage.key}` });
@@ -319,7 +396,7 @@ function StageLane({ stage, deals, money, onOpen, onConvert, onDelete, onOpenCli
       </div>
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
         {deals.map((d) => (
-          <DealCard key={d.id} deal={d} money={money} onOpen={onOpen} onConvert={onConvert} onDelete={onDelete} onOpenClient={onOpenClient} />
+          <DealCard key={d.id} deal={d} money={money} today={today} onMove={onMove} onQuote={onQuote} onOpen={onOpen} onConvert={onConvert} onDelete={onDelete} onOpenClient={onOpenClient} />
         ))}
       </div>
     </div>
@@ -337,8 +414,19 @@ function followUpState(deal: Deal, today: string): { label: string; overdue: boo
   return { label: `follow up ${deal.nextFollowUpAt}`, overdue: false };
 }
 
-function DealCard({ deal, money, onOpen, onConvert, onDelete, onOpenClient }: {
-  deal: Deal; money: (v: number | string) => string; onOpen: (d: Deal) => void;
+/**
+ * Days since anything happened on an open deal that has no follow-up date, from
+ * 14 days. Null when it is fine: closed, recently touched, or already on the list.
+ */
+function quietDays(deal: Deal, today: string): number | null {
+  if (deal.stage === 'won' || deal.stage === 'lost' || deal.nextFollowUpAt || !deal.lastTouchAt) return null;
+  const days = Math.floor((Date.parse(today + 'T00:00:00Z') - new Date(deal.lastTouchAt).getTime()) / 86400000);
+  return days >= 14 ? days : null;
+}
+
+function DealCard({ deal, money, today, onMove, onQuote, onOpen, onConvert, onDelete, onOpenClient }: {
+  deal: Deal; money: (v: number | string) => string; today: string;
+  onMove: (d: Deal, s: Stage) => void; onQuote: (id: number) => void; onOpen: (d: Deal) => void;
   onConvert: (id: number) => void; onDelete: (id: number) => void; onOpenClient?: (folderId: number) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: deal.id });
@@ -352,9 +440,12 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onOpenClient }: {
           <p className="truncate text-sm text-slate-100">{deal.title}</p>
           {deal.company && <p className="truncate text-xs text-slate-400">{deal.company}</p>}
         </div>
-        <Menu align="right"
+        <Menu align="right" label={`More for ${deal.title}`}
           trigger={<span className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
           items={[
+            // Dragging is fiddly on a phone, so every move is also a tap away.
+            ...STAGES.filter((x) => x.key !== deal.stage).map((x) => ({ label: `Move to ${x.label}`, onClick: () => onMove(deal, x.key) })),
+            { label: deal.quotes?.count ? 'Make another quote' : 'Make a quote', onClick: () => onQuote(deal.id) },
             ...(deal.clientFolderId
               ? [{ label: 'Open client (Delivery)', onClick: () => onOpenClient?.(deal.clientFolderId!) }]
               : [{ label: 'Convert to client', onClick: async () => { if (await confirmDialog(`Turn "${deal.company || deal.title}" into a Delivery client?`)) onConvert(deal.id); } }]),
@@ -364,16 +455,32 @@ function DealCard({ deal, money, onOpen, onConvert, onDelete, onOpenClient }: {
       </div>
       <div className="mt-2 flex items-center justify-between text-[11px]">
         <span className="num font-medium text-violet-300">{money(deal.value)}</span>
-        {deal.clientFolderId && (
-          <span className="inline-flex items-center gap-1 rounded bg-green-600/20 px-1.5 py-0.5 text-green-300"><ArrowRightLeft size={10} /> client</span>
-        )}
+        <span className="flex items-center gap-1">
+          {!!deal.quotes?.count && (
+            <span title={deal.quotes.accepted ? 'A quote for this deal was accepted' : `${deal.quotes.count} quote${deal.quotes.count === 1 ? '' : 's'} made for this deal`}
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 ${deal.quotes.accepted ? 'bg-green-600/20 text-green-300' : 'bg-slate-700/60 text-slate-300'}`}>
+              <FileText size={10} /> {deal.quotes.accepted ? 'accepted' : 'quoted'}
+            </span>
+          )}
+          {deal.clientFolderId && (
+            <span className="inline-flex items-center gap-1 rounded bg-green-600/20 px-1.5 py-0.5 text-green-300"><ArrowRightLeft size={10} /> client</span>
+          )}
+        </span>
       </div>
 
       {/* An overdue chase should be visible on the board, not only after opening
           the deal. That is the whole point of writing the date down. */}
       {(() => {
-        const f = followUpState(deal, new Date().toISOString().slice(0, 10));
-        if (!f) return null;
+        const f = followUpState(deal, today);
+        if (!f) {
+          const quiet = quietDays(deal, today);
+          return quiet ? (
+            <div className="mt-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200"
+              title="Nothing logged and no follow-up date. Log a call or set a date.">
+              quiet for {quiet} days
+            </div>
+          ) : null;
+        }
         return (
           <div className={`mt-1.5 rounded px-1.5 py-0.5 text-[10px] ${
             f.overdue ? 'bg-red-600/20 text-red-300' : 'bg-slate-700/60 text-slate-400'}`}>

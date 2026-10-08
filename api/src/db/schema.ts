@@ -848,6 +848,9 @@ export const documents = mysqlTable('documents', {
   // needs twice over: to ask PayFast for a reusable token when the client pays this
   // one by hand, and to know which stored token to charge for the next cycle.
   subscriptionId: int('subscription_id', { unsigned: true }),
+  // The deal this quote (or invoice) was made for, so the pipeline can see that a
+  // quote went out and hear when it is accepted. Set only when made from a deal.
+  dealId: int('deal_id', { unsigned: true }),
   clientName: varchar('client_name', { length: 150 }).notNull(),
   clientEmail: varchar('client_email', { length: 150 }),
   clientAddress: text('client_address'),

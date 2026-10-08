@@ -175,6 +175,9 @@ export async function crmRoutes(app) {
     app.get('/api/v1/deals/follow-ups', async (req) => {
         const { accountId } = authOf(req);
         const today = new Date().toISOString().slice(0, 10);
+        // The board passes the business it is showing; without it the strip listed
+        // every business's chases above one business's pipeline.
+        const biz = Number(req.query.businessId) || null;
         const rows = await db.select({
             id: deals.id, title: deals.title, company: deals.company, stage: deals.stage,
             value: deals.value, businessId: deals.businessId,
@@ -182,7 +185,7 @@ export async function crmRoutes(app) {
             contactName: contacts.name, contactEmail: contacts.email,
         }).from(deals)
             .leftJoin(contacts, eq(contacts.id, deals.contactId))
-            .where(tenantWhere(deals, accountId, isNotNull(deals.nextFollowUpAt), lte(deals.nextFollowUpAt, today), or(eq(deals.stage, 'lead'), eq(deals.stage, 'contacted'), eq(deals.stage, 'proposal')), await businessScope(req, deals.businessId)))
+            .where(tenantWhere(deals, accountId, isNotNull(deals.nextFollowUpAt), lte(deals.nextFollowUpAt, today), or(eq(deals.stage, 'lead'), eq(deals.stage, 'contacted'), eq(deals.stage, 'proposal')), biz ? eq(deals.businessId, biz) : undefined, await businessScope(req, deals.businessId)))
             .orderBy(asc(deals.nextFollowUpAt))
             .limit(200);
         return { followUps: rows, today };

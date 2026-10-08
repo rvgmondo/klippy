@@ -1,0 +1,1 @@
+ALTER TABLE `documents` ADD `deal_id` int unsigned;

@@ -1,8 +1,8 @@
 import { money } from '../lib/money.js';
 import { z } from 'zod';
-import { and, asc, eq, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { deals, dealActivities } from '../db/schema.js';
+import { deals, dealActivities, documents } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
@@ -38,6 +38,49 @@ export async function dealRoutes(app) {
         const rows = await db.select().from(deals)
             .where(tenantWhere(deals, accountId, bizFilter, scope))
             .orderBy(asc(deals.stage), asc(deals.position));
+        /**
+         * When each deal was last touched, and what was quoted on it.
+         *
+         * "Last touched" is the newest logged call, note or stage move, else when the
+         * deal was added. Not updatedAt: dragging one card renumbers every card in the
+         * lane, which would make every deal look fresh. A deal nobody has touched in
+         * weeks is the one quietly dying, and the board now says so.
+         */
+        const ids = rows.map((d) => d.id);
+        const touched = new Map();
+        const quoted = new Map();
+        if (ids.length) {
+            const acts = await db.select({ dealId: dealActivities.dealId, at: sql `MAX(${dealActivities.occurredAt})` })
+                .from(dealActivities)
+                .where(tenantWhere(dealActivities, accountId, inArray(dealActivities.dealId, ids)))
+                .groupBy(dealActivities.dealId);
+            for (const a of acts) {
+                const v = a.at;
+                if (!v)
+                    continue;
+                // MAX() comes back as text, in UTC (the session is pinned to UTC).
+                const at = v instanceof Date ? v : new Date(String(v).replace(' ', 'T') + 'Z');
+                if (!Number.isNaN(at.getTime()))
+                    touched.set(a.dealId, at);
+            }
+            const docs = await db.select({ dealId: documents.dealId, decision: documents.decision, status: documents.status })
+                .from(documents)
+                .where(tenantWhere(documents, accountId, inArray(documents.dealId, ids), eq(documents.type, 'quote'), ne(documents.status, 'void')));
+            for (const q of docs) {
+                if (!q.dealId)
+                    continue;
+                const e = quoted.get(q.dealId) ?? { count: 0, accepted: false };
+                e.count += 1;
+                if (q.decision === 'accepted' || q.status === 'accepted')
+                    e.accepted = true;
+                quoted.set(q.dealId, e);
+            }
+        }
+        const shaped = rows.map((d) => {
+            const t = touched.get(d.id);
+            const last = t && t > d.createdAt ? t : d.createdAt;
+            return { ...d, lastTouchAt: last, quotes: quoted.get(d.id) ?? { count: 0, accepted: false } };
+        });
         const openStages = ['lead', 'contacted', 'proposal'];
         const open = rows.filter((d) => openStages.includes(d.stage));
         const monthStart = new Date();
@@ -69,7 +112,7 @@ export async function dealRoutes(app) {
             }, new Map())].map(([reason, count]) => ({ reason, count }))
             .sort((a, b) => b.count - a.count);
         return {
-            deals: rows,
+            deals: shaped,
             summary: {
                 openCount: open.length,
                 pipelineValue: Math.round(open.reduce((s, d) => s + Number(d.value), 0) * 100) / 100,
@@ -82,6 +125,25 @@ export async function dealRoutes(app) {
                 lostReasons,
             },
         };
+    });
+    /** One deal, with the quotes and invoices made for it. */
+    app.get('/api/v1/deals/:id', async (req, reply) => {
+        const { accountId } = authOf(req);
+        const id = intId(req);
+        if (!id)
+            return reply.code(400).send({ error: 'Bad id.' });
+        const [deal] = await db.select().from(deals).where(tenantWhere(deals, accountId, eq(deals.id, id))).limit(1);
+        if (!deal)
+            return reply.code(404).send({ error: 'Deal not found.' });
+        if (!(await assertMaybeBusiness(req, reply, deal.businessId)))
+            return;
+        const docs = await db.select({
+            id: documents.id, type: documents.type, number: documents.number, status: documents.status,
+            decision: documents.decision, total: documents.total, currency: documents.currency, issueDate: documents.issueDate,
+        }).from(documents)
+            .where(tenantWhere(documents, accountId, eq(documents.dealId, id)))
+            .orderBy(desc(documents.id));
+        return { deal, documents: docs };
     });
     app.post('/api/v1/deals', async (req, reply) => {
         const { accountId, userId } = authOf(req);

@@ -149,8 +149,10 @@ const mkClient = async (name, { hosting = 'active', trashed = false } = {}) => {
   ok(bizOk.ok, 'with hosting cleared the business deletes normally', String(bizOk.status));
 
   await db.query('DELETE FROM hosting_accounts WHERE id = ?', [c.hostingId]);
+  // Still refused: its subscription is active, and deleting the offering would
+  // delete the subscription with it and stop that billing. Archive is the way out.
   const offOk = await del(`/offerings/${c.offeringId}`);
-  ok(offOk.ok, 'with hosting cleared the offering deletes normally', String(offOk.status));
+  ok(offOk.status === 409, 'with hosting cleared, an offering someone is subscribed to is still kept (archive it instead)', String(offOk.status));
   await db.query('DELETE FROM folders WHERE id = ?', [c.folderId]);
 }
 

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useFromBusiness, PICK_BUSINESS } from './FromBusiness';
 import { confirmDialog, notify } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, X, PackageSearch, Repeat } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, PackageSearch, Repeat, Copy, Search } from 'lucide-react';
 import { apiGet, apiPost, apiPatch, apiDelete } from '../lib/api';
 import { Skeleton } from './ui';
 import type { Business, BusinessType, Offering, Subscription, Folder } from '../lib/types';
@@ -64,9 +64,36 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
       mrr: { currency: string; mrr: number; subscriptions: number }[];
     }>(`/offerings${bizParam}`),
   });
-  const rows = data?.offerings ?? [];
+  const allRows = data?.offerings ?? [];
+  // Archived items used to sit in the list at half strength forever. They are kept
+  // (old invoices and subscriptions point at them) but tucked away by default.
+  const [showArchived, setShowArchived] = useState(false);
+  const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<'list' | 'earned'>('list');
+  const archivedCount = allRows.filter((o) => !o.active).length;
+  const q = query.trim().toLowerCase();
+  const rows = allRows
+    .filter((o) => showArchived || o.active)
+    .filter((o) => !q || o.name.toLowerCase().includes(q) || (o.description ?? '').toLowerCase().includes(q))
+    .sort((a, b) => sort === 'earned' ? (b.usage?.revenue12m ?? 0) - (a.usage?.revenue12m ?? 0) : 0);
   const invalidate = () => qc.invalidateQueries({ queryKey: ['offerings'] });
-  const del = useMutation({ mutationFn: (id: number) => apiDelete(`/offerings/${id}`), onSuccess: invalidate });
+  const del = useMutation({
+    mutationFn: (id: number) => apiDelete(`/offerings/${id}`),
+    onSuccess: invalidate,
+    // The server refuses when clients are subscribed to it, and says why. That
+    // reason used to be swallowed, so the button simply did nothing.
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not delete that.', 'error'),
+  });
+  const duplicate = useMutation({
+    mutationFn: (o: Offering) => apiPost('/offerings', {
+      businessId: o.businessId, name: `${o.name} (copy)`.slice(0, 150), description: o.description,
+      price: Number(o.price) || 0, cost: o.cost != null ? Number(o.cost) : null, unit: o.unit,
+      recurring: o.recurring, stockQty: null, reorderPoint: o.reorderPoint,
+      provisioning: o.provisioning ?? 'none', whmPackage: o.whmPackage ?? null,
+    }),
+    onSuccess: () => { invalidate(); notify('Copied. Rename and price the copy.', 'ok'); },
+    onError: (e) => notify(e instanceof Error ? e.message : 'Could not copy that.', 'error'),
+  });
   const toggleActive = useMutation({
     mutationFn: (v: { id: number; active: boolean }) => apiPatch(`/offerings/${v.id}`, { active: v.active }),
     onSuccess: invalidate,
@@ -130,6 +157,27 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
           </div>
         )}
 
+        {allRows.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <label className="relative min-w-0 flex-1 sm:max-w-xs">
+              <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find an item" aria-label="Find an item"
+                className="min-h-10 w-full rounded-lg border border-slate-700 bg-slate-900/70 pl-8 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 sm:min-h-9" />
+            </label>
+            <select value={sort} onChange={(e) => setSort(e.target.value as 'list' | 'earned')} aria-label="Order"
+              className="min-h-10 rounded-lg border border-slate-700 bg-slate-900/70 px-2 text-sm text-slate-200 sm:min-h-9">
+              <option value="list">Your order</option>
+              <option value="earned">Earned most</option>
+            </select>
+            {archivedCount > 0 && (
+              <button onClick={() => setShowArchived((v) => !v)}
+                className="min-h-10 rounded-lg px-2 text-xs text-slate-400 hover:text-slate-200 sm:min-h-9">
+                {showArchived ? 'Hide archived' : `Show ${archivedCount} archived`}
+              </button>
+            )}
+          </div>
+        )}
+
         {isLoading && <Skeleton className="h-48" />}
         {!isLoading && (
         <div className="overflow-x-auto rounded-xl border border-slate-800">
@@ -138,7 +186,8 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
               <tr>
                 <th className="px-3 py-2 font-medium">Name</th>
                 <th className="px-3 py-2 text-right font-medium">Price</th>
-                <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Cost</th>
+                <th className="hidden px-3 py-2 text-right font-medium sm:table-cell" title="Price less cost, where a cost is set">Margin</th>
+                <th className="hidden px-3 py-2 text-right font-medium md:table-cell" title="On invoices sent or paid in the last 12 months">Last 12 months</th>
                 <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Stock</th>
                 <th className="px-3 py-2 font-medium"></th>
                 <th className="px-3 py-2"></th>
@@ -146,25 +195,44 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-10 text-center text-slate-500">
+                <tr><td colSpan={7} className="px-3 py-10 text-center text-slate-500">
                   <PackageSearch size={22} className="mx-auto mb-2 opacity-50" />
-                  Nothing here yet. Add what you sell.
+                  {allRows.length === 0 ? 'Nothing here yet. Add what you sell.' : 'Nothing matches.'}
                 </td></tr>
               )}
               {rows.map((o) => (
                 <tr key={o.id} className={`group border-t border-slate-800 ${o.active ? '' : 'opacity-50'}`}>
-                  <td className="px-3 py-2 font-medium text-slate-200">{o.name}</td>
+                  <td className="max-w-[18rem] px-3 py-2">
+                    <span className="block font-medium text-slate-200">{o.name}</span>
+                    {o.description && <span className="block truncate text-xs text-slate-500">{o.description}</span>}
+                  </td>
                   <td className="px-3 py-2 text-right num text-slate-100">
                     {money(o.price)}{o.unit ? <span className="text-slate-500"> /{o.unit}</span> : null}
                   </td>
-                  <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">{o.cost ? money(o.cost) : '-'}</td>
+                  <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">
+                    {o.cost != null && Number(o.price) > 0 ? (() => {
+                      const m = Number(o.price) - Number(o.cost);
+                      const pct = Math.round((m / Number(o.price)) * 100);
+                      return <span className={m < 0 ? 'text-red-300' : pct < 20 ? 'text-amber-300' : ''} title={`Cost ${money(o.cost)}`}>{money(m)} <span className="text-slate-500">{pct}%</span></span>;
+                    })() : '-'}
+                  </td>
+                  <td className="hidden px-3 py-2 text-right num md:table-cell">
+                    {o.usage && o.usage.revenue12m > 0
+                      ? <span className="text-slate-200" title={`${o.usage.sold12m} sold`}>{money(o.usage.revenue12m)}</span>
+                      : <span className="text-slate-600">nothing</span>}
+                  </td>
                   <td className="hidden px-3 py-2 text-right num text-slate-400 sm:table-cell">
                     {o.stockQty == null ? '-' : (
                       <span className={o.reorderPoint != null && o.stockQty <= o.reorderPoint ? 'text-amber-400' : ''}>{o.stockQty}</span>
                     )}
                   </td>
                   <td className="px-3 py-2">
-                    {o.recurring && <span className="rounded-md bg-violet-600/30 px-2 py-0.5 text-[11px] text-violet-200">recurring</span>}
+                    {o.recurring && (
+                      <span className="whitespace-nowrap rounded-md bg-violet-600/30 px-2 py-0.5 text-[11px] text-violet-200"
+                        title={o.usage?.subscribers ? `${o.usage.subscribers} active subscription${o.usage.subscribers === 1 ? '' : 's'}` : 'Nobody is subscribed yet'}>
+                        recurring{o.usage?.subscribers ? `, ${o.usage.subscribers} on it` : ''}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-1">
@@ -172,7 +240,8 @@ export function OfferingsView({ businessId }: { businessId: BusinessSelection })
                         title={o.active ? 'Archive' : 'Reactivate'}
                         className="tap px-2 text-[11px] text-slate-500 hover:bg-slate-800 hover:text-slate-200">{o.active ? 'Archive' : 'Reactivate'}</button>
                       <button onClick={() => setEditing(o)} title="Edit" className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Pencil size={14} /></button>
-                      <button onClick={async () => { if (await confirmDialog(`Delete "${o.name}"?`, { danger: true })) del.mutate(o.id); }} title="Delete" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><Trash2 size={14} /></button>
+                      <button onClick={() => duplicate.mutate(o)} disabled={duplicate.isPending} title="Make a copy" className="tap text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Copy size={14} /></button>
+                      <button onClick={async () => { if (await confirmDialog(o.usage?.everUsed ? `"${o.name}" has subscriptions on it, so it can only be archived. Try deleting anyway?` : `Delete "${o.name}"?`, { danger: true })) del.mutate(o.id); }} title="Delete" className="tap text-slate-500 hover:bg-slate-800 hover:text-red-400"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>
@@ -411,6 +480,10 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
   const [provisioning, setProvisioning] = useState(offering?.provisioning ?? 'none');
   const [whmPackage, setWhmPackage] = useState(offering?.whmPackage ?? '');
   const showCost = activeTypes.includes('products') || cost !== '';
+  // Subscriptions with no price of their own pay the list price, so changing it
+  // here changes their next bill. Said before saving, not discovered on the invoice.
+  const followers = offering?.usage?.followPrice ?? 0;
+  const priceChanged = !isNew && Number(price) !== Number(offering!.price);
 
   const save = useMutation({
     mutationFn: () => {
@@ -467,10 +540,16 @@ function OfferingEditor({ offering, activeTypes, businessId, onClose, onSaved }:
           </div>
           <div>
             <label className="mb-1 block text-xs text-slate-400">Per (optional)</label>
-            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="hour, unit, month..."
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="hour, unit or month"
               className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-violet-500" />
           </div>
         </div>
+        {priceChanged && followers > 0 && (
+          <p className="-mt-1 mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            {followers} subscription{followers === 1 ? ' pays' : 's pay'} the list price, so {followers === 1 ? 'its' : 'their'} next bill will be the new price.
+            Clients on a price of their own are not affected.
+          </p>
+        )}
 
         {showCost && (
           <div className="mb-3">

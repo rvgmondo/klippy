@@ -96,8 +96,27 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
 
   // The palette and the client action row hand this view an intent through the
   // URL: open a fresh invoice or quote, optionally already pointed at a client.
+  // Made from a deal: the deal's client, title and value start the quote, and the
+  // deal hears about it once it is saved.
+  const [fromDeal, setFromDeal] = useState<FromDeal | null>(null);
+  // Its own key rather than new=quote: the Deals screen listens for "new" too, and
+  // took the request on its way out, so the quote never opened.
+  useUrlAction('fromdeal', (dl) => {
+    apiGet<{ deal: { id: number; businessId: number | null; title: string; company: string | null; contactName: string | null; contactEmail: string | null; value: string; clientFolderId: number | null } }>(`/deals/${Number(dl)}`)
+      .then(({ deal }) => {
+        setFromDeal({
+          id: deal.id, businessId: deal.businessId, title: deal.title, value: Number(deal.value) || 0,
+          name: deal.company || deal.contactName || deal.title, email: deal.contactEmail,
+        });
+        setInitialFolder(deal.clientFolderId);
+        setTab('quote');
+        setEditing('new');
+      })
+      .catch((e: Error) => notify(e.message || 'That deal could not be opened.', 'error'));
+  });
   useUrlAction('new', (v) => {
     if (v !== 'invoice' && v !== 'quote') return;
+    setFromDeal(null);
     const f = takeUrlParam('folder');
     setInitialFolder(f ? Number(f) : null);
     setTab(v);
@@ -466,7 +485,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                         <button onClick={() => setPaying(d)} title="Payments"
                           className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-green-300"><DollarSign size={14} /></button>
                       )}
-                      <Menu align="right"
+                      <Menu align="right" label={`More for ${d.number}`}
                         trigger={<span className="grid h-8 w-8 place-items-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={15} /></span>}
                         items={[
                           { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
@@ -534,7 +553,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
                 {d.type === 'invoice' && (
                   <button onClick={() => setPaying(d)} title="Payments" className="tap text-slate-400 hover:bg-slate-800 hover:text-green-300"><DollarSign size={16} /></button>
                 )}
-                <Menu align="right"
+                <Menu align="right" label={`More for ${d.number}`}
                   trigger={<span className="tap text-slate-400 hover:bg-slate-800 hover:text-slate-200"><MoreHorizontal size={17} /></span>}
                   items={[
                     { label: 'Print / PDF', onClick: () => setPrinting(d.id) },
@@ -561,7 +580,7 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
       {/* Keyed per intent, so opening "New invoice" again while an editor is mounted starts
           a fresh one. Without it a remembered draft id would survive, and the next save
           would overwrite that earlier draft with an unrelated document. */}
-      {editing && <Editor key={`${String(editing)}:${tab}`} id={editing} type={tab} businessId={newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} onClose={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onSaved={() => { setEditing(null); setInitialFolder(null); invalidate(); }} onChanged={invalidate} />}
+      {editing && <Editor key={`${String(editing)}:${tab}:${fromDeal?.id ?? ''}`} id={editing} type={tab} businessId={(editing === 'new' && fromDeal?.businessId) || newBusinessId} initialFolderId={editing === 'new' ? initialFolder : null} fromDeal={editing === 'new' ? fromDeal : null} onClose={() => { setEditing(null); setInitialFolder(null); setFromDeal(null); invalidate(); }} onSaved={() => { setEditing(null); setInitialFolder(null); setFromDeal(null); invalidate(); qc.invalidateQueries({ queryKey: ['deals'] }); qc.invalidateQueries({ queryKey: ['deal'] }); }} onChanged={invalidate} />}
       {printing && <PrintView id={printing} onClose={() => setPrinting(null)} />}
       {paying && <PaymentsModal doc={paying} onClose={() => { setPaying(null); invalidate(); }} />}
       {acting && <DocActionSheet doc={acting.doc} action={acting.action} onClose={() => { setActing(null); invalidate(); }} />}
@@ -574,7 +593,9 @@ export function BillingView({ businessId }: { businessId: BusinessSelection }) {
   );
 }
 
-function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onChanged }: { id: number | 'new'; type: DocType; businessId?: number; initialFolderId?: number | null; onClose: () => void; onSaved: () => void; onChanged: () => void }) {
+interface FromDeal { id: number; businessId: number | null; title: string; value: number; name: string; email: string | null }
+
+function Editor({ id, type, businessId, initialFolderId, fromDeal, onClose, onSaved, onChanged }: { id: number | 'new'; type: DocType; businessId?: number; initialFolderId?: number | null; fromDeal?: FromDeal | null; onClose: () => void; onSaved: () => void; onChanged: () => void }) {
   const isNew = id === 'new';
   /**
    * The document this editor has ALREADY created, when a save went through but the send
@@ -627,8 +648,8 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [foldersQ.data, initialFolderId, id]);
-  const [clientName, setClientName] = useState('');
-  const [clientEmail, setClientEmail] = useState('');
+  const [clientName, setClientName] = useState(fromDeal?.name ?? '');
+  const [clientEmail, setClientEmail] = useState(fromDeal?.email ?? '');
   const [clientAddress, setClientAddress] = useState('');
   const [clientVat, setClientVat] = useState('');
   // What this client is billed in, when it is not what the business bills in.
@@ -648,7 +669,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
   const [depositType, setDepositType] = useState<DepositType>('none');
   const [depositValue, setDepositValue] = useState(0);
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<Line[]>([{ description: '', quantity: 1, unitPrice: 0 }]);
+  const [lines, setLines] = useState<Line[]>([{ description: fromDeal?.title ?? '', quantity: 1, unitPrice: fromDeal?.value ?? 0 }]);
   const offeringsQ = useQuery({
     queryKey: ['offerings', businessId],
     queryFn: () => apiGet<{ offerings: { id: number; name: string; description: string | null; price: string; recurring: boolean; active: boolean }[] }>(
@@ -860,6 +881,7 @@ function Editor({ id, type, businessId, initialFolderId, onClose, onSaved, onCha
         // retry would link the same hours twice.
         ...(creating && defaultsBusinessId ? { businessId: defaultsBusinessId } : {}),
         ...(creating && type === 'invoice' && pulledTime ? { fromTime: pulledTime } : {}),
+        ...(creating && fromDeal ? { dealId: fromDeal.id } : {}),
         lines: lines.filter((l) => l.description.trim()).map((l) => ({
           description: l.description.trim(),
           detail: l.detail?.trim() || null,

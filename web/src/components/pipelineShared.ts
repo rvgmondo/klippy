@@ -9,6 +9,10 @@ export interface Deal {
   stage: Stage; notes: string | null; clientFolderId: number | null;
   contactId?: number | null; source?: string | null;
   nextFollowUpAt?: string | null; followUpNote?: string | null;
+  businessId?: number | null; wonAt?: string | null; createdAt?: string;
+  /** Newest logged call, note or stage move, else when it was added. */
+  lastTouchAt?: string;
+  quotes?: { count: number; accepted: boolean };
 }
 export interface Contact { id: number; name: string; email: string | null; company: string | null }
 export interface Activity {

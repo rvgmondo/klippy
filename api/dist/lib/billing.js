@@ -185,6 +185,9 @@ export async function generateSubscriptionInvoice(accountId, sub) {
             // emails come from.
             detail: off.description || null,
             quantity: '1.00', unitPrice: money(price), amount: money(price), position: 0,
+            // So the price list can say what this item earns. No recurringMonths: this
+            // invoice IS the subscription billing, it must not start another one.
+            offeringId: sub.offeringId,
         }));
         return newId;
     });

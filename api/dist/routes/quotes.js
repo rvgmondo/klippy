@@ -7,6 +7,7 @@ import { signQuoteToken, verifyQuoteToken } from '../lib/secretbox.js';
 import { appUrl } from '../lib/mailer.js';
 import { rateLimit } from '../lib/rateLimit.js';
 import { notifyAdmins } from '../lib/notify.js';
+import { quoteAccepted } from '../lib/dealLink.js';
 /**
  * The public quote page: accept or decline without an account.
  *
@@ -142,6 +143,8 @@ export async function quoteRoutes(app) {
         if (!res[0].affectedRows) {
             return reply.type('text/html').send(shell('Already decided', `<h1 style="font-size:20px">This quote was just decided elsewhere.</h1>`));
         }
+        if (decision === 'accepted')
+            await quoteAccepted(doc.accountId, id, name).catch(() => { });
         await notifyAdmins(doc.accountId, {
             kind: 'quote',
             title: `Quote ${doc.number} ${decision}`,
