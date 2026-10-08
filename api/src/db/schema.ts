@@ -207,6 +207,14 @@ export const businesses = mysqlTable('businesses', {
   /** Whether quotes carry the bank details. Most do not: nothing is owed yet. */
   quoteShowBank: boolean('quote_show_bank').default(false).notNull(),
   creditNoteFooter: text('credit_note_footer'),
+  /**
+   * Days after a quote is sent with no answer before the client gets ONE polite
+   * follow-up with the accept link. Null is off, which is the default: it emails
+   * clients, so the business switches it on.
+   */
+  quoteFollowUpDays: int('quote_follow_up_days', { unsigned: true }),
+  /** On the 1st, email a statement to every client of this business who owes money. Off by default. */
+  monthlyStatements: boolean('monthly_statements').default(false).notNull(),
   // ---- Payment reminder schedule (per business) ------------------------------
   // Days relative to an invoice's due date to send a reminder on: negative is
   // before due, 0 is on the due date, positive is overdue. Null means the sensible
@@ -857,6 +865,8 @@ export const documents = mysqlTable('documents', {
    * first document back instead. Unique per workspace; null for everything else.
    */
   createKey: varchar('create_key', { length: 64 }),
+  /** When the automatic follow-up on this unanswered quote went out. Once only. */
+  quoteNudgedAt: datetime('quote_nudged_at'),
   // The deal this quote (or invoice) was made for, so the pipeline can see that a
   // quote went out and hear when it is accepted. Set only when made from a deal.
   dealId: int('deal_id', { unsigned: true }),

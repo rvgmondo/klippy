@@ -57,6 +57,8 @@ const updateSchema = z.object({
     quoteFooter: nullableStr(2000),
     quoteShowBank: z.boolean().optional(),
     creditNoteFooter: nullableStr(2000),
+    quoteFollowUpDays: z.number().int().min(1).max(60).nullable().optional(),
+    monthlyStatements: z.boolean().optional(),
     invoiceAccent: z.string().trim().max(20).optional(),
     defaultTaxRate: z.number().min(0).max(100).nullable().optional(),
     defaultDueDays: z.number().int().min(0).max(365).optional(),

@@ -62,10 +62,10 @@ const YOU: Item[] = [
 const BUSINESS: Item[] = [
   { id: 'biz:brand', label: 'Name and logo', icon: Building2, hint: 'What clients see at the top of every quote, invoice and email', words: 'brand colour color logo font' },
   { id: 'biz:invoicing', label: 'Business details', icon: Receipt, hint: 'Address, VAT number, bank details, currency and WhatsApp', words: 'vat tax bank address registration whatsapp currency' },
-  { id: 'biz:documents', label: 'Invoices, quotes and credit notes', icon: Files, hint: 'Payment terms, how long quotes last, deposits, wording and numbering', words: 'invoice quote credit note terms footer deposit valid numbering prefix number due days' },
+  { id: 'biz:documents', label: 'Invoices, quotes and credit notes', icon: Files, hint: 'Payment terms, how long quotes last, deposits, wording and numbering', words: 'invoice quote credit note terms footer deposit valid numbering prefix number due days follow up unanswered nudge' },
   { id: 'biz:pdf', label: 'Document look', icon: FileText, hint: 'How your quotes and invoices look as a PDF', words: 'pdf design template layout' },
   { id: 'biz:payments', label: 'Getting paid online', icon: CreditCard, hint: 'The card payment account this business is paid into', words: 'payfast card online pay now merchant debit' },
-  { id: 'biz:reminders', label: 'Chasing unpaid invoices', icon: BellRing, hint: 'When reminders go out, and by email, SMS or WhatsApp', words: 'reminder overdue chase sms whatsapp suspend' },
+  { id: 'biz:reminders', label: 'Chasing unpaid invoices', icon: BellRing, hint: 'When reminders go out, by email, SMS or WhatsApp, and monthly statements', words: 'reminder overdue chase sms whatsapp suspend statement monthly' },
   { id: 'biz:email', label: 'Email sending', icon: Mail, hint: 'The address this business sends from, and where replies go', words: 'smtp sender from reply' },
   { id: 'biz:hosting', label: 'Hosting', icon: Server, hint: 'Only if you sell hosting: the server new accounts are made on', words: 'whm cpanel server hosting' },
   { id: 'biz:modules', label: 'Features', icon: LayoutGrid, hint: 'Which parts of Klippy this business uses', words: 'modules deals posts calendar expenses' },

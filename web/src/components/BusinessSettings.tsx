@@ -69,6 +69,9 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
     quoteValidDays: business.quoteValidDays ?? 30,
     quoteDepositPercent: business.quoteDepositPercent != null ? String(Number(business.quoteDepositPercent)) : '',
     quoteShowBank: !!business.quoteShowBank,
+    quoteFollowUp: business.quoteFollowUpDays != null,
+    quoteFollowUpDays: String(business.quoteFollowUpDays ?? 4),
+    monthlyStatements: !!business.monthlyStatements,
     invoiceHeaderHtml: business.invoiceHeaderHtml ?? '',
     invoiceFooterHtml: business.invoiceFooterHtml ?? '',
     prefixInvoice: business.prefixInvoice ?? '',
@@ -109,6 +112,8 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
       quoteValidDays: Number(form.quoteValidDays) || 0,
       quoteDepositPercent: form.quoteDepositPercent === '' ? null : Number(form.quoteDepositPercent),
       quoteShowBank: form.quoteShowBank,
+      quoteFollowUpDays: form.quoteFollowUp ? Math.min(60, Math.max(1, Number(form.quoteFollowUpDays) || 4)) : null,
+      monthlyStatements: form.monthlyStatements,
       invoiceHeaderHtml: form.invoiceHeaderHtml || null,
       invoiceFooterHtml: form.invoiceFooterHtml || null,
       prefixInvoice: form.prefixInvoice, prefixQuote: form.prefixQuote,
@@ -342,6 +347,24 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                   onChange={(e) => set('quoteShowBank', e.target.checked)} />
                 <span>Show bank details on quotes<span className="block text-[11px] text-slate-500">Useful when a deposit is paid straight from the quote. Off by default, because nothing is owed yet.</span></span>
               </label>
+              {/* Emails clients, so it starts off and the business switches it on. */}
+              <div className="rounded-lg border border-slate-800 p-3">
+                <label className="flex items-start gap-2 text-sm text-slate-300">
+                  <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={form.quoteFollowUp}
+                    onChange={(e) => set('quoteFollowUp', e.target.checked)} />
+                  <span>Follow up on quotes nobody has answered
+                    <span className="block text-[11px] text-slate-500">One short, friendly email with the accept link. Once per quote, never after it has expired, and never once they have answered.</span>
+                  </span>
+                </label>
+                {form.quoteFollowUp && (
+                  <label className="mt-2 flex items-center gap-2 pl-6 text-sm text-slate-300">
+                    After
+                    <input type="number" min={1} max={60} className={`${field} w-20`} value={form.quoteFollowUpDays}
+                      aria-label="Days before the follow-up" onChange={(e) => set('quoteFollowUpDays', e.target.value)} />
+                    days with no answer
+                  </label>
+                )}
+              </div>
               <NumberingEditor businessId={business.id} form={form} set={set} field={field} label={label} only="quote" />
             </div>}
 
@@ -386,6 +409,13 @@ export function BusinessSettingsPanel({ business, only }: { business: Business; 
                 Once this overdue, a final "service at risk" notice is sent and the invoice shows in Collections as flagged. Klippy notifies, it does not cut off service.
               </p>
             </div>
+            <label className="flex items-start gap-2 text-sm text-slate-300">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[var(--accent)]" checked={form.monthlyStatements}
+                onChange={(e) => set('monthlyStatements', e.target.checked)} />
+              <span>Email a statement on the 1st of every month to each client who owes money
+                <span className="block text-[11px] text-slate-500">Their statement of account as a PDF, listing every invoice and payment. Not sent to clients whose reminders are paused, or for old-system invoices.</span>
+              </span>
+            </label>
           </section>}
       </div>
 

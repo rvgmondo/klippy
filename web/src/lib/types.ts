@@ -104,6 +104,10 @@ export interface Business {
   quoteDepositPercent?: string | null;
   quoteFooter?: string | null;
   quoteShowBank?: boolean;
+  /** Days before an unanswered quote gets one follow-up. Null is off. */
+  quoteFollowUpDays?: number | null;
+  /** Statements emailed on the 1st to clients who owe. */
+  monthlyStatements?: boolean;
   creditNoteFooter?: string | null;
   bankDetails?: string | null;
   invoiceFooter?: string | null;

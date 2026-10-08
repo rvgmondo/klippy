@@ -21,6 +21,7 @@ import { IMPORTED_SEQ_BASE } from './numbering.js';
 import { syncStaleFeeds } from './calendarFeeds.js';
 import { balancesFor, CHASE_MIN } from './balances.js';
 import { settleIfCovered } from './settle.js';
+import { runQuoteFollowUps, runMonthlyStatements, runMonthReport } from './monthly.js';
 import { planReminder, reminderConfigFor, logReminder, channelsOf } from './reminders.js';
 /**
  * The app's daily jobs, and the scheduler that runs them.
@@ -87,6 +88,24 @@ export const JOBS = [
         // Early, so the day's figures are already right by the time anyone looks at them.
         description: 'Pulls card machine sales and their fees from any connected provider, so counter takings show up beside invoiced work.',
         hour: 4,
+    },
+    {
+        name: 'month-report',
+        label: 'Monthly money report',
+        description: 'On the 1st, emails owners last month in money: invoiced, money in, spent, what is owed and by whom, and what is due this month.',
+        hour: 7,
+    },
+    {
+        name: 'quote-follow-ups',
+        label: 'Quote follow-ups',
+        description: 'Sends one polite follow-up on a quote nobody has answered, after the number of days each business sets. Off unless a business switches it on.',
+        hour: 9,
+    },
+    {
+        name: 'monthly-statements',
+        label: 'Monthly statements',
+        description: 'On the 1st, emails each client who owes money their statement of account. Off unless a business switches it on.',
+        hour: 9,
     },
     {
         name: 'invoice-reminders',
@@ -301,9 +320,13 @@ export async function runFinanceDigest() {
         })
             .from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
             .where(and(eq(payments.accountId, accountId), gte(payments.paidOn, weekAgo)));
-        const owedRows = await db.select({ currency: documents.currency, total: documents.total })
+        // What is really still owed: part payments and credit notes taken off. Adding
+        // up invoice totals overstated it by every rand already paid on account.
+        const owedDocs = await db.select({ id: documents.id, currency: documents.currency, total: documents.total })
             .from(documents)
             .where(and(eq(documents.accountId, accountId), eq(documents.type, 'invoice'), eq(documents.status, 'sent')));
+        const owedBal = await balancesFor(accountId, owedDocs);
+        const owedRows = owedDocs.map((d) => ({ currency: d.currency, total: owedBal.get(d.id)?.outstanding ?? Number(d.total) }));
         // Counter takings. Without these a shop's week reads as nothing happened: the
         // digest was built entirely out of invoices, so a business that sells over a
         // counter got either a wildly understated week or, if it invoices nobody at all,
@@ -831,6 +854,9 @@ const RUNNERS = {
     'invoice-reminders': runInvoiceReminders,
     'sync-sales': syncAllConnections,
     'recurring-expenses': runRecurringExpenses,
+    'quote-follow-ups': () => runQuoteFollowUps(),
+    'monthly-statements': () => runMonthlyStatements(),
+    'month-report': () => runMonthReport(),
 };
 /** Run one job now and record the outcome, whatever it is. */
 export async function runJob(name) {
