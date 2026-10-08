@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, asc, desc, eq, gte, lte, ne, or, isNull, isNotNull, sql } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments, taskLabels, labels, calendarEvents } from '../db/schema.js';
+import { tasks, boards, boardColumns, folders, users, taskSubtasks, taskComments, taskLabels, labels, calendarEvents, externalEvents } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { intId, nextPosition } from '../lib/http.js';
@@ -202,6 +202,22 @@ export async function taskRoutes(app) {
             ...m,
             minutes: Math.max(15, Math.round(((m.endAt?.getTime() ?? m.startAt.getTime() + 30 * 60000) - m.startAt.getTime()) / 60000)),
         }));
+        // Meetings from the person's own Outlook or Google calendar, when they have read
+        // one in. Private to them, so filtered by user. Negative ids keep them apart
+        // from Klippy's own meetings on the timeline.
+        const outside = (await db.select({
+            id: externalEvents.id, title: externalEvents.title, startAt: externalEvents.startAt,
+            endAt: externalEvents.endAt, location: externalEvents.location,
+        }).from(externalEvents)
+            .where(tenantWhere(externalEvents, accountId, eq(externalEvents.userId, userId), gte(externalEvents.startAt, dayStart), lte(externalEvents.startAt, dayEnd), eq(externalEvents.allDay, false)))
+            .orderBy(asc(externalEvents.startAt)))
+            .map((m) => ({
+            id: -m.id, title: m.title, kind: 'meeting', startAt: m.startAt, endAt: m.endAt, location: m.location,
+            folderId: null, external: true,
+            minutes: Math.max(15, Math.round(((m.endAt?.getTime() ?? m.startAt.getTime() + 30 * 60000) - m.startAt.getTime()) / 60000)),
+        }));
+        meetings.push(...outside);
+        meetings.sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
         const meetingMinutes = meetings.reduce((sum, m) => sum + m.minutes, 0);
         const taskMinutes = scheduled
             .filter((t) => !t.isCompleted)

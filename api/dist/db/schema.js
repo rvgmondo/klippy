@@ -2140,4 +2140,46 @@ export const invoiceReminders = mysqlTable('invoice_reminders', {
 }, (t) => [
     index('idx_invoice_reminders_doc').on(t.accountId, t.documentId),
 ]);
+// ---- Calendars read in from elsewhere ----------------------------------------------
+/**
+ * A calendar someone publishes from Outlook, Google or Apple, read into Klippy so
+ * their real meetings show beside their work. One-way, and private to the person
+ * who added it: a personal calendar is nobody else's business.
+ *
+ * The link is a secret (anyone holding it can read the calendar), so it is stored
+ * encrypted and never sent back to the browser; only its host is shown.
+ */
+export const calendarFeeds = mysqlTable('calendar_feeds', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull()
+        .references(() => users.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 80 }).notNull(),
+    urlEnc: text('url_enc').notNull(),
+    urlHost: varchar('url_host', { length: 120 }).notNull(),
+    lastSyncedAt: datetime('last_synced_at'),
+    lastError: varchar('last_error', { length: 255 }),
+    eventCount: int('event_count', { unsigned: true }).default(0).notNull(),
+    createdAt: createdAt(),
+}, (t) => [
+    index('idx_calendar_feeds_user').on(t.accountId, t.userId),
+]);
+/** The events from those calendars, for a window around today, replaced on each read. */
+export const externalEvents = mysqlTable('external_events', {
+    id: pk(),
+    accountId: int('account_id', { unsigned: true }).notNull()
+        .references(() => accounts.id, { onDelete: 'cascade' }),
+    feedId: int('feed_id', { unsigned: true }).notNull()
+        .references(() => calendarFeeds.id, { onDelete: 'cascade' }),
+    userId: int('user_id', { unsigned: true }).notNull(),
+    uid: varchar('uid', { length: 255 }).notNull(),
+    title: varchar('title', { length: 300 }).notNull(),
+    location: varchar('location', { length: 300 }),
+    startAt: datetime('start_at').notNull(),
+    endAt: datetime('end_at'),
+    allDay: boolean('all_day').default(false).notNull(),
+}, (t) => [
+    index('idx_external_events_user_start').on(t.accountId, t.userId, t.startAt),
+]);
 //# sourceMappingURL=schema.js.map

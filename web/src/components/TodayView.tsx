@@ -22,6 +22,8 @@ interface DayTask {
 interface DayMeeting {
   id: number; title: string; kind: string; startAt: string; endAt: string | null;
   location: string | null; folderId: number | null; minutes: number;
+  /** From the person's own Outlook or Google calendar. */
+  external?: boolean;
 }
 interface DayData {
   date: string;
@@ -668,7 +670,7 @@ function MeetingBlock({ meeting, onOpen }: { meeting: DayMeeting; onOpen: () => 
         <Users size={12} className="shrink-0 text-sky-300" /> {meeting.title}
       </div>
       <div className="num truncate text-[11px] text-sky-300/80">
-        {fmtClock(meeting.startAt)}, {fmtDuration(meeting.minutes)}{meeting.location ? `, ${meeting.location}` : ''}
+        {fmtClock(meeting.startAt)}, {fmtDuration(meeting.minutes)}{meeting.location ? `, ${meeting.location}` : ''}{meeting.external ? ', from your calendar' : ''}
       </div>
     </button>
   );

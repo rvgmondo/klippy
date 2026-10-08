@@ -18,6 +18,7 @@ import { notifyAdmins } from './notify.js';
 import { syncAllConnections } from './salesSync.js';
 import { runRecurringExpenses } from './recurringExpenses.js';
 import { IMPORTED_SEQ_BASE } from './numbering.js';
+import { syncStaleFeeds } from './calendarFeeds.js';
 import { balancesFor, CHASE_MIN } from './balances.js';
 import { settleIfCovered } from './settle.js';
 import { planReminder, reminderConfigFor, logReminder, channelsOf, type ReminderConfig } from './reminders.js';
@@ -941,6 +942,8 @@ export function startScheduler(): void {
       // eslint-disable-next-line no-console
       console.error('klippy-api scheduler tick failed:', err);
     });
+    // Outside calendars (Outlook, Google) are read again when 15 minutes old.
+    syncStaleFeeds().catch(() => { /* each feed records its own error */ });
   };
   // A moment after boot, so it does not compete with the first requests.
   setTimeout(tick, 20_000);

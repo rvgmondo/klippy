@@ -7,6 +7,7 @@ import { authOf } from '../lib/context.js';
 import { isPlatformAdmin } from '../lib/platform.js';
 import { JOBS, runJob, runDueJobs, type JobName } from '../lib/jobs.js';
 import { runSocialPublish } from '../lib/social/publish.js';
+import { syncStaleFeeds } from '../lib/calendarFeeds.js';
 
 /**
  * The daily jobs are run by the app itself (see lib/jobs.ts), so none of this needs
@@ -41,6 +42,8 @@ export async function cronRoutes(app: FastifyInstance) {
     if (auth === 'unset') return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
     if (auth === 'bad') return reply.code(401).send({ error: 'Bad cron key.' });
     await runDueJobs();
+    // Outside calendars too, so they stay fresh while the app sleeps.
+    await syncStaleFeeds().catch(() => 0);
     return { ok: true };
   });
 

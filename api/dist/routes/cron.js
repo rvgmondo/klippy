@@ -6,6 +6,7 @@ import { authOf } from '../lib/context.js';
 import { isPlatformAdmin } from '../lib/platform.js';
 import { JOBS, runJob, runDueJobs } from '../lib/jobs.js';
 import { runSocialPublish } from '../lib/social/publish.js';
+import { syncStaleFeeds } from '../lib/calendarFeeds.js';
 /**
  * The daily jobs are run by the app itself (see lib/jobs.ts), so none of this needs
  * an external cron any more. What is left here is:
@@ -41,6 +42,8 @@ export async function cronRoutes(app) {
         if (auth === 'bad')
             return reply.code(401).send({ error: 'Bad cron key.' });
         await runDueJobs();
+        // Outside calendars too, so they stay fresh while the app sleeps.
+        await syncStaleFeeds().catch(() => 0);
         return { ok: true };
     });
     for (const job of JOBS) {

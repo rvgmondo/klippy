@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss, Banknote } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, CalendarPlus, Rss, Banknote, CalendarDays } from 'lucide-react';
+import { CalendarFeedsModal } from './CalendarFeedsModal';
 import { apiGet, apiPatch } from '../lib/api';
 import { money } from '../lib/money';
 import { navigateTo } from '../lib/urlAction';
@@ -119,6 +120,23 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
   });
   const onMove = (id: number, dueDate: string) => move.mutate({ id, dueDate });
 
+  // Meetings read in from the person's own Outlook, Google or Apple calendar.
+  const [feedsOpen, setFeedsOpen] = useState(false);
+  const outsideQ = useQuery({
+    queryKey: ['external-events', range.from, range.to],
+    queryFn: () => apiGet<{ events: OutsideEvent[] }>(`/external-events?from=${range.from}&to=${range.to}`),
+    refetchInterval: 5 * 60 * 1000,
+  });
+  const outsideByDay = useMemo(() => {
+    const m = new Map<string, OutsideEvent[]>();
+    for (const e of outsideQ.data?.events ?? []) {
+      // All-day events are stored at midnight UTC; timed ones go on their LOCAL day.
+      const k = e.allDay ? e.startAt.slice(0, 10) : iso(new Date(e.startAt));
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return m;
+  }, [outsideQ.data]);
+
   function shift(dir: number) {
     if (view === 'day') setCursor(addDays(cursor, dir));
     else if (view === 'week') setCursor(addDays(cursor, dir * 7));
@@ -138,6 +156,10 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
               title={showMoney ? 'Hide invoice and quote dates' : 'Show when invoices fall due and quotes expire'}
               className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-2.5 text-xs sm:min-h-9 ${showMoney ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}>
               <Banknote size={14} /> Money
+            </button>
+            <button onClick={() => setFeedsOpen(true)} title="Read your Outlook, Google or Apple calendar into Klippy"
+              className="flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 sm:min-h-9">
+              <CalendarDays size={14} /> Your calendars
             </button>
             <button onClick={copyFeed} title="Copy a feed link your Google, Outlook or Apple calendar can subscribe to"
               className="grid h-10 w-10 place-items-center rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 sm:h-9 sm:w-9">
@@ -159,22 +181,23 @@ export function CalendarView({ businessId = 'all' }: { businessId?: BusinessSele
 
       <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-4">
         {isLoading && <Skeleton className="h-full min-h-64" />}
-        {!isLoading && (data?.tasks?.length ?? 0) === 0 && (eventsQ.data?.events?.length ?? 0) === 0 && (
+        {!isLoading && (data?.tasks?.length ?? 0) === 0 && (eventsQ.data?.events?.length ?? 0) === 0 && (outsideQ.data?.events?.length ?? 0) === 0 && (
           <div className="mx-auto mb-3 max-w-md rounded-xl border border-dashed border-slate-700 p-4 text-center text-xs text-slate-500">
             Nothing scheduled yet. Cards with due dates appear here on their own;
             the Meeting button adds calls and appointments alongside them.
           </div>
         )}
         {!isLoading && (<>
-        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
-        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
-        {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} money={moneyByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'month' && <MonthGrid cursor={cursor} byDay={byDay} events={eventsByDay} outside={outsideByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'week' && <WeekGrid cursor={cursor} byDay={byDay} events={eventsByDay} outside={outsideByDay} money={moneyByDay} onMove={onMove} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
+        {view === 'day' && <DayList cursor={cursor} byDay={byDay} events={eventsByDay} outside={outsideByDay} money={moneyByDay} onOpen={setOpenTask} onOpenEvent={setOpenEvent} onAdd={setAddDate} />}
         {view === 'year' && <YearGrid cursor={cursor} byDay={byDay} onPick={(d) => { setCursor(d); setView('month'); }} />}
         </>)}
       </div>
 
       {openTask && <CardDetail taskId={openTask.id} boardId={openTask.boardId} onClose={() => setOpenTask(null)} />}
       {addDate && <QuickAddTask dueDate={addDate} onClose={() => setAddDate(null)} />}
+      {feedsOpen && <CalendarFeedsModal onClose={() => setFeedsOpen(false)} />}
       {meetingDate && <MeetingModal defaultDate={meetingDate} businessId={businessId} onClose={() => setMeetingDate(null)} />}
       {openEvent && <MeetingModal existing={openEvent} businessId={businessId} onClose={() => setOpenEvent(null)} />}
     </CanvasPage>
@@ -188,6 +211,20 @@ interface MoneyDoc {
   status: string; currency: string; total: string; outstanding?: number; imported?: boolean; decision?: string | null;
 }
 type MoneyMap = Map<string, MoneyDoc[]>;
+interface OutsideEvent { id: number; title: string; location: string | null; startAt: string; endAt: string | null; allDay: boolean; feedName: string }
+type OutsideMap = Map<string, OutsideEvent[]>;
+
+/** A meeting from the person's own calendar: shown, not editable here. */
+function OutsidePill({ e }: { e: OutsideEvent }) {
+  const time = e.allDay ? 'all day' : new Date(e.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <div title={`${e.title}${e.location ? `, ${e.location}` : ''}. From ${e.feedName}; change it there.`}
+      className="flex w-full items-center gap-1.5 truncate rounded border-l-2 border-sky-400 bg-sky-500/10 px-1.5 py-0.5 text-left text-[11px] text-sky-200">
+      {!e.allDay && <span className="num shrink-0 opacity-80">{time}</span>}
+      <span className="truncate">{e.title}</span>
+    </div>
+  );
+}
 const todayIso = () => iso(new Date());
 
 /** Lets a day take a task dropped on it. */
@@ -247,7 +284,7 @@ function EventPill({ e, onOpen }: { e: CalendarEvent; onOpen: (e: CalendarEvent)
   );
 }
 
-function MonthGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function MonthGrid({ cursor, byDay, events, outside, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; outside: OutsideMap; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
   const gridStart = startOfWeek(first);
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
@@ -263,8 +300,9 @@ function MonthGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onO
         const inMonth = d.getMonth() === cursor.getMonth();
         const list = byDay.get(iso(d)) ?? [];
         const evs = events.get(iso(d)) ?? [];
+        const outs = outside.get(iso(d)) ?? [];
         const docs = moneyMap.get(iso(d)) ?? [];
-        const max = Math.max(0, 3 - evs.length - Math.min(docs.length, 2));
+        const max = Math.max(0, 3 - evs.length - Math.min(outs.length, 2) - Math.min(docs.length, 2));
         return (
           <div key={i} {...dropProps(iso(d), onMove)} className={`group/day relative min-h-16 border-b border-r border-slate-800 p-1 sm:min-h-24 sm:p-1.5 ${inMonth ? '' : 'bg-slate-950/60'}`}>
             <div className="mb-1 flex items-center justify-between">
@@ -276,9 +314,10 @@ function MonthGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onO
             </div>
             <div className="space-y-1">
               {evs.slice(0, 3).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
+              {outs.slice(0, 2).map((e) => <OutsidePill key={`o${e.id}`} e={e} />)}
               {docs.slice(0, 2).map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
               {list.slice(0, max).map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
-              {(list.length > max || docs.length > 2) && <div className="px-1 text-[10px] text-slate-500">+{Math.max(0, list.length - max) + Math.max(0, docs.length - 2)} more</div>}
+              {(list.length > max || docs.length > 2 || outs.length > 2) && <div className="px-1 text-[10px] text-slate-500">+{Math.max(0, list.length - max) + Math.max(0, docs.length - 2) + Math.max(0, outs.length - 2)} more</div>}
             </div>
           </div>
         );
@@ -287,7 +326,7 @@ function MonthGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onO
   );
 }
 
-function WeekGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function WeekGrid({ cursor, byDay, events, outside, money: moneyMap, onMove, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; outside: OutsideMap; money: MoneyMap; onMove: MoveFn; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const start = startOfWeek(cursor);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const today = new Date();
@@ -306,6 +345,7 @@ function WeekGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOp
             </div>
             <div className="space-y-1">
               {(events.get(iso(d)) ?? []).map((e) => <EventPill key={e.id} e={e} onOpen={onOpenEvent} />)}
+              {(outside.get(iso(d)) ?? []).map((e) => <OutsidePill key={`o${e.id}`} e={e} />)}
               {(moneyMap.get(iso(d)) ?? []).map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
               {list.map((t) => <TaskPill key={t.id} t={t} onOpen={onOpen} />)}
             </div>
@@ -316,10 +356,11 @@ function WeekGrid({ cursor, byDay, events, money: moneyMap, onMove, onOpen, onOp
   );
 }
 
-function DayList({ cursor, byDay, events, money: moneyMap, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; money: MoneyMap; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
+function DayList({ cursor, byDay, events, outside, money: moneyMap, onOpen, onOpenEvent, onAdd }: { cursor: Date; byDay: Map<string, CalendarTask[]>; events: Map<string, CalendarEvent[]>; outside: OutsideMap; money: MoneyMap; onOpen: OpenFn; onOpenEvent: (e: CalendarEvent) => void; onAdd: (d: string) => void }) {
   const list = byDay.get(iso(cursor)) ?? [];
   const evs = events.get(iso(cursor)) ?? [];
   const docs = moneyMap.get(iso(cursor)) ?? [];
+  const outs = outside.get(iso(cursor)) ?? [];
   return (
     <div className="mx-auto max-w-2xl space-y-2">
       <button onClick={() => onAdd(iso(cursor))}
@@ -344,8 +385,9 @@ function DayList({ cursor, byDay, events, money: moneyMap, onOpen, onOpenEvent, 
           </span>
         </button>
       ))}
+      {outs.map((e) => <OutsidePill key={`o${e.id}`} e={e} />)}
       {docs.map((x) => <MoneyPill key={`m${x.id}`} d={x} />)}
-      {list.length === 0 && evs.length === 0 && docs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing on this day.</p>}
+      {list.length === 0 && evs.length === 0 && docs.length === 0 && outs.length === 0 && <p className="py-8 text-center text-sm text-slate-500">Nothing on this day.</p>}
       {list.map((t) => (
         <button key={t.id} onClick={() => onOpen({ id: t.id, boardId: t.boardId })}
           className="flex w-full items-center gap-3 rounded-xl border border-slate-800 p-3 text-left hover:bg-slate-900">
