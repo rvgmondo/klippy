@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { folders, documents, boards, tasks, contacts, deals } from '../db/schema.js';
+import { folders, documents, boards, tasks, contacts, deals, subscriptions, offerings, taskFiles } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { intId } from '../lib/http.js';
@@ -117,7 +117,7 @@ export async function clientRoutes(app: FastifyInstance) {
       billingVatNumber: folders.billingVatNumber, hourlyRate: folders.hourlyRate,
       monthlyHoursBudget: folders.monthlyHoursBudget, legalName: folders.legalName, regNumber: folders.regNumber,
       companyType: folders.companyType, country: folders.country, taxNumber: folders.taxNumber,
-      industry: folders.industry, website: folders.website, paymentTermsDays: folders.paymentTermsDays, remindersPaused: folders.remindersPaused,
+      industry: folders.industry, website: folders.website, paymentTermsDays: folders.paymentTermsDays, remindersPaused: folders.remindersPaused, clientSince: folders.clientSince,
       createdAt: folders.createdAt,
     }).from(folders)
       .where(tenantWhere(folders, accountId, eq(folders.id, id), isNull(folders.deletedAt))).limit(1);
@@ -175,8 +175,26 @@ export async function clientRoutes(app: FastifyInstance) {
     }).from(deals)
       .where(tenantWhere(deals, accountId, eq(deals.clientFolderId, id)));
 
+    // What they pay on repeat, so "is Acme on hosting?" is answered on their page.
+    const subs = await db.select({
+      id: subscriptions.id, status: subscriptions.status, price: subscriptions.price, listPrice: offerings.price,
+      intervalMonths: subscriptions.intervalMonths, nextBillDate: subscriptions.nextBillDate,
+      offeringName: offerings.name, domain: subscriptions.domain,
+    }).from(subscriptions).innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
+      .where(tenantWhere(subscriptions, accountId, eq(subscriptions.folderId, id), ne(subscriptions.status, 'canceled')))
+      .orderBy(asc(subscriptions.nextBillDate));
+    // Every file attached to a card on their boards.
+    const files = boardIds.length ? await db.select({
+      id: taskFiles.id, name: taskFiles.originalName, size: taskFiles.filesize, uploadedAt: taskFiles.uploadedAt,
+      taskTitle: tasks.title, boardId: tasks.boardId,
+    }).from(taskFiles).innerJoin(tasks, eq(tasks.id, taskFiles.taskId))
+      .where(tenantWhere(taskFiles, accountId, inArray(tasks.boardId, boardIds)))
+      .orderBy(desc(taskFiles.uploadedAt)).limit(200) : [];
+
     return {
       client: { ...c, hasLogo: !!c.hasImage, hasImage: undefined },
+      subscriptions: subs.map((x) => ({ ...x, price: Number(x.price ?? x.listPrice), listPrice: undefined })),
+      files,
       money: { owed, overdue, openInvoices, lateCount },
       documents: docRows,
       boards: boardRows.map((b) => ({

@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, MessageCircle, Phone, Mail, MapPin, Pencil, FileText, Receipt, Users, Search,
-  KanbanSquare, Target, AlertTriangle, Plus,
+  ArrowLeft, MessageCircle, Phone, Mail, MapPin, Pencil, FileText, Receipt, Users, Search, KanbanSquare, Target, AlertTriangle, Plus, Repeat, Paperclip, Download,
 } from 'lucide-react';
 import { ClientMessages, EmailComposer } from './ClientTalk';
 import { apiGet, apiPatch } from '../lib/api';
@@ -43,7 +42,7 @@ interface ClientPageData {
     billingEmail: string | null; billingPhone: string | null; billingAddress: string | null;
     billingVatNumber: string | null; hourlyRate: string | null; legalName: string | null;
     regNumber: string | null; companyType: string | null; website: string | null;
-    paymentTermsDays: number | null; createdAt: string; remindersPaused?: boolean;
+    paymentTermsDays: number | null; createdAt: string; remindersPaused?: boolean; clientSince?: string | null;
   };
   money: { owed: PerCur; overdue: PerCur; openInvoices: number; lateCount: number };
   documents: DocRow[];
@@ -51,6 +50,8 @@ interface ClientPageData {
   tasks: { id: number; title: string; dueDate: string | null; boardId: number }[];
   people: { id: number; name: string; email: string | null; phone: string | null; role: string | null }[];
   deals: { id: number; title: string; stage: string; value: number }[];
+  subscriptions?: { id: number; status: 'active' | 'paused'; price: number; intervalMonths: number; nextBillDate: string; offeringName: string; domain: string | null }[];
+  files?: { id: number; name: string; size: number; uploadedAt: string; taskTitle: string; boardId: number }[];
 }
 
 /** Each currency on its own, never added together. Whole units in lists, where width matters. */
@@ -180,6 +181,22 @@ function ClientList({ businessId, onOpen }: { businessId: BusinessSelection; onO
             <option value="owes">Owes you most</option>
             <option value="recent">Recently active</option>
           </select>
+          <button className={`${btnSecondary} ml-auto inline-flex items-center gap-1.5 px-3 py-1.5`} disabled={rows.length === 0}
+            onClick={() => {
+              // The list as shown, for the accountant or a mailing list.
+              const cell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+              const owedText = (m: PerCur) => Object.entries(m).filter(([, v]) => v > 0.001).map(([cur, v]) => `${cur} ${v.toFixed(2)}`).join('; ');
+              const csv = [['Name', 'Email', 'Cell', 'Owes', 'Overdue', ...(showBiz ? ['Business'] : [])],
+                ...rows.map((c) => [c.name, c.email ?? '', c.phone ?? '', owedText(c.owed), owedText(c.overdue), ...(showBiz ? [bizOf(c.businessId)?.name ?? ''] : [])])]
+                .map((r) => r.map(cell).join(',')).join(String.fromCharCode(13, 10));
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+              a.download = `${word.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+            }}>
+            <Download size={14} /> Export
+          </button>
         </div>
       </PageHeader>
 
@@ -244,7 +261,7 @@ function ClientList({ businessId, onOpen }: { businessId: BusinessSelection; onO
 // One client
 // ---------------------------------------------------------------------------------
 
-type Tab = 'overview' | 'money' | 'work' | 'people' | 'messages';
+type Tab = 'overview' | 'money' | 'work' | 'people' | 'files' | 'messages';
 
 function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
   const { account } = useAuth();
@@ -306,6 +323,7 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
     { key: 'money', label: 'Money', n: data.documents.length },
     { key: 'work', label: 'Work', n: data.tasks.length },
     { key: 'people', label: 'People', n: data.people.length },
+    { key: 'files', label: 'Files', n: data.files?.length || undefined },
     { key: 'messages', label: 'Messages', n: waiting || undefined },
   ];
   const addresses = [...new Set([c.billingEmail, ...data.people.map((p) => p.email)]
@@ -331,7 +349,7 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
                     </span>
                   )}
                   {data.deals.some((d) => d.stage !== 'won' && d.stage !== 'lost') && <span className="text-sky-400">Deal open</span>}
-                  <span>{`${(account?.folderLabelSingular || 'Client')} since ${new Date(c.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`}</span>
+                  <span>{`${(account?.folderLabelSingular || 'Client')} since ${new Date(c.clientSince ? `${c.clientSince.slice(0, 10)}T00:00:00` : c.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`}</span>
                 </p>
               </div>
             </div>
@@ -468,6 +486,32 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
                   </ul>
                 )}
               </Card>
+              <Card>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="flex items-center gap-2 font-semibold text-slate-100"><Repeat size={15} /> On repeat</h2>
+                  <button onClick={() => navigateTo('subscriptions')} className="text-xs text-[var(--accent)]">All subscriptions</button>
+                </div>
+                {(data.subscriptions ?? []).length === 0 ? (
+                  <p className="text-sm text-slate-500">Nothing billed to them on repeat.</p>
+                ) : (
+                  <ul className="space-y-1.5 text-sm">
+                    {data.subscriptions!.map((x) => (
+                      <li key={x.id} className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block truncate text-slate-200">{x.offeringName}{x.domain ? `, ${x.domain}` : ''}</span>
+                          <span className="block text-xs text-slate-500">
+                            {x.status === 'paused' ? 'Paused' : `Next bill ${fmtDay(x.nextBillDate)}`}
+                          </span>
+                        </span>
+                        <span className="num shrink-0 text-right text-slate-300">
+                          {money(x.price, b?.currency ?? account?.currency ?? 'ZAR')}
+                          <span className="block text-[11px] text-slate-500">{x.intervalMonths === 1 ? 'a month' : x.intervalMonths === 12 ? 'a year' : `every ${x.intervalMonths} months`}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
               {(c.legalName || c.regNumber || c.website) && (
                 <Card>
                   <h2 className="mb-2 font-semibold text-slate-100">Company</h2>
@@ -571,6 +615,28 @@ function ClientPage({ id, onBack }: { id: number; onBack: () => void }) {
                   </div>
                 );
               })}
+            </div>
+          )
+        )}
+
+        {tab === 'files' && (
+          (data.files ?? []).length === 0 ? (
+            <EmptyState icon={<Paperclip size={28} />} title="No files yet"
+              body="Files attached to cards on their boards show up here, so you never have to remember which card they went on." />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-slate-800">
+              {data.files!.map((f) => (
+                <div key={f.id} className="flex items-center gap-3 border-b border-slate-800 bg-slate-900/30 px-3 py-2.5 last:border-b-0">
+                  <Paperclip size={15} className="shrink-0 text-slate-500" />
+                  <span className="min-w-0 flex-1">
+                    <a href={`/api/v1/files/${f.id}/download`} className="block truncate text-sm text-slate-100 hover:text-[var(--accent)] hover:underline">{f.name}</a>
+                    <button onClick={() => openBoard(f.boardId)} className="block truncate text-left text-xs text-slate-500 hover:text-slate-300">
+                      On "{f.taskTitle}", {data.boards.find((x) => x.id === f.boardId)?.name ?? 'a board'}
+                    </button>
+                  </span>
+                  <span className="shrink-0 text-xs text-slate-500">{fmtDay(f.uploadedAt.slice(0, 10))}</span>
+                </div>
+              ))}
             </div>
           )
         )}

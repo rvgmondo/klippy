@@ -109,6 +109,9 @@ ok(upCard < 300 && att?.clientName === 'Acme Work' && att?.taskTitle === 'Undate
 ok(((await B('GET', `/storage/search?q=brief-${tag}`)).body.items ?? []).length === 0, 'another account cannot find it');
 ok(!((await B('GET', '/files/attachments')).body.files ?? []).some((f) => f.name === `logo-${tag}.txt`), 'or see the card attachment');
 
+const page = (await A('GET', `/clients/${acme}`)).body;
+ok(Array.isArray(page.subscriptions) && page.files?.some((f) => f.name === `logo-${tag}.txt`), 'the client page lists their files and what they pay on repeat');
+
 // ---- duplicating documents ---------------------------------------------------------------------
 const inv = (await A('POST', '/documents', {
   type: 'invoice', businessId: biz.id, folderId: acme, clientName: 'Acme Work', issueDate: '2026-01-15',
