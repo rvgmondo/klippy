@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lt, lte, or } from 'drizzle-orm';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { db } from '../db/client.js';
 import { focusItems, tasks, boards, folders, businesses, documents, deals } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -107,7 +108,10 @@ export async function focusRoutes(app) {
             dueDate: documents.dueDate, total: documents.total, currency: documents.currency,
             businessId: documents.businessId,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lte(documents.dueDate, today), visible(documents.businessId))))
+            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lte(documents.dueDate, today), 
+        // Not the old system's history. Oldest first and capped at ten, those took
+        // every slot, so no invoice raised in Klippy could ever reach Do today.
+        lt(documents.seq, IMPORTED_SEQ_BASE), visible(documents.businessId))))
             .orderBy(asc(documents.dueDate))
             .limit(PER_SOURCE_CAP);
         /**
@@ -141,7 +145,7 @@ export async function focusRoutes(app) {
             dueDate: documents.dueDate, total: documents.total, currency: documents.currency,
             businessId: documents.businessId,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'quote'), eq(documents.status, 'sent'), isNull(documents.decision), isNotNull(documents.dueDate), lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)), visible(documents.businessId))))
+            .where(tenantWhere(documents, accountId, and(eq(documents.type, 'quote'), eq(documents.status, 'sent'), isNull(documents.decision), isNotNull(documents.dueDate), lt(documents.seq, IMPORTED_SEQ_BASE), lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)), visible(documents.businessId))))
             .orderBy(asc(documents.dueDate))
             .limit(PER_SOURCE_CAP);
         for (const q of quoteRows) {

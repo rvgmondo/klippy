@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { confirmDialog, notify, promptDialog } from './ConfirmDialog';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -86,6 +86,15 @@ export function PipelineView({ businessId, onOpenClient }: { businessId: Busines
   const [showInsights, setShowInsights] = useState(false);
   useUrlAction('new', (v) => { if (v === 'deal') setAdding(true); });
   const [editing, setEditing] = useState<Deal | null>(null);
+  // Home and the follow-up email point at one deal; open it once the board has loaded.
+  const [wantDeal, setWantDeal] = useState<number | null>(null);
+  useUrlAction('deal', (v) => setWantDeal(Number(v) || null));
+  useEffect(() => {
+    if (wantDeal == null || !data) return;
+    const d = data.deals.find((x) => x.id === wantDeal);
+    if (d) setEditing(d); else notify('That deal is not in this business. Pick All businesses to find it.');
+    setWantDeal(null);
+  }, [wantDeal, data]);
 
   const makeQuote = (id: number) => navigateTo('billing', { fromdeal: String(id) });
   const moveTo = async (deal: Deal, stage: Stage) => {

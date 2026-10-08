@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { PaymentsModal } from './PaymentsModal';
-import { navigateTo } from '../lib/urlAction';
+import { navigateTo, useUrlAction } from '../lib/urlAction';
 import type { DocSummary } from './billingShared';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, AlertTriangle, FileText, MessageCircle, Search } from 'lucide-react';
@@ -81,6 +81,8 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   // and seeing it per client, which is how you actually ring people.
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  // Home's "Sort them out" lands here already narrowed.
+  useUrlAction('show', (v) => { if (FILTERS.some((f) => f.key === v)) setFilter(v as Filter); });
   const [byClient, setByClient] = useState(false);
   const q = query.trim().toLowerCase();
   const allItems = data?.items ?? [];

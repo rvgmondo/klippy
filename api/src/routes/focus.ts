@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, asc, eq, inArray, isNull, isNotNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lt, lte, or } from 'drizzle-orm';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import type { SQL } from 'drizzle-orm';
 import type { AnyMySqlColumn } from 'drizzle-orm/mysql-core';
 import { db } from '../db/client.js';
@@ -144,6 +145,9 @@ export async function focusRoutes(app: FastifyInstance) {
       .where(tenantWhere(documents, accountId, and(
         eq(documents.type, 'invoice'), eq(documents.status, 'sent'),
         isNotNull(documents.dueDate), lte(documents.dueDate, today),
+        // Not the old system's history. Oldest first and capped at ten, those took
+        // every slot, so no invoice raised in Klippy could ever reach Do today.
+        lt(documents.seq, IMPORTED_SEQ_BASE),
         visible(documents.businessId),
       )))
       .orderBy(asc(documents.dueDate))
@@ -183,6 +187,7 @@ export async function focusRoutes(app: FastifyInstance) {
         eq(documents.type, 'quote'), eq(documents.status, 'sent'),
         isNull(documents.decision),
         isNotNull(documents.dueDate),
+        lt(documents.seq, IMPORTED_SEQ_BASE),
         lte(documents.dueDate, addDays(today, QUOTE_EXPIRY_WINDOW_DAYS)),
         visible(documents.businessId),
       )))

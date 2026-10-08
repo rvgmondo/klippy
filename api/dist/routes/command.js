@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { eq, gte, isNotNull, isNull, lt, lte, ne, sql, inArray } from 'drizzle-orm';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { db } from '../db/client.js';
 import { tasks, boards, folders, deals, documents, payments, subscriptions, calendarEvents, } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
@@ -21,7 +22,9 @@ export async function commandRoutes(app) {
             total: documents.total, dueDate: documents.dueDate, suspendedAt: documents.suspendedAt,
             currency: documents.currency,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lt(documents.dueDate, today), bizFilter(documents.businessId), await businessScope(req, documents.businessId)));
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lt(documents.dueDate, today), 
+        // Old-system history is sorted out on Owed to you, not offered as chasing.
+        lt(documents.seq, IMPORTED_SEQ_BASE), bizFilter(documents.businessId), await businessScope(req, documents.businessId)));
         // Net off payments and credits so we chase what is actually owed.
         const invIds = overdueInvoices.map((i) => i.id);
         const paidBy = new Map();

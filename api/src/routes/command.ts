@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { and, eq, gte, isNotNull, isNull, lt, lte, ne, or, sql, inArray } from 'drizzle-orm';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { db } from '../db/client.js';
 import {
   tasks, boards, folders, deals, documents, payments, subscriptions, calendarEvents,
@@ -66,6 +67,8 @@ export async function commandRoutes(app: FastifyInstance) {
       .where(tenantWhere(documents, accountId,
         eq(documents.type, 'invoice'), eq(documents.status, 'sent'),
         isNotNull(documents.dueDate), lt(documents.dueDate, today),
+        // Old-system history is sorted out on Owed to you, not offered as chasing.
+        lt(documents.seq, IMPORTED_SEQ_BASE),
         bizFilter(documents.businessId),
         await businessScope(req, documents.businessId),
       ));

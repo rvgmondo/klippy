@@ -436,6 +436,7 @@ export async function runSubscriptionBilling() {
                 businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
                 createdBy: sub.createdBy, autoSend: sub.autoSend, subscriptionId: sub.id,
                 price: sub.price != null ? Number(sub.price) : null,
+                period: { from: sub.nextBillDate, to: addDays(nextDate, -1) },
             });
             // Then try to take the money, if this subscription is set up for it. Every
             // guard lives in attemptAutoDebit; it returns "skipped" for the ordinary case

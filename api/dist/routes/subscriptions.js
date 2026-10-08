@@ -7,7 +7,7 @@ import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness } from '../lib/access.js';
 import { intId } from '../lib/http.js';
 import { resolveBusinessId } from '../lib/business.js';
-import { addMonths, billingAnchor, generateSubscriptionInvoice, upcomingBills } from '../lib/billing.js';
+import { addDays, addMonths, billingAnchor, generateSubscriptionInvoice, upcomingBills } from '../lib/billing.js';
 import { money } from '../lib/money.js';
 import { suspendForSubscription } from '../lib/hosting.js';
 const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -92,7 +92,10 @@ export async function subscriptionRoutes(app) {
         // missed month every morning. Starting now bills this cycle (below) and the next
         // one on the same day of the month, from today on.
         let nextBillDate = addMonths(startedOn, intervalMonths);
+        // Where the cycle being billed now began, for the period on the first invoice.
+        let cycleStart = startedOn;
         for (let i = 0; i < 1200 && nextBillDate <= todayStr(); i++) {
+            cycleStart = nextBillDate;
             nextBillDate = addMonths(nextBillDate, intervalMonths, Number(startedOn.slice(8, 10)));
         }
         const ins = await db.insert(subscriptions).values(withTenant(accountId, {
@@ -113,6 +116,7 @@ export async function subscriptionRoutes(app) {
                 businessId, offeringId: d.offeringId, folderId: d.folderId,
                 createdBy: userId, autoSend: d.autoSend ?? false, subscriptionId: id,
                 price: d.price ?? null,
+                period: { from: cycleStart, to: addDays(nextBillDate, -1) },
             });
             await db.update(subscriptions).set({ lastBilledAt: new Date() })
                 .where(tenantWhere(subscriptions, accountId, eq(subscriptions.id, id)));
@@ -277,6 +281,7 @@ export async function subscriptionRoutes(app) {
                 businessId: sub.businessId, offeringId: sub.offeringId, folderId: sub.folderId,
                 createdBy: userId, autoSend: sub.autoSend, subscriptionId: sub.id,
                 price: sub.price != null ? Number(sub.price) : null,
+                period: { from: sub.nextBillDate, to: addDays(next, -1) },
             });
             return { ok: true, documentId: docId, billedFor: sub.nextBillDate, nextBillDate: next };
         }

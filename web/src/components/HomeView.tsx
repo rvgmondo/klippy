@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, KanbanSquare,
-  LayoutGrid, List, Receipt, Share2, Target, Plus, LifeBuoy,
+  LayoutGrid, List, Receipt, Share2, Target, Plus, LifeBuoy, Archive,
 } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { money, moneyRound } from '../lib/money';
@@ -40,11 +40,17 @@ interface Item {
   docId?: number; docType?: string; docNumber?: string;
   taskId?: number; boardId?: number; eventId?: number; dealId?: number; postId?: number; supportId?: number;
   at?: string; allDay?: boolean;
+  /** From the person's own Outlook, Google or Apple calendar. */
+  external?: boolean;
+  /** How many documents a summary row stands for. */
+  count?: number;
 }
 interface HomeData {
   today: string;
   figures: {
     owed: PerCur; overdue: PerCur; comingIn: PerCur; moneyIn: PerCur;
+    /** The part of owed that is old-system history still being checked. */
+    oldOwed?: PerCur;
     byMethod: { method: string; currency: string; amount: number }[];
     cameInToday: { docId: number; number: string; clientName: string; amount: number; currency: string; method: string }[];
   };
@@ -138,6 +144,7 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
   }
 
   async function chaseAll() {
+    // Old-system invoices are one summary row and are never bulk-chased.
     const late = items.filter((i) => i.kind === 'invoice-late');
     const clients = [...new Set(late.map((i) => i.clientName).filter(Boolean))];
     const ok = await confirmDialog(
@@ -172,7 +179,9 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
       case 'quote-expiring': return [b('Remind', () => setSheet({ doc: docRef(i), action: 'remind' }), true)];
       case 'task': return [b('Open', () => setTask({ id: i.taskId!, boardId: i.boardId! }))];
       case 'event': return [b('Open', () => onNavigate('calendar'))];
-      case 'deal': return [b('Open deal', () => onNavigate('pipeline'))];
+      case 'deal': return [b('Open deal', () => navigateTo('pipeline', { deal: String(i.dealId) }))];
+      case 'old-unpaid': return [b('Sort them out', () => navigateTo('collections', { show: 'old' }))];
+      case 'old-drafts': return [b('Open invoices', () => onNavigate('billing'))];
       case 'post': return [b('Open', () => navigateTo('social', { post: String(i.postId) }))];
       case 'support': return [b('Answer', () => openHelp(i), true)];
       default: return [];
@@ -184,11 +193,14 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
     else if (i.docId) navigateTo('billing', { open: String(i.docId), doctype: i.docType ?? 'invoice' });
     else if (i.taskId && i.boardId) setTask({ id: i.taskId, boardId: i.boardId });
     else if (i.eventId) onNavigate('calendar');
-    else if (i.dealId) onNavigate('pipeline');
+    else if (i.dealId) navigateTo('pipeline', { deal: String(i.dealId) });
+    else if (i.kind === 'old-unpaid') navigateTo('collections', { show: 'old' });
+    else if (i.kind === 'old-drafts') onNavigate('billing');
     else if (i.postId) navigateTo('social', { post: String(i.postId) });
   };
   const icon = (i: Item) => {
     const cls = 'grid h-9 w-9 shrink-0 place-items-center rounded-lg';
+    if (i.kind === 'old-unpaid' || i.kind === 'old-drafts') return <span className={`${cls} bg-slate-800 text-slate-400`}><Archive size={16} /></span>;
     if (i.kind === 'invoice-late') return <span className={`${cls} bg-red-500/15 text-red-400`}><AlertTriangle size={16} /></span>;
     if (i.kind === 'invoice-due' || i.kind === 'draft') return <span className={`${cls} bg-amber-500/15 text-amber-400`}><Receipt size={16} /></span>;
     if (i.kind.startsWith('quote')) return <span className={`${cls} bg-[var(--accent-quiet)] text-violet-300`}><FileText size={16} /></span>;
@@ -250,7 +262,8 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
         ) : (
           <div className="grid gap-3 sm:grid-cols-3">
             <Figure label="Owed to you" value={perCur(f.owed, 'Nothing')} onClick={() => onNavigate('collections')}
-              line={hasAny(f.overdue) ? `${perCur(f.overdue)} of it overdue` : 'None of it is late'} warn={hasAny(f.overdue)} />
+              line={(hasAny(f.overdue) ? `${perCur(f.overdue)} of it overdue` : 'None of it is late')
+                + (f.oldOwed && hasAny(f.oldOwed) ? `. ${perCur(f.oldOwed)} is old-system history` : '')} warn={hasAny(f.overdue)} />
             {/* On a phone the list is the point, so only the figure that drives it stays on top. */}
             <Figure label="Coming in, next 8 weeks" value={perCur(f.comingIn, 'Nothing due')} onClick={() => onNavigate('cashflow')} wide
               line="Invoices due in the next 8 weeks. What is already late is in Owed, not here." />
@@ -319,6 +332,7 @@ export function HomeView({ businessId, onNavigate, onPickBusiness }: {
                                 <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ background: bz.color }} />{bz.name}</span>
                               )}
                               {i.at && <span>{whenText(i.at, i.allDay)}</span>}
+                              {i.external && <span className="rounded bg-sky-500/10 px-1.5 text-[11px] text-sky-300" title="From your own calendar. Change it there.">your calendar</span>}
                               {i.sub && <span>{i.sub}</span>}
                             </div>
                           </div>

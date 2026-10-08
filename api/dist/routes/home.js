@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { eq, gte, inArray, isNotNull, isNull, lte, ne } from 'drizzle-orm';
 import { db } from '../db/client.js';
-import { documents, payments, tasks, boards, folders, calendarEvents, deals, socialPosts, businesses, supportRequests, } from '../db/schema.js';
+import { documents, payments, tasks, boards, folders, calendarEvents, deals, socialPosts, businesses, supportRequests, externalEvents, } from '../db/schema.js';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
 import { accessibleBusinessIds } from '../lib/access.js';
@@ -21,7 +22,7 @@ const daysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.pa
 export async function homeRoutes(app) {
     app.addHook('preHandler', app.requireAuth);
     app.get('/api/v1/home', async (req) => {
-        const { accountId } = authOf(req);
+        const { accountId, userId } = authOf(req);
         const q = z.object({ businessId: z.coerce.number().int().positive().optional() }).safeParse(req.query);
         const only = q.success ? q.data.businessId : undefined;
         const allowed = await accessibleBusinessIds(req);
@@ -37,7 +38,7 @@ export async function homeRoutes(app) {
             clientName: documents.clientName, folderId: documents.folderId, businessId: documents.businessId,
             issueDate: documents.issueDate, dueDate: documents.dueDate, total: documents.total,
             currency: documents.currency, decision: documents.decision, lastReminderOn: documents.lastReminderOn,
-            createdAt: documents.createdAt,
+            createdAt: documents.createdAt, seq: documents.seq,
         }).from(documents)
             .where(tenantWhere(documents, accountId, ne(documents.status, 'void'), ne(documents.status, 'paid'))))
             .filter((d) => inScope(d.businessId));
@@ -47,11 +48,27 @@ export async function homeRoutes(app) {
         const overdue = {};
         const comingIn = {};
         const comingEnd = plusDays(today, 56);
+        /**
+         * Invoices carried over from the old system are history being checked by hand.
+         * One row each buried today's real work: 28 of them sat above every task. They
+         * still count in what is owed (the books say so), but on the list they are one
+         * summary row that leads to where they are sorted out.
+         */
+        const isOld = (d) => d.seq >= IMPORTED_SEQ_BASE;
+        const oldOwed = {};
+        let oldCount = 0;
         for (const d of unpaid) {
             const left = bal.get(d.id)?.outstanding ?? Number(d.total);
             if (left <= 0.001)
                 continue;
             add(owed, d.currency, left);
+            if (isOld(d)) {
+                add(oldOwed, d.currency, left);
+                if (d.dueDate && d.dueDate < today)
+                    add(overdue, d.currency, left);
+                oldCount += 1;
+                continue;
+            }
             const base = {
                 businessId: d.businessId, folderId: d.folderId, clientName: d.clientName,
                 amount: round(left), currency: d.currency, of: left < Number(d.total) - 0.001 ? Number(d.total) : undefined,
@@ -78,7 +95,30 @@ export async function homeRoutes(app) {
                 }
             }
         }
+        if (oldCount) {
+            const curs = Object.keys(oldOwed);
+            items.push({
+                key: 'old-unpaid', group: 'overdue', kind: 'old-unpaid', count: oldCount,
+                title: `${oldCount} ${oldCount === 1 ? 'invoice' : 'invoices'} from your old system still marked unpaid`,
+                sub: 'Mark the paid ones paid and cancel the rest. Klippy does not chase these on its own',
+                businessId: null, folderId: null, clientName: null,
+                ...(curs.length === 1 ? { amount: round(oldOwed[curs[0]]), currency: curs[0] } : {}),
+                // After the real overdue work, never above it.
+                rank: 1e9,
+            });
+        }
+        const oldDrafts = docs.filter((d) => isOld(d) && d.status === 'draft' && d.type !== 'credit_note').length;
+        if (oldDrafts) {
+            items.push({
+                key: 'old-drafts', group: 'week', kind: 'old-drafts', count: oldDrafts,
+                title: `${oldDrafts} ${oldDrafts === 1 ? 'draft' : 'drafts'} carried over from your old system`,
+                sub: 'History, not bills waiting to go out. Delete the ones you do not need',
+                businessId: null, folderId: null, clientName: null, rank: 1e9,
+            });
+        }
         for (const d of docs) {
+            if (isOld(d))
+                continue;
             if (d.status === 'draft' && d.type !== 'credit_note') {
                 const age = daysBetween(iso(new Date(d.createdAt)), today);
                 items.push({
@@ -156,9 +196,10 @@ export async function homeRoutes(app) {
                 cameInToday.push({ docId: d.id, number: d.number, clientName: d.clientName, amount: round(amt), currency: d.currency, method });
             }
         }
-        // Invoices the schedule raised on its own this month (a repeating invoice).
+        // Invoices the schedule raised AND sent on its own this month. Drafts waiting
+        // for a person do not count: the line says "sent by itself", and a draft was not.
         const auto = (await db.select({ id: documents.id, businessId: documents.businessId }).from(documents)
-            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), isNotNull(documents.subscriptionId), gte(documents.issueDate, monthStart))))
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), isNotNull(documents.subscriptionId), gte(documents.issueDate, monthStart), inArray(documents.status, ['sent', 'paid']))))
             .filter((d) => inScope(d.businessId)).length;
         // ---- Tasks ---------------------------------------------------------------------
         const tree = await db.select({ id: folders.id, parentId: folders.parentId, businessId: folders.businessId, name: folders.name })
@@ -213,6 +254,23 @@ export async function homeRoutes(app) {
                 businessId: e.businessId, folderId: e.folderId, clientName: null, eventId: e.id,
                 rank: e.startAt.getTime() / 1e12,
             });
+        }
+        // The person's own calendar, read in from Outlook, Google or Apple. Private to
+        // them, so only theirs, and shown whatever business is picked (it has none).
+        if (userId) {
+            const outs = await db.select({
+                id: externalEvents.id, title: externalEvents.title, startAt: externalEvents.startAt,
+                allDay: externalEvents.allDay, location: externalEvents.location,
+            }).from(externalEvents)
+                .where(tenantWhere(externalEvents, accountId, eq(externalEvents.userId, userId), gte(externalEvents.startAt, new Date(`${today}T00:00:00Z`)), lte(externalEvents.startAt, new Date(`${weekEnd}T23:59:59Z`))));
+            for (const e of outs) {
+                const day = iso(e.startAt);
+                items.push({
+                    key: `out-${e.id}`, group: day === today ? 'today' : 'week', kind: 'event', title: e.title,
+                    sub: e.location ?? '', at: e.startAt.toISOString(), allDay: e.allDay, external: true,
+                    businessId: null, folderId: null, clientName: null, rank: e.startAt.getTime() / 1e12,
+                });
+            }
         }
         // ---- Deals with a follow-up due ------------------------------------------------
         const ds = await db.select({
@@ -278,7 +336,7 @@ export async function homeRoutes(app) {
             .map((b) => ({ id: b.id, count: items.filter((i) => i.businessId == null || i.businessId === b.id).length }));
         return {
             today,
-            figures: { owed, overdue, comingIn, moneyIn, byMethod, cameInToday },
+            figures: { owed, overdue, comingIn, moneyIn, byMethod, cameInToday, oldOwed },
             didForYou: { afterReminder, afterReminderCount: remindedDocs.size, autoInvoices: auto, cardSelf },
             items,
             counts: {

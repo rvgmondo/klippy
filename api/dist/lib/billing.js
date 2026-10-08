@@ -89,6 +89,15 @@ export function upcomingBills(from, intervalMonths, anchor, n, endsOn) {
     return out;
 }
 /** Plain day arithmetic in UTC, so a due date never shifts with the server's zone. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/**
+ * The stretch a subscription invoice pays for, in words: "3 Jul to 2 Aug 2026".
+ * The year is said once when both ends share it.
+ */
+export function periodLabel(from, to) {
+    const say = (d, year) => `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]}${year ? ` ${d.slice(0, 4)}` : ''}`;
+    return `${say(from, from.slice(0, 4) !== to.slice(0, 4))} to ${say(to, true)}`;
+}
 export function addDays(dateStr, days) {
     const d = new Date(`${dateStr}T00:00:00.000Z`);
     d.setUTCDate(d.getUTCDate() + days);
@@ -178,7 +187,7 @@ export async function generateSubscriptionInvoice(accountId, sub) {
         }));
         const newId = Number(ins[0].insertId);
         await tx.insert(documentLines).values(withTenant(accountId, {
-            documentId: newId, description: `${off.name}${off.unit ? ` (${off.unit})` : ''}`,
+            documentId: newId, description: `${off.name}${off.unit ? ` (${off.unit})` : ''}${sub.period ? `, ${periodLabel(sub.period.from, sub.period.to)}` : ''}`.slice(0, 255),
             // What they are paying for, in the words already written on the off.
             // A recurring invoice is the one a client sees most often and questions
             // least often, so a bare product name is where "what is this charge?"
