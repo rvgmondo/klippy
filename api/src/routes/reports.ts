@@ -1,15 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { and, eq, gte, isNotNull, lte, ne, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNotNull, lt, lte, ne, inArray, sql } from 'drizzle-orm';
 import { DEFAULT_CURRENCY, roundMoney } from '../lib/currency.js';
 import { mrrByCurrency, chargeFor } from '../lib/mrr.js';
 import { addMonths, billingAnchor, addDays } from '../lib/billing.js';
 import { balancesFor } from '../lib/balances.js';
+import { IMPORTED_SEQ_BASE } from '../lib/numbering.js';
 import { db } from '../db/client.js';
 import { timeEntries, tasks, boards, folders, users, accounts, businesses, expenses, offerings, subscriptions, documents, payments, sales } from '../db/schema.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere } from '../lib/tenant.js';
-import { accessibleBusinessIds, businessScope } from '../lib/access.js';
+import { accessibleBusinessIds, businessScope, canSeeBusiness } from '../lib/access.js';
 
 const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 
@@ -318,9 +319,14 @@ export async function reportRoutes(app: FastifyInstance) {
     const q = z.object({
       kind: z.enum(['invoices', 'payments', 'expenses']),
       from: dateStr, to: dateStr,
+      // The business picked in the switcher. The exports ignored it and always gave
+      // the whole workspace, beside a VAT figure for one company: the bookkeeper got
+      // two companies' invoices in one file with nothing saying which was whose.
+      businessId: z.coerce.number().int().positive().optional(),
     }).safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'kind, from and to (YYYY-MM-DD) are required.' });
-    const { kind, from, to } = q.data;
+    const { kind, from, to, businessId } = q.data;
+    if (businessId && !(await canSeeBusiness(req, businessId))) return reply.code(403).send({ error: 'You do not have access to that business.' });
 
     const esc = (v: unknown): string => {
       const str = v == null ? '' : String(v);
@@ -330,6 +336,11 @@ export async function reportRoutes(app: FastifyInstance) {
     };
     const toCsv = (header: string[], rows: unknown[][]) =>
       [header, ...rows].map((r) => r.map(esc).join(',')).join('\r\n') + '\r\n';
+    // Every row says which business it belongs to, so a file covering several is
+    // still sortable into each company's books.
+    const bizNames = new Map((await db.select({ id: businesses.id, name: businesses.name }).from(businesses)
+      .where(tenantWhere(businesses, accountId))).map((b) => [b.id, b.name]));
+    const bizName = (id: number | null) => (id != null ? bizNames.get(id) : null) ?? '';
 
     let csv = '';
     if (kind === 'invoices') {
@@ -337,37 +348,46 @@ export async function reportRoutes(app: FastifyInstance) {
         number: documents.number, type: documents.type, issueDate: documents.issueDate,
         dueDate: documents.dueDate, client: documents.clientName, vat: documents.clientVatNumber,
         currency: documents.currency, subtotal: documents.subtotal, tax: documents.taxAmount,
-        total: documents.total, status: documents.status,
+        total: documents.total, status: documents.status, businessId: documents.businessId,
       }).from(documents)
         .where(tenantWhere(documents, accountId,
           await businessScope(req, documents.businessId),
+          businessId ? eq(documents.businessId, businessId) : undefined,
           inArray(documents.type, ['invoice', 'credit_note']),
-          gte(documents.issueDate, from), lte(documents.issueDate, to)));
+          gte(documents.issueDate, from), lte(documents.issueDate, to)))
+        .orderBy(asc(documents.issueDate));
       csv = toCsv(
-        ['Number', 'Type', 'Issue date', 'Due date', 'Client', 'Client VAT', 'Currency', 'Subtotal', 'Tax', 'Total', 'Status'],
-        rows.map((r) => [r.number, r.type, r.issueDate, r.dueDate, r.client, r.vat, r.currency, r.subtotal, r.tax, r.total, r.status]));
+        ['Business', 'Number', 'Type', 'Issue date', 'Due date', 'Client', 'Client VAT', 'Currency', 'Subtotal', 'Tax', 'Total', 'Status'],
+        rows.map((r) => [bizName(r.businessId), r.number, r.type, r.issueDate, r.dueDate, r.client, r.vat, r.currency, r.subtotal, r.tax, r.total, r.status]));
     } else if (kind === 'payments') {
       const rows = await db.select({
         paidOn: payments.paidOn, amount: payments.amount, method: payments.method,
         number: documents.number, client: documents.clientName, currency: documents.currency,
-      }).from(payments).innerJoin(documents, eq(documents.id, payments.documentId))
+        businessId: documents.businessId,
+      }).from(payments).innerJoin(documents, and(eq(documents.id, payments.documentId), eq(documents.accountId, accountId)))
         .where(and(eq(payments.accountId, accountId),
           await businessScope(req, documents.businessId),
-          gte(payments.paidOn, from), lte(payments.paidOn, to)));
+          businessId ? eq(documents.businessId, businessId) : undefined,
+          gte(payments.paidOn, from), lte(payments.paidOn, to)))
+        .orderBy(asc(payments.paidOn));
       csv = toCsv(
-        ['Paid on', 'Amount', 'Method', 'Invoice', 'Client', 'Currency'],
-        rows.map((r) => [r.paidOn, r.amount, r.method, r.number, r.client, r.currency]));
+        ['Business', 'Paid on', 'Amount', 'Method', 'Invoice', 'Client', 'Currency'],
+        rows.map((r) => [bizName(r.businessId), r.paidOn, r.amount, r.method, r.number, r.client, r.currency]));
     } else {
       const rows = await db.select({
         incurredOn: expenses.incurredOn, description: expenses.description,
-        category: expenses.category, amount: expenses.amount,
+        category: expenses.category, amount: expenses.amount, vat: expenses.vatAmount,
+        businessId: expenses.businessId, client: folders.name, receipt: expenses.receiptNodeId,
       }).from(expenses)
+        .leftJoin(folders, and(eq(folders.id, expenses.folderId), eq(folders.accountId, accountId)))
         .where(and(eq(expenses.accountId, accountId),
           await businessScope(req, expenses.businessId),
-          gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)));
+          businessId ? eq(expenses.businessId, businessId) : undefined,
+          gte(expenses.incurredOn, from), lte(expenses.incurredOn, to)))
+        .orderBy(asc(expenses.incurredOn));
       csv = toCsv(
-        ['Date', 'Description', 'Category', 'Amount'],
-        rows.map((r) => [r.incurredOn, r.description, r.category, r.amount]));
+        ['Business', 'Date', 'Description', 'Category', 'Client', 'Amount', 'VAT', 'Receipt kept'],
+        rows.map((r) => [bizName(r.businessId), r.incurredOn, r.description, r.category, r.client ?? '', r.amount, r.vat ?? '', r.receipt ? 'yes' : 'no']));
     }
 
     reply.header('Content-Type', 'text/csv; charset=utf-8');
@@ -729,6 +749,7 @@ export async function reportRoutes(app: FastifyInstance) {
     const invRows = await db.select({
       id: documents.id, total: documents.total, dueDate: documents.dueDate,
       currency: documents.currency, businessId: documents.businessId,
+      number: documents.number, clientName: documents.clientName,
     }).from(documents)
       .where(tenantWhere(documents, accountId,
         eq(documents.type, 'invoice'), eq(documents.status, 'sent'),
@@ -738,13 +759,18 @@ export async function reportRoutes(app: FastifyInstance) {
     const balances = await balancesFor(accountId, invRows);
 
     type Bucket = { start: string; end: string; invoices: number; subscriptions: number };
-    type Lane = { overdue: number; overdueCount: number; later: number; buckets: Bucket[] };
+    /**
+     * What makes up each column. The chart said a week was thin or full and gave
+     * no way to see whose money it was. week: -1 is overdue, WEEKS is "after that".
+     */
+    type Item = { week: number; kind: 'invoice' | 'subscription'; id: number; label: string; client: string; date: string; amount: number };
+    type Lane = { overdue: number; overdueCount: number; later: number; buckets: Bucket[]; items: Item[]; drafts: number; draftCount: number };
     const lanes = new Map<string, Lane>();
     const laneOf = (cur: string): Lane => {
       let l = lanes.get(cur);
       if (!l) {
         l = {
-          overdue: 0, overdueCount: 0, later: 0,
+          overdue: 0, overdueCount: 0, later: 0, items: [], drafts: 0, draftCount: 0,
           buckets: Array.from({ length: WEEKS }, (_, i) => ({
             start: addDays(today, i * 7), end: addDays(today, i * 7 + 6), invoices: 0, subscriptions: 0,
           })),
@@ -761,18 +787,42 @@ export async function reportRoutes(app: FastifyInstance) {
       if (owed <= 0.001) continue;
       const lane = laneOf(inv.currency);
       const due = inv.dueDate!;
-      if (due < today) { lane.overdue += owed; lane.overdueCount += 1; }
-      else if (due > horizon) lane.later += owed;
-      else lane.buckets[Math.min(WEEKS - 1, weekIndex(due))]!.invoices += owed;
+      let week: number;
+      if (due < today) { lane.overdue += owed; lane.overdueCount += 1; week = -1; }
+      else if (due > horizon) { lane.later += owed; week = WEEKS; }
+      else { week = Math.min(WEEKS - 1, weekIndex(due)); lane.buckets[week]!.invoices += owed; }
+      lane.items.push({ week, kind: 'invoice', id: inv.id, label: inv.number, client: inv.clientName, date: due, amount: roundMoney(owed, inv.currency) });
+    }
+
+    /**
+     * Drafts: money that cannot arrive because nobody has sent the invoice yet.
+     * Subscriptions raise their invoices as drafts when they are not set to send on
+     * their own, and the subscription moves on to its next date, so a draft left
+     * sitting was counted nowhere on this screen. Shown, not forecast: a draft has
+     * no due date anyone has agreed to.
+     */
+    const draftRows = await db.select({ total: documents.total, currency: documents.currency }).from(documents)
+      .where(tenantWhere(documents, accountId,
+        eq(documents.type, 'invoice'), eq(documents.status, 'draft'),
+        // Drafts carried over from the old system are history, not unsent bills.
+        lt(documents.seq, IMPORTED_SEQ_BASE),
+        onlyBusiness !== undefined ? eq(documents.businessId, onlyBusiness) : undefined,
+        await businessScope(req, documents.businessId)));
+    for (const d of draftRows) {
+      const lane = laneOf(d.currency);
+      lane.drafts += Number(d.total);
+      lane.draftCount += 1;
     }
 
     const subRows = await db.select({
+      id: subscriptions.id, offeringName: offerings.name, clientName: folders.name,
       price: subscriptions.price, listPrice: offerings.price,
       intervalMonths: subscriptions.intervalMonths, startedOn: subscriptions.startedOn,
       nextBillDate: subscriptions.nextBillDate, businessId: subscriptions.businessId,
       billingDay: subscriptions.billingDay, endsOn: subscriptions.endsOn,
     }).from(subscriptions)
-      .innerJoin(offerings, eq(offerings.id, subscriptions.offeringId))
+      .innerJoin(offerings, and(eq(offerings.id, subscriptions.offeringId), eq(offerings.accountId, accountId)))
+      .leftJoin(folders, and(eq(folders.id, subscriptions.folderId), eq(folders.accountId, accountId)))
       .where(tenantWhere(subscriptions, accountId, eq(subscriptions.status, 'active'),
         onlyBusiness !== undefined ? eq(subscriptions.businessId, onlyBusiness) : undefined,
         await businessScope(req, subscriptions.businessId)));
@@ -786,7 +836,9 @@ export async function reportRoutes(app: FastifyInstance) {
       // rather than dropping it into the past.
       let d = s.nextBillDate < today ? today : s.nextBillDate;
       for (let i = 0; i < 24 && d <= horizon && !(s.endsOn && d > s.endsOn); i++) {
-        lane.buckets[Math.min(WEEKS - 1, Math.max(0, weekIndex(d)))]!.subscriptions += amount;
+        const week = Math.min(WEEKS - 1, Math.max(0, weekIndex(d)));
+        lane.buckets[week]!.subscriptions += amount;
+        lane.items.push({ week, kind: 'subscription', id: s.id, label: s.offeringName, client: s.clientName ?? '', date: d, amount: roundMoney(amount, curOf(s.businessId)) });
         d = addMonths(d, s.intervalMonths, anchor);
       }
     }
@@ -806,6 +858,9 @@ export async function reportRoutes(app: FastifyInstance) {
         later: roundMoney(l.later, currency),
         buckets,
         expected,
+        drafts: roundMoney(l.drafts, currency),
+        draftCount: l.draftCount,
+        items: l.items.sort((a, b) => a.week - b.week || a.date.localeCompare(b.date) || b.amount - a.amount),
       };
     }).sort((a, b) => b.expected - a.expected);
 

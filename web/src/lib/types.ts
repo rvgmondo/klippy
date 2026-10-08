@@ -77,6 +77,10 @@ export interface Expense {
   amount: string;
   vatAmount: string | null;
   incurredOn: string;
+  /** The receipt, a file in Files under Receipts. */
+  receiptNodeId?: number | null;
+  /** Written by a standing cost rather than typed in. */
+  recurringExpenseId?: number | null;
 }
 export type BusinessType = 'services' | 'products' | 'code' | 'content';
 export interface Business {

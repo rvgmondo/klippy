@@ -1,0 +1,2 @@
+ALTER TABLE `expenses` ADD `receipt_node_id` int unsigned;--> statement-breakpoint
+ALTER TABLE `expenses` ADD CONSTRAINT `expenses_receipt_node_id_storage_nodes_id_fk` FOREIGN KEY (`receipt_node_id`) REFERENCES `storage_nodes`(`id`) ON DELETE set null ON UPDATE no action;

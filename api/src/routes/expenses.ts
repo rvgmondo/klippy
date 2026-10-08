@@ -1,9 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { money } from '../lib/money.js';
 import { z } from 'zod';
-import { asc, desc, eq, gte, lte, and } from 'drizzle-orm';
+import { asc, desc, eq, gte, lte, and, isNull } from 'drizzle-orm';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 import { db } from '../db/client.js';
-import { expenses, recurringExpenses } from '../db/schema.js';
+import { expenses, recurringExpenses, folders, storageNodes } from '../db/schema.js';
+import { storage } from '../lib/storage.js';
 import { authOf } from '../lib/context.js';
 import { tenantWhere, withTenant } from '../lib/tenant.js';
 import { businessScope, assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
@@ -24,6 +27,35 @@ const createSchema = z.object({
   incurredOn: dateStr,
 });
 const updateSchema = createSchema.partial();
+
+/**
+ * The client an expense is tagged to is one of THIS workspace's.
+ *
+ * The id was stored as sent. businessForNew only looks the folder up to pick a
+ * business, and when a business was given it went on without it, so an expense
+ * could point at another workspace's client and per-client profit would count it.
+ */
+async function folderIsMine(accountId: number, folderId: number | null | undefined): Promise<boolean> {
+  if (folderId == null) return true;
+  const [f] = await db.select({ id: folders.id }).from(folders)
+    .where(tenantWhere(folders, accountId, eq(folders.id, folderId))).limit(1);
+  return !!f;
+}
+
+/** The Receipts folder at the top of Files, made the first time it is needed. */
+async function receiptsFolder(accountId: number, userId: number | null): Promise<number> {
+  const [f] = await db.select({ id: storageNodes.id }).from(storageNodes)
+    .where(tenantWhere(storageNodes, accountId, isNull(storageNodes.parentId),
+      eq(storageNodes.kind, 'folder'), eq(storageNodes.name, 'Receipts'))).limit(1);
+  if (f) return f.id;
+  const ins = await db.insert(storageNodes).values(withTenant(accountId, {
+    parentId: null, kind: 'folder' as const, name: 'Receipts', uploadedBy: userId,
+  }));
+  return Number(ins[0].insertId);
+}
+
+const RECEIPT_BYTES = 15 * 1024 * 1024;
+const RECEIPT_TYPES = /^(image\/(jpeg|png|webp|heic|heif|gif)|application\/pdf)$/;
 
 // A simple dated cost ledger - not full accounting, just enough to answer
 // "what did this business actually spend" so profit can be shown alongside revenue.
@@ -55,6 +87,7 @@ export async function expenseRoutes(app: FastifyInstance) {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
     const d = parsed.data;
+    if (!(await folderIsMine(accountId, d.folderId))) return reply.code(400).send({ error: 'That client was not found.' });
     const which = await businessForNew(accountId, d.businessId, d.folderId ?? null);
     if ('error' in which) return reply.code(400).send({ error: which.error });
     const businessId = which.id;
@@ -79,6 +112,7 @@ export async function expenseRoutes(app: FastifyInstance) {
     if (!own) return reply.code(404).send({ error: 'Expense not found.' });
     if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
     const d = parsed.data;
+    if (!(await folderIsMine(accountId, d.folderId))) return reply.code(400).send({ error: 'That client was not found.' });
     const patch: Record<string, unknown> = { ...d };
     delete patch.businessId;
     if (d.amount !== undefined) patch.amount = money(d.amount);
@@ -101,6 +135,67 @@ export async function expenseRoutes(app: FastifyInstance) {
     if (!res[0].affectedRows) return reply.code(404).send({ error: 'Expense not found.' });
     return { ok: true };
   });
+
+  /**
+   * Attach the receipt: a photo or PDF, filed in Files under Receipts and named
+   * after the expense so it can be found there too. Replaces any earlier one.
+   */
+  app.post('/api/v1/expenses/:id/receipt', async (req, reply) => {
+    const { accountId, userId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select().from(expenses)
+      .where(tenantWhere(expenses, accountId, eq(expenses.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Expense not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
+
+    const part = await req.file({ limits: { fileSize: RECEIPT_BYTES } });
+    if (!part) return reply.code(400).send({ error: 'No file uploaded.' });
+    if (!RECEIPT_TYPES.test(part.mimetype)) {
+      part.file.resume();
+      return reply.code(400).send({ error: 'A receipt has to be a photo or a PDF.' });
+    }
+    const ext = path.extname(part.filename).slice(0, 12).replace(/[^.a-zA-Z0-9]/g, '');
+    const key = `${accountId}/${Date.now()}_${randomBytes(8).toString('hex')}${ext}`;
+    const size = await storage().save(key, part.file);
+    if (part.file.truncated) {
+      await storage().delete(key);
+      return reply.code(400).send({ error: 'That file is larger than 15MB. A photo of the slip is plenty.' });
+    }
+    const parentId = await receiptsFolder(accountId, userId);
+    const name = `${own.incurredOn} ${own.description}`.replace(/[\\/:*?"<>|]/g, '-').slice(0, 200) + ext;
+    const ins = await db.insert(storageNodes).values(withTenant(accountId, {
+      parentId, kind: 'file' as const, name, storageKey: key, size, mimeType: part.mimetype, uploadedBy: userId,
+    }));
+    const nodeId = Number(ins[0].insertId);
+    await db.update(expenses).set({ receiptNodeId: nodeId })
+      .where(tenantWhere(expenses, accountId, eq(expenses.id, id)));
+    // The one it replaces goes, file and all, or Receipts fills with orphans.
+    if (own.receiptNodeId) await removeNode(accountId, own.receiptNodeId);
+    return reply.code(201).send({ receiptNodeId: nodeId });
+  });
+
+  app.delete('/api/v1/expenses/:id/receipt', async (req, reply) => {
+    const { accountId } = authOf(req);
+    const id = intId(req);
+    if (!id) return reply.code(400).send({ error: 'Bad id.' });
+    const [own] = await db.select().from(expenses)
+      .where(tenantWhere(expenses, accountId, eq(expenses.id, id))).limit(1);
+    if (!own) return reply.code(404).send({ error: 'Expense not found.' });
+    if (!(await assertMaybeBusiness(req, reply, own.businessId))) return;
+    await db.update(expenses).set({ receiptNodeId: null })
+      .where(tenantWhere(expenses, accountId, eq(expenses.id, id)));
+    if (own.receiptNodeId) await removeNode(accountId, own.receiptNodeId);
+    return { ok: true };
+  });
+
+  async function removeNode(accountId: number, nodeId: number) {
+    const [n] = await db.select().from(storageNodes)
+      .where(tenantWhere(storageNodes, accountId, eq(storageNodes.id, nodeId), eq(storageNodes.kind, 'file'))).limit(1);
+    if (!n) return;
+    if (n.storageKey) await storage().delete(n.storageKey).catch(() => {});
+    await db.delete(storageNodes).where(tenantWhere(storageNodes, accountId, eq(storageNodes.id, nodeId)));
+  }
 
   /**
    * The costs that repeat.

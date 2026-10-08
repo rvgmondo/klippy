@@ -293,14 +293,20 @@ export async function documentRoutes(app) {
         const folderIds = [...new Set(rows.map((r) => r.folderId).filter((x) => x != null))];
         const phoned = new Set();
         const pausedClients = new Set();
+        // The client's email as it is NOW. The list used to show only the copy typed on
+        // the invoice, so a client who got an email on file later had no Chase button
+        // here, while Chase all (which reads the client) emailed them anyway.
+        const liveEmail = new Map();
         if (folderIds.length) {
-            const fRows = await db.select({ id: folders.id, phone: folders.billingPhone, paused: folders.remindersPaused }).from(folders)
+            const fRows = await db.select({ id: folders.id, phone: folders.billingPhone, paused: folders.remindersPaused, email: folders.billingEmail }).from(folders)
                 .where(tenantWhere(folders, accountId, inArray(folders.id, folderIds)));
             for (const f of fRows) {
                 if (normalizePhone(f.phone))
                     phoned.add(f.id);
                 if (f.paused)
                     pausedClients.add(f.id);
+                if (f.email)
+                    liveEmail.set(f.id, f.email);
             }
             const cRows = await db.select({ folderId: contacts.folderId, phone: contacts.phone }).from(contacts)
                 .where(tenantWhere(contacts, accountId, inArray(contacts.folderId, folderIds), isNotNull(contacts.phone)));
@@ -314,7 +320,9 @@ export async function documentRoutes(app) {
             cfgs.set(b, await reminderConfigFor(b));
         const items = rows
             .map((r) => ({
-            id: r.id, number: r.number, clientName: r.clientName, clientEmail: r.clientEmail,
+            id: r.id, number: r.number, clientName: r.clientName,
+            clientEmail: (r.folderId != null ? liveEmail.get(r.folderId) : undefined) ?? r.clientEmail,
+            imported: r.seq >= IMPORTED_SEQ_BASE,
             hasPhone: r.folderId != null && phoned.has(r.folderId),
             businessId: r.businessId, folderId: r.folderId, currency: r.currency, total: Number(r.total),
             // What is actually still owed, which is what you chase for.
@@ -344,11 +352,28 @@ export async function documentRoutes(app) {
             count: items.filter((i) => i.currency === currency).length,
         }))
             .sort((a, b) => b.outstanding - a.outstanding);
+        /**
+         * How old the debt is, per currency. The single Outstanding figure hid the one
+         * thing that decides what to do next: R20 000 owed for a week is a nudge, the
+         * same owed for three months is a phone call or a write-off.
+         */
+        const BUCKETS = [
+            { key: '1-30', from: 1, to: 30 }, { key: '31-60', from: 31, to: 60 },
+            { key: '61-90', from: 61, to: 90 }, { key: '90+', from: 91, to: Infinity },
+        ];
+        const ageing = byCurrency.map((c) => ({
+            currency: c.currency,
+            buckets: BUCKETS.map((b) => {
+                const inB = items.filter((i) => i.currency === c.currency && i.daysOverdue >= b.from && i.daysOverdue <= b.to);
+                return { key: b.key, amount: round(inB.reduce((t, i) => t + i.outstanding, 0)), count: inB.length };
+            }),
+        }));
         return {
             items,
             summary: {
                 count: items.length,
                 byCurrency,
+                ageing,
                 suspended: items.filter((i) => i.suspended).length,
             },
         };
@@ -383,7 +408,11 @@ export async function documentRoutes(app) {
             folderId: documents.folderId, currency: documents.currency,
             total: documents.total, dueDate: documents.dueDate, remindersPaused: documents.remindersPaused,
         }).from(documents)
-            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lt(documents.dueDate, today), parsed.data.ids?.length ? inArray(documents.id, parsed.data.ids) : undefined, parsed.data.businessId ? eq(documents.businessId, parsed.data.businessId) : undefined, await businessScope(req, documents.businessId)));
+            .where(tenantWhere(documents, accountId, eq(documents.type, 'invoice'), eq(documents.status, 'sent'), isNotNull(documents.dueDate), lt(documents.dueDate, today), 
+        // Picked by hand, anything goes. In bulk, never the invoices carried over from
+        // the old system: they are history still being checked, and the daily run
+        // leaves them alone for the same reason.
+        parsed.data.ids?.length ? inArray(documents.id, parsed.data.ids) : lt(documents.seq, IMPORTED_SEQ_BASE), parsed.data.businessId ? eq(documents.businessId, parsed.data.businessId) : undefined, await businessScope(req, documents.businessId)));
         if (!rows.length)
             return { sent: 0, covered: 0, skipped: 0, detail: 'Nothing overdue matched.' };
         const balances = await balancesFor(accountId, rows);

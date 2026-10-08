@@ -3,7 +3,7 @@ import { PaymentsModal } from './PaymentsModal';
 import { navigateTo } from '../lib/urlAction';
 import type { DocSummary } from './billingShared';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, AlertTriangle, FileText, MessageCircle } from 'lucide-react';
+import { Mail, AlertTriangle, FileText, MessageCircle, Search } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 import { StatementView } from './StatementView';
@@ -20,7 +20,22 @@ interface Item {
   businessId: number | null; folderId: number | null; currency: string; total: number; outstanding: number; dueDate: string | null;
   daysOverdue: number; lastReminderOn: string | null; suspended: boolean;
   remindersPaused?: boolean; nextReminder?: string | null;
+  /** Carried over from the old system. */
+  imported?: boolean;
 }
+type Filter = 'all' | 'mine' | 'risk' | 'unchased' | 'paused' | 'old';
+const FILTERS: { key: Filter; label: string; test: (i: Item) => boolean }[] = [
+  { key: 'all', label: 'Everything', test: () => true },
+  { key: 'mine', label: 'Raised in Klippy', test: (i) => !i.imported },
+  { key: 'risk', label: 'At risk', test: (i) => i.suspended },
+  { key: 'unchased', label: 'Not chased yet', test: (i) => !i.lastReminderOn },
+  { key: 'paused', label: 'Reminders paused', test: (i) => !!i.remindersPaused },
+  { key: 'old', label: 'From the old system', test: (i) => !!i.imported },
+];
+/** The colour for how late something is: the older, the hotter. */
+const AGE_TONE: Record<string, string> = {
+  '1-30': 'bg-amber-400/70', '31-60': 'bg-orange-500/80', '61-90': 'bg-red-500/80', '90+': 'bg-red-700',
+};
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const sayDay = (d: string) => `${Number(d.slice(8, 10))} ${MON[Number(d.slice(5, 7)) - 1]}`;
 /** Last chased, and what happens next: the same plan the daily run follows. */
@@ -36,6 +51,7 @@ interface Collections {
     count: number;
     /** One total per currency. Klippy never adds unlike currencies together. */
     byCurrency: { currency: string; outstanding: number; count: number }[];
+    ageing?: { currency: string; buckets: { key: string; amount: number; count: number }[] }[];
     suspended: number;
   };
 }
@@ -61,6 +77,24 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
   // everything they owe, with a pay link per invoice and their statement attached,
   // then records the reminder so the automatic schedule does not chase again today.
   const [sel, setSel] = useState<Set<number>>(new Set());
+  // Finding someone, narrowing to the ones that need a different kind of attention,
+  // and seeing it per client, which is how you actually ring people.
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [byClient, setByClient] = useState(false);
+  const q = query.trim().toLowerCase();
+  const allItems = data?.items ?? [];
+  const shown = allItems.filter((i) => FILTERS.find((f) => f.key === filter)!.test(i)
+    && (!q || i.clientName.toLowerCase().includes(q) || i.number.toLowerCase().includes(q) || (i.clientEmail ?? '').toLowerCase().includes(q)));
+  const narrowed = filter !== 'all' || !!q;
+  const clients = [...shown.reduce((m, i) => {
+    const key = `${i.folderId ?? i.clientName.toLowerCase()}:${i.currency}`;
+    const g = m.get(key) ?? { key, name: i.clientName, folderId: i.folderId, currency: i.currency, items: [] as Item[] };
+    g.items.push(i);
+    return m.set(key, g);
+  }, new Map<string, { key: string; name: string; folderId: number | null; currency: string; items: Item[] }>()).values()]
+    .map((g) => ({ ...g, owed: g.items.reduce((t, i) => t + i.outstanding, 0), oldest: Math.max(...g.items.map((i) => i.daysOverdue)) }))
+    .sort((a, b) => b.owed - a.owed);
   const toggle = (id: number) => setSel((s) => {
     const next = new Set(s);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -105,8 +139,10 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
    * the screen could reach every debtor at once. Chasing ticked invoices asks too, since it
    * is the same button and the same consequence.
    */
-  const confirmChase = async () => {
-    const chosen = sel.size ? (data?.items ?? []).filter((i) => sel.has(i.id)) : (data?.items ?? []);
+  const confirmChase = async (only?: Item[]) => {
+    // Ticked rows, else what the filter shows, else everything.
+    // In bulk, invoices from the old system are left out unless that is the filter.
+    const chosen = only ?? (sel.size ? allItems.filter((i) => sel.has(i.id)) : shown.filter((i) => filter === 'old' || !i.imported));
     const reachable = chosen.filter((i) => i.clientEmail);
     const clients = new Set(reachable.map((i) => (i.clientEmail ?? '').toLowerCase())).size;
     if (!reachable.length) {
@@ -118,7 +154,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
     const yes = await confirmDialog(
       `Send payment reminders to ${who} about ${invoices}? They go out now, by email, and by SMS or WhatsApp too if those are switched on.`,
       { confirmLabel: 'Send reminders' });
-    if (yes) chase.mutate(sel.size ? [...sel] : undefined);
+    if (yes) chase.mutate(only ? reachable.map((i) => i.id) : sel.size ? [...sel] : narrowed ? reachable.map((i) => i.id) : undefined);
   };
 
   return (
@@ -152,32 +188,119 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
               <Kpi label="Flagged at risk" value={String(data.summary.suspended)} warn={data.summary.suspended > 0} />
             </div>
 
+            {(data.summary.ageing ?? []).filter((a) => a.buckets.some((b) => b.amount > 0)).map((a) => {
+              const total = a.buckets.reduce((t, b) => t + b.amount, 0) || 1;
+              return (
+                <div key={a.currency} className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                  <div className="mb-2 text-[11px] uppercase tracking-wide text-slate-500">
+                    How late{(data.summary.ageing ?? []).length > 1 ? ` (${a.currency})` : ''}
+                  </div>
+                  <div className="flex h-2.5 overflow-hidden rounded-full bg-slate-800" aria-hidden>
+                    {a.buckets.map((b) => b.amount > 0 && (
+                      <div key={b.key} className={AGE_TONE[b.key]} style={{ width: `${(b.amount / total) * 100}%` }} />
+                    ))}
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {a.buckets.map((b) => (
+                      <div key={b.key}>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                          <span className={`h-2 w-2 rounded-full ${AGE_TONE[b.key]}`} /> {b.key} days
+                        </div>
+                        <div className="num text-sm font-medium text-slate-200">{money(b.amount, a.currency)}</div>
+                        <div className="text-[11px] text-slate-500">{b.count} invoice{b.count === 1 ? '' : 's'}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
             {data.items.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-700 p-8 text-center text-sm text-slate-400">
                 Nothing overdue. Everyone has paid, or is not late yet.
               </div>
             ) : (
               <>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="relative min-w-0 flex-1 sm:max-w-xs">
+                  <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Client or invoice number" aria-label="Find a client or invoice"
+                    className="min-h-10 w-full rounded-lg border border-slate-700 bg-slate-900/70 pl-8 pr-3 text-sm text-slate-100 placeholder-slate-500 outline-none focus:border-violet-500 sm:min-h-9" />
+                </label>
+                <select value={filter} onChange={(e) => { setFilter(e.target.value as Filter); setSel(new Set()); }} aria-label="Show"
+                  className="min-h-10 rounded-lg border border-slate-700 bg-slate-900/70 px-2 text-sm text-slate-200 sm:min-h-9">
+                  {FILTERS.map((f) => {
+                    const n = allItems.filter(f.test).length;
+                    return (f.key === 'all' || n > 0) && <option key={f.key} value={f.key}>{f.label} ({n})</option>;
+                  })}
+                </select>
+                <div className="flex rounded-lg border border-slate-700 p-0.5 text-xs" role="group" aria-label="Group by">
+                  <button onClick={() => setByClient(false)} aria-pressed={!byClient}
+                    className={`min-h-9 rounded-md px-2.5 sm:min-h-8 ${!byClient ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>Invoices</button>
+                  <button onClick={() => { setByClient(true); setSel(new Set()); }} aria-pressed={byClient}
+                    className={`min-h-9 rounded-md px-2.5 sm:min-h-8 ${byClient ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:text-slate-200'}`}>By client</button>
+                </div>
+              </div>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="text-xs text-slate-500">
                   {sel.size > 0
                     ? `${sel.size} selected`
-                    : 'Tick invoices to chase a few, or chase everything owed in one go.'}
+                    : narrowed
+                      ? `${shown.length} of ${allItems.length} shown.`
+                      : byClient ? `${clients.length} client${clients.length === 1 ? '' : 's'} owe you.` : 'Tick invoices to chase a few, or chase everything owed in one go.'}
                 </div>
-                <button onClick={() => void confirmChase()} disabled={chase.isPending}
+                <button onClick={() => void confirmChase()} disabled={chase.isPending || shown.length === 0}
                   className="flex items-center gap-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-sm font-medium text-[var(--accent-ink)] hover:bg-violet-500 disabled:opacity-50">
-                  <Mail size={14} /> {chase.isPending ? 'Sending' : sel.size ? `Chase selected (${sel.size})` : 'Chase all'}
+                  <Mail size={14} /> {chase.isPending ? 'Sending' : sel.size ? `Chase selected (${sel.size})` : narrowed ? `Chase these (${shown.length})` : 'Chase all'}
                 </button>
               </div>
+
+              {byClient && (
+                <div className="overflow-hidden rounded-xl border border-slate-800">
+                  {clients.map((c) => (
+                    <div key={c.key} className="flex flex-wrap items-center gap-3 border-t border-slate-800 px-3 py-3 first:border-t-0">
+                      <div className="min-w-0 flex-1">
+                        {c.folderId
+                          ? <button onClick={() => navigateTo('clients', { client: String(c.folderId) })} className="text-left text-sm font-medium text-slate-200 hover:text-[var(--accent)] hover:underline">{c.name}</button>
+                          : <div className="text-sm font-medium text-slate-200">{c.name}</div>}
+                        <div className="text-[11px] text-slate-500">
+                          {c.items.length} invoice{c.items.length === 1 ? '' : 's'}, oldest{' '}
+                          <span className={c.oldest >= 14 ? 'text-red-300' : 'text-amber-300'}>{c.oldest} days late</span>
+                          {c.items.some((i) => i.suspended) && <span className="text-red-300">, at risk</span>}
+                          {', '}{c.items.map((i) => i.number).join(', ')}
+                        </div>
+                      </div>
+                      <div className="num text-right text-sm font-semibold text-slate-100">{money(c.owed, c.currency)}</div>
+                      <div className="flex gap-1.5">
+                        {c.folderId && (
+                          <button onClick={() => setStatementFor(c.folderId)}
+                            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800">
+                            <FileText size={12} /> Statement
+                          </button>
+                        )}
+                        {c.items.some((i) => i.clientEmail) && (
+                          <button onClick={() => void confirmChase(c.items)} disabled={chase.isPending}
+                            title="One email listing everything this client owes, statement attached"
+                            className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-700 px-2.5 text-xs text-slate-300 hover:bg-slate-800 disabled:opacity-50">
+                            <Mail size={12} /> Chase
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {clients.length === 0 && <div className="px-3 py-6 text-center text-sm text-slate-500">Nothing matches.</div>}
+                </div>
+              )}
+              {!byClient && <>
               <div className="hidden overflow-x-auto rounded-xl border border-slate-800 sm:block">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-800 text-left text-[11px] uppercase tracking-wide text-slate-500">
                       <th className="w-8 px-3 py-2">
                         <input type="checkbox" aria-label="Select every invoice with an email address"
-                          checked={sel.size > 0 && sel.size === data.items.filter((i) => i.clientEmail).length}
+                          checked={sel.size > 0 && sel.size === shown.filter((i) => i.clientEmail).length}
                           onChange={(e) => setSel(e.target.checked
-                            ? new Set(data.items.filter((i) => i.clientEmail).map((i) => i.id))
+                            ? new Set(shown.filter((i) => i.clientEmail).map((i) => i.id))
                             : new Set())}
                           className="accent-violet-500" />
                       </th>
@@ -190,7 +313,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                     </tr>
                   </thead>
                   <tbody>
-                    {data.items.map((i) => (
+                    {shown.map((i) => (
                       <tr key={i.id} className="border-b border-slate-800/60 last:border-0">
                         <td className="px-3 py-2.5">
                           <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)}
@@ -202,6 +325,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2">
                             <span className="num text-slate-200">{i.number}</span>
+                            {i.imported && <span className="rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] text-slate-400" title="Carried over from your old invoicing system. Not chased automatically.">old system</span>}
                             {i.suspended && (
                               <span className="flex items-center gap-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-medium text-red-300">
                                 <AlertTriangle size={10} /> At risk
@@ -265,7 +389,7 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                   phone in a spare minute, and the seven-column table made it a
                   zoom-and-squint exercise. */}
               <div className="overflow-hidden rounded-xl border border-slate-800 sm:hidden">
-                {data.items.map((i) => (
+                {shown.map((i) => (
                   <div key={i.id} className="border-t border-slate-800 px-3 py-3 first:border-t-0">
                     <div className="flex items-start gap-3">
                       <input type="checkbox" checked={sel.has(i.id)} onChange={() => toggle(i.id)}
@@ -321,6 +445,8 @@ export function CollectionsView({ businessId }: { businessId: BusinessSelection 
                   </div>
                 ))}
               </div>
+              {shown.length === 0 && <div className="rounded-xl border border-slate-800 px-3 py-6 text-center text-sm text-slate-500">Nothing matches.</div>}
+              </>}
               </>
             )}
             <p className="text-[11px] text-slate-500">

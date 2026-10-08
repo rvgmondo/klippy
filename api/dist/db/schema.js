@@ -1063,6 +1063,13 @@ export const expenses = mysqlTable('expenses', {
      */
     recurringExpenseId: int('recurring_expense_id', { unsigned: true })
         .references(() => recurringExpenses.id, { onDelete: 'set null' }),
+    /**
+     * The slip, as a file in Files under Receipts. SARS expects the source document
+     * behind every claimed expense for five years, and a shoebox is not a system.
+     * Set null if the file is removed from Files, so the expense itself survives.
+     */
+    receiptNodeId: int('receipt_node_id', { unsigned: true })
+        .references(() => storageNodes.id, { onDelete: 'set null' }),
     createdBy: int('created_by', { unsigned: true }).references(() => users.id, { onDelete: 'set null' }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

@@ -35,6 +35,25 @@ function startOfMonth() {
 }
 function today() { return new Date().toISOString().slice(0, 10); }
 
+/**
+ * The periods people actually report on. The South African tax year runs from
+ * 1 March to the end of February, which no date picker suggests on its own.
+ */
+function presets(): { label: string; from: string; to: string }[] {
+  const n = new Date();
+  const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const y = n.getFullYear(), m = n.getMonth();
+  const taxStart = m >= 2 ? y : y - 1;
+  return [
+    { label: 'This month', from: ymd(new Date(y, m, 1)), to: today() },
+    { label: 'Last month', from: ymd(new Date(y, m - 1, 1)), to: ymd(new Date(y, m, 0)) },
+    { label: 'Last two months', from: ymd(new Date(y, m - 2, 1)), to: ymd(new Date(y, m, 0)) },
+    { label: 'This tax year', from: `${taxStart}-03-01`, to: today() },
+    { label: 'Last tax year', from: `${taxStart - 1}-03-01`, to: ymd(new Date(taxStart, 2, 0)) },
+    { label: 'This calendar year', from: `${y}-01-01`, to: today() },
+  ];
+}
+
 export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
   const [from, setFrom] = useState(startOfMonth());
   const [to, setTo] = useState(today());
@@ -65,13 +84,23 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
 
   const field = fieldInlineClass;
   const cur = data?.currency ?? 'ZAR';
+  const choices = presets();
+  const chosen = choices.find((p) => p.from === from && p.to === to)?.label ?? '';
 
   return (
     <Page>
       <PageHeader view="reports" title="Reports"
         subtitle="What you kept, what is still unbilled, and what the taxman needs."
         actions={(
-          <div className="flex items-end gap-2">
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] text-slate-500">Period</span>
+              <select className={field} value={chosen} aria-label="Period"
+                onChange={(e) => { const p = choices.find((x) => x.label === e.target.value); if (p) { setFrom(p.from); setTo(p.to); } }}>
+                {!chosen && <option value="">Your own dates</option>}
+                {choices.map((p) => <option key={p.label} value={p.label}>{p.label}</option>)}
+              </select>
+            </label>
             <label className="block">
               <span className="mb-1 block text-[11px] text-slate-500">From</span>
               <input type="date" className={field} value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -95,7 +124,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <h3 className="mr-auto text-sm font-semibold text-slate-200">For your accountant</h3>
             {(['invoices', 'payments', 'expenses'] as const).map((k) => (
-              <a key={k} href={`/api/v1/reports/export?kind=${k}&from=${from}&to=${to}`}
+              <a key={k} href={`/api/v1/reports/export?kind=${k}&from=${from}&to=${to}${bizQ}`}
                 className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800">
                 Export {k} CSV
               </a>
@@ -149,7 +178,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
           // failed, which looks like the report is simply broken.
           <ErrorNote error={error} onRetry={() => refetch()} />
         ) : isLoading || !data ? (
-          <p className="text-sm text-slate-500">Loading...</p>
+          <p className="text-sm text-slate-500">Loading</p>
         ) : (
           <>
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -201,7 +230,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
 
             {!data.mixed && data.totals.mrr > 0 && (
               <p className="-mt-3 mb-5 text-xs text-slate-500">
-                Plus <span className="font-medium text-violet-300">{money(data.totals.mrr, cur)}</span> in monthly recurring revenue (not date-ranged - see Offerings).
+                Plus <span className="font-medium text-violet-300">{money(data.totals.mrr, cur)}</span> in monthly recurring revenue. That figure is today's, not tied to these dates; the Price list shows it per item.
               </p>
             )}
 
@@ -246,7 +275,7 @@ export function ReportsView({ businessId }: { businessId: BusinessSelection }) {
 
             {data.totals.unratedClients > 0 && (
               <p className="mt-2 text-[11px] text-amber-400/80">
-                Set an hourly rate on a client (its ⋯ menu in the sidebar) and its hours turn into money here.
+                Set an hourly rate on a client (in its menu in the sidebar) and its hours turn into money here.
                 Rates flow down to subfolders.
               </p>
             )}
