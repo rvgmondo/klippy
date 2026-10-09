@@ -36,7 +36,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
   const qc = useQueryClient();
   // An email about a help request links here with ?help=12, straight onto it.
   const [helpId] = useState(() => Number(new URLSearchParams(window.location.search).get('help')) || null);
-  const [tab, setTab] = useState<'documents' | 'statement' | 'report' | 'hosting' | 'details' | 'help'>(helpId ? 'help' : 'documents');
+  const [tab, setTab] = useState<'documents' | 'statement' | 'plans' | 'report' | 'hosting' | 'details' | 'help'>(helpId ? 'help' : 'documents');
   const accent = { background: 'var(--portal-accent, #0f172a)' };
 
   const { data } = useQuery({
@@ -144,7 +144,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
         )}
 
         <nav className="mb-4 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-slate-200">
-          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['report', 'Work report'], ['hosting', 'Hosting'], ['help', 'Get help'], ['details', 'Your details']] as const)
+          {([['documents', 'Invoices and quotes'], ['statement', 'Statement'], ['plans', 'Monthly services'], ['report', 'Work report'], ['hosting', 'Hosting'], ['help', 'Get help'], ['details', 'Your details']] as const)
             .map(([id, labelText]) => (
               <button key={id} onClick={() => setTab(id)}
                 // On a phone the row scrolls sideways; keep the open tab in sight.
@@ -163,6 +163,7 @@ export function PortalApp({ me, onSignedOut }: { me: PortalMe; onSignedOut: () =
             readOnly={!!me.preview} />
         )}
         {tab === 'statement' && <Statement />}
+        {tab === 'plans' && <Plans />}
         {tab === 'report' && <WorkReport />}
         {/* The Documents tab already shows a payment that failed to start. The Hosting tab
             did not, so a client pressing Pay there got nothing at all when it failed. */}
@@ -419,6 +420,64 @@ interface StatementLine { date: string; kind: string; ref: string; change: strin
  * running balance across two is not a number; a switcher appears only when the
  * client has been billed in more than one.
  */
+interface Plan {
+  id: number; name: string; description: string | null; domain: string | null; status: 'active' | 'paused';
+  amount: number; currency: string; intervalMonths: number; startedOn: string; endsOn: string | null; nextBillDate: string | null;
+}
+const longDate = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const every = (n: number) => (n === 1 ? 'a month' : n === 12 ? 'a year' : `every ${n} months`);
+
+/** What the client pays for on repeat, so a monthly charge never arrives unexplained. */
+function Plans() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['portal-plans'],
+    queryFn: () => apiGet<{ subscriptions: Plan[] }>('/portal/subscriptions'),
+  });
+  if (isLoading) return <p className="text-sm text-slate-500">Loading</p>;
+  const plans = data?.subscriptions ?? [];
+  if (!plans.length) {
+    return <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Nothing is billed to you on repeat.</div>;
+  }
+  // One total per currency and per rhythm would be fussy; a monthly figure is what people compare.
+  const perMonth = plans.filter((p) => p.status === 'active').reduce((m, p) => {
+    m.set(p.currency, (m.get(p.currency) ?? 0) + p.amount / Math.max(1, p.intervalMonths));
+    return m;
+  }, new Map<string, number>());
+  return (
+    <div className="space-y-3">
+      {perMonth.size > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-xs uppercase tracking-wide text-slate-500">On repeat, per month</div>
+          <div className="mt-1 flex flex-wrap gap-x-6 text-2xl font-semibold num">
+            {[...perMonth].map(([cur, v]) => <span key={cur}>{money(cur, Math.round(v * 100) / 100)}</span>)}
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Before VAT, where VAT applies. Each bill arrives as an invoice in Invoices and quotes.</p>
+        </div>
+      )}
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        {plans.map((p) => (
+          <div key={p.id} className="flex flex-wrap items-start gap-3 border-b border-slate-100 p-4 last:border-0">
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-slate-900">{p.name}{p.domain ? <span className="font-normal text-slate-500">, {p.domain}</span> : null}</div>
+              {p.description && <p className="mt-0.5 text-xs text-slate-500">{p.description}</p>}
+              <p className="mt-1 text-xs text-slate-600">
+                {p.status === 'paused' ? 'Paused, so nothing is billed for now.'
+                  : p.nextBillDate ? `Next bill on ${longDate(p.nextBillDate)}.` : ''}
+                {' '}Since {longDate(p.startedOn)}{p.endsOn ? `, until ${longDate(p.endsOn)}` : ''}.
+              </p>
+            </div>
+            <div className="text-right">
+              <div className="num text-sm font-semibold text-slate-900">{money(p.currency, p.amount)}</div>
+              <div className="text-xs text-slate-500">{every(p.intervalMonths)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-500">To change or stop a service, use Get help and we will sort it out.</p>
+    </div>
+  );
+}
+
 function Statement() {
   const [cur, setCur] = useState<string | null>(null);
   const { data, isLoading } = useQuery({

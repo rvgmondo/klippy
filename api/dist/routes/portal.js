@@ -19,6 +19,8 @@ import { intId } from '../lib/http.js';
 import { assertMaybeBusiness, assertBusinessAccess } from '../lib/access.js';
 import { authLimiter } from '../lib/rateLimit.js';
 import { notifyAdmins } from '../lib/notify.js';
+import { currencyFor } from '../lib/currencyFor.js';
+import { chargeFor } from '../lib/mrr.js';
 /** The scope filter. Every read of a client-owned table goes through this. */
 const mine = (c) => and(eq(documents.accountId, c.user.accountId), eq(documents.folderId, c.user.folderId));
 /** What a client is allowed to see at all: issued documents, never drafts. */
@@ -619,6 +621,41 @@ export async function portalRoutes(app) {
         return { ok: true, decision: parsed.data.decision };
     });
     // ---- Hosting --------------------------------------------------------------
+    /**
+     * What this client pays for on repeat, and when the next bill comes.
+     *
+     * A hosting or retainer client could see each month's invoice but not the plan
+     * behind it, so "what is this charge, and is it every month?" came by email. The
+     * amount is what THEY pay, not the list price, and in the business's currency.
+     */
+    app.get('/api/v1/portal/subscriptions', async (req, reply) => {
+        const c = await require(req, reply);
+        if (!c)
+            return;
+        const rows = await db.select({
+            id: subscriptions.id, status: subscriptions.status, price: subscriptions.price, list: offerings.price,
+            name: offerings.name, description: offerings.description, unit: offerings.unit,
+            intervalMonths: subscriptions.intervalMonths, nextBillDate: subscriptions.nextBillDate,
+            startedOn: subscriptions.startedOn, endsOn: subscriptions.endsOn, domain: subscriptions.domain,
+            businessId: subscriptions.businessId,
+        }).from(subscriptions)
+            .innerJoin(offerings, and(eq(offerings.id, subscriptions.offeringId), eq(offerings.accountId, c.user.accountId)))
+            .where(and(eq(subscriptions.accountId, c.user.accountId), eq(subscriptions.folderId, c.user.folderId), inArray(subscriptions.status, ['active', 'paused'])));
+        const curs = new Map();
+        const plans = [];
+        for (const r of rows) {
+            if (!curs.has(r.businessId))
+                curs.set(r.businessId, await currencyFor(c.user.accountId, r.businessId));
+            plans.push({
+                id: r.id, name: r.name, description: r.description, domain: r.domain, status: r.status,
+                amount: chargeFor(r, { price: r.list }), currency: curs.get(r.businessId),
+                intervalMonths: r.intervalMonths, startedOn: r.startedOn, endsOn: r.endsOn,
+                // A paused plan has no next bill; saying a date would be a promise nobody made.
+                nextBillDate: r.status === 'active' ? r.nextBillDate : null,
+            });
+        }
+        return { subscriptions: plans.sort((a, b) => (a.nextBillDate ?? '9').localeCompare(b.nextBillDate ?? '9')) };
+    });
     app.get('/api/v1/portal/hosting', async (req, reply) => {
         const c = await require(req, reply);
         if (!c)

@@ -8,6 +8,11 @@ import { isPlatformAdmin } from '../lib/platform.js';
 import { JOBS, runJob, runDueJobs, type JobName } from '../lib/jobs.js';
 import { runSocialPublish } from '../lib/social/publish.js';
 import { syncStaleFeeds } from '../lib/calendarFeeds.js';
+import { secretsAvailable } from '../lib/secretbox.js';
+import { appUrl } from '../lib/mailer.js';
+
+/** The job_runs row that records the server cron knocking, for the set-up check. */
+const CRON_ROW = 'cron-tick';
 
 /**
  * The daily jobs are run by the app itself (see lib/jobs.ts), so none of this needs
@@ -17,6 +22,58 @@ import { syncStaleFeeds } from '../lib/calendarFeeds.js';
  *  - a signed-in view of what ran and when, so Settings can show it and offer a
  *    "run now" button instead of asking anyone to write a curl command.
  */
+type Check = { key: string; label: string; state: 'ok' | 'warn' | 'bad'; detail: string };
+
+/**
+ * Is everything the background work needs actually in place?
+ *
+ * Reminders, recurring invoices, follow-ups, statements and calendar sync all run
+ * on their own, and every one of them does NOTHING, silently, when the server is
+ * missing a setting or nothing wakes the app. This says so in plain words, with
+ * the fix, instead of leaving it to be noticed when a client was never chased.
+ * Only presence is reported, never a value.
+ */
+export function setupChecks(byName: Map<string, typeof jobRuns.$inferSelect>): Check[] {
+  const out: Check[] = [];
+  const prod = process.env.NODE_ENV === 'production';
+  out.push(process.env.SMTP_HOST
+    ? { key: 'mail', label: 'Email', state: 'ok', detail: 'A mail server is set, so emails can leave.' }
+    : { key: 'mail', label: 'Email', state: 'bad', detail: 'No mail server is set, so reminders, invoices and reports go nowhere. Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and SMTP_FROM in cPanel and restart the app.' });
+  const url = appUrl();
+  out.push(/localhost|127\.0\.0\.1/.test(url) && prod
+    ? { key: 'url', label: 'Links in emails', state: 'bad', detail: `APP_URL is ${url}, so every link in an email points nowhere. Set it to the address people use, then restart.` }
+    : { key: 'url', label: 'Links in emails', state: 'ok', detail: `Links point to ${url}.` });
+  out.push(secretsAvailable()
+    ? { key: 'secret', label: 'Encryption key', state: 'ok', detail: 'PAYMENTS_SECRET is set, so card details and calendar links can be stored safely.' }
+    : { key: 'secret', label: 'Encryption key', state: 'bad', detail: 'PAYMENTS_SECRET is not set, so card payments and reading your Outlook calendar cannot work. Add a long random value in cPanel and restart.' });
+  out.push(process.env.CRON_SECRET
+    ? { key: 'cronkey', label: 'Cron key', state: 'ok', detail: 'CRON_SECRET is set.' }
+    : { key: 'cronkey', label: 'Cron key', state: 'bad', detail: 'CRON_SECRET is not set, so the cPanel cron below is refused. Add a long random value in cPanel and restart.' });
+
+  // The cron that wakes the app. cPanel puts an idle app to sleep, and a sleeping
+  // app runs nothing until somebody opens it.
+  const tick = byName.get(CRON_ROW)?.lastRunAt;
+  const ageMin = tick ? (Date.now() - new Date(tick).getTime()) / 60000 : null;
+  out.push(ageMin == null
+    ? { key: 'cron', label: 'Wake-up cron', state: 'bad', detail: 'The cPanel cron has never reached Klippy, so the daily work only happens when someone opens the app. Add the cron line below, every 15 minutes.' }
+    : ageMin <= 60
+      ? { key: 'cron', label: 'Wake-up cron', state: 'ok', detail: `Last knocked ${Math.max(1, Math.round(ageMin))} min ago.` }
+      : { key: 'cron', label: 'Wake-up cron', state: 'warn', detail: `Last knocked ${ageMin < 1440 ? `${Math.round(ageMin / 60)} hours` : `${Math.round(ageMin / 1440)} days`} ago. Check the cron is still in cPanel.` });
+
+  const failed = JOBS.filter((j) => byName.get(j.name)?.lastStatus === 'failed');
+  out.push(failed.length
+    ? { key: 'failed', label: 'Daily jobs', state: 'bad', detail: `Failed on their last run: ${failed.map((j) => j.label).join(', ')}. The reason is beside each one below.` }
+    : { key: 'failed', label: 'Daily jobs', state: 'ok', detail: 'None failed on their last run.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const hour = new Date().getHours();
+  const missed = JOBS.filter((j) => {
+    const s = byName.get(j.name);
+    return (s?.enabled ?? true) && hour >= j.hour + 1 && s?.lastRunOn !== today;
+  });
+  if (missed.length) out.push({ key: 'missed', label: 'Today\'s run', state: 'warn', detail: `Not run yet today, though their time has passed: ${missed.map((j) => j.label).join(', ')}. Usually the app was asleep; the wake-up cron fixes that.` });
+  return out;
+}
+
 export async function cronRoutes(app: FastifyInstance) {
   const bySecret = (req: { headers: Record<string, unknown> }): 'ok' | 'unset' | 'bad' => {
     const secret = process.env.CRON_SECRET;
@@ -41,6 +98,11 @@ export async function cronRoutes(app: FastifyInstance) {
     const auth = bySecret(req as never);
     if (auth === 'unset') return reply.code(503).send({ error: 'CRON_SECRET is not configured.' });
     if (auth === 'bad') return reply.code(401).send({ error: 'Bad cron key.' });
+    // Noted first, so the set-up check can say the cron is working even on a tick
+    // where nothing else was due.
+    await db.insert(jobRuns).values({ name: CRON_ROW, lastRunOn: new Date().toISOString().slice(0, 10), lastRunAt: new Date(), lastStatus: 'ok' })
+      .onDuplicateKeyUpdate({ set: { lastRunOn: new Date().toISOString().slice(0, 10), lastRunAt: new Date(), lastStatus: 'ok' } })
+      .catch(() => { /* the check is a nicety; the tick is the job */ });
     await runDueJobs();
     // Outside calendars too, so they stay fresh while the app sleeps.
     await syncStaleFeeds().catch(() => 0);
@@ -113,6 +175,9 @@ export async function cronRoutes(app: FastifyInstance) {
       // Whether email can actually leave the server. Every job sends mail, so
       // without this they run and quietly deliver nothing.
       mailConfigured: !!process.env.SMTP_HOST,
+      checks: setupChecks(byName),
+      // What to paste into cPanel. The key is never sent back; the owner has it.
+      cronCommand: `curl -s -X POST -H "X-Cron-Key: YOUR_CRON_SECRET" ${appUrl()}/api/v1/cron/tick`,
       jobs: JOBS.map((j) => {
         const s = byName.get(j.name);
         return {

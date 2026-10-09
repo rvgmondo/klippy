@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Play, CheckCircle2, AlertTriangle, Clock } from 'lucide-react';
+import { useState } from 'react';
+import { Play, CheckCircle2, AlertTriangle, Clock, XCircle, Copy } from 'lucide-react';
 import { apiGet, apiPost, apiPatch } from '../lib/api';
 import { ErrorNote } from './ErrorNote';
 
@@ -9,7 +10,8 @@ interface Job {
   lastRunOn: string | null; lastRunAt: string | null;
   lastStatus: 'ok' | 'failed' | null; lastMessage: string | null;
 }
-interface Automation { mailConfigured: boolean; jobs: Job[] }
+interface Check { key: string; label: string; state: 'ok' | 'warn' | 'bad'; detail: string }
+interface Automation { mailConfigured: boolean; jobs: Job[]; checks?: Check[]; cronCommand?: string }
 
 function whenText(job: Job): string {
   if (!job.lastRunAt) return 'Has not run yet';
@@ -41,21 +43,48 @@ export function AutomationPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['automation'] }),
   });
 
+  const [copied, setCopied] = useState(false);
   if (error) return <ErrorNote error={error} onRetry={() => refetch()} />;
+  const checks = data?.checks ?? [];
+  const problems = checks.filter((c) => c.state !== 'ok').length;
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-slate-500">
-        Klippy runs these itself, once a day. Nothing to set up, and no cron jobs to write.
-      </p>
-
-      {data && !data.mailConfigured && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
-          Email is not configured on the server, so these run but deliver nothing. Add
-          <span className="text-amber-200"> SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and SMTP_FROM </span>
-          to the app environment and restart it.
+      {/* Everything below runs by itself, and does nothing at all when the server is
+          missing a setting. This says so before a client goes unchased. */}
+      {checks.length > 0 && (
+        <div className={`rounded-xl border p-3 ${problems ? 'border-amber-500/30 bg-amber-500/[0.06]' : 'border-emerald-500/30 bg-emerald-500/[0.06]'}`}>
+          <div className="mb-2 text-sm font-medium text-slate-100">
+            {problems ? `Set-up check: ${problems} ${problems === 1 ? 'thing needs' : 'things need'} attention` : 'Set-up check: everything is in place'}
+          </div>
+          <ul className="space-y-1.5">
+            {checks.map((c) => (
+              <li key={c.key} className="flex items-start gap-2 text-xs">
+                {c.state === 'ok' ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-400" />
+                  : c.state === 'warn' ? <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-400" />
+                    : <XCircle size={14} className="mt-0.5 shrink-0 text-red-400" />}
+                <span><span className="font-medium text-slate-200">{c.label}.</span> <span className="text-slate-400">{c.detail}</span></span>
+              </li>
+            ))}
+          </ul>
+          {data?.cronCommand && checks.some((c) => (c.key === 'cron' || c.key === 'missed') && c.state !== 'ok') && (
+            <div className="mt-3">
+              <div className="mb-1 text-[11px] text-slate-500">In cPanel, Cron Jobs, every 15 minutes. Put your CRON_SECRET where it says YOUR_CRON_SECRET.</div>
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg bg-slate-950 px-2 py-1.5 text-[11px] text-slate-300">{data.cronCommand}</code>
+                <button onClick={() => { void navigator.clipboard?.writeText(data.cronCommand!); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800">
+                  <Copy size={11} /> {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      <p className="text-xs text-slate-500">
+        Klippy runs these once a day, after the hour shown. The wake-up cron makes sure that happens even when nobody has opened the app.
+      </p>
 
       <div className="space-y-2">
         {(data?.jobs ?? []).map((job) => (
