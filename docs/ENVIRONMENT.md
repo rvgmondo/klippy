@@ -75,7 +75,7 @@ when it last knocked.
 | `META_APP_ID`, `META_APP_SECRET`, `META_LOGIN_CONFIG_ID` | Your Meta (Facebook and Instagram) app. You can also enter these in Klippy on Posts, Accounts tab, under App details, which is easier; what is entered in Klippy wins. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | The same for LinkedIn. |
 | `PUBLIC_MEDIA_BASE` | Only if Instagram says it cannot reach your images: the public address files are served from. Defaults to `APP_URL`. |
-| `PLATFORM_ADMIN_EMAILS` | Comma-separated emails allowed to see Settings, Automation. Defaults to the owner of the first workspace, which is you. |
+| `PLATFORM_ADMIN_EMAILS` | Your sign-in email, e.g. `ruben@mondobase.com` (comma-separated for more than one). Who may open Settings, Automation and run the platform's daily jobs. Without it Klippy guesses the owner of the oldest workspace on the server, which may be an old test workspace, so set it. |
 | `COOKIE_DOMAIN` | Leave empty unless the app and API live on different subdomains. |
 | `UPLOAD_DIR`, `STORAGE_DIR` | Where uploaded files are kept. The defaults are fine on cPanel. |
 | `PORT` | Set by cPanel. Do not add it yourself. |

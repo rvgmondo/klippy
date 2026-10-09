@@ -9,6 +9,8 @@ import { runSocialPublish } from '../lib/social/publish.js';
 import { syncStaleFeeds } from '../lib/calendarFeeds.js';
 import { secretsAvailable } from '../lib/secretbox.js';
 import { appUrl } from '../lib/mailer.js';
+/** Said when someone who is not the operator opens Automation, with the way to become one. */
+const NOT_OPERATOR = 'Only the platform operator can see this. If that is you, add PLATFORM_ADMIN_EMAILS with your sign-in email to the server settings in cPanel and restart the app.';
 /** The job_runs row that records the server cron knocking, for the set-up check. */
 const CRON_ROW = 'cron-tick';
 /**
@@ -166,7 +168,7 @@ export async function cronRoutes(app) {
     // aggregate run messages.
     app.get('/api/v1/automation', { preHandler: app.requireAuth }, async (req, reply) => {
         if (!(await isPlatformAdmin(req)))
-            return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
+            return reply.code(403).send({ error: NOT_OPERATOR });
         const state = await db.select().from(jobRuns);
         const byName = new Map(state.map((s) => [s.name, s]));
         return {
@@ -205,7 +207,7 @@ export async function cronRoutes(app) {
         // Forces a global job to run now, off-schedule (e.g. hosting suspensions across
         // every account). Operator only.
         if (!(await isPlatformAdmin(req)))
-            return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
+            return reply.code(403).send({ error: NOT_OPERATOR });
         const name = req.params.name;
         if (!JOBS.some((j) => j.name === name))
             return reply.code(404).send({ error: 'No such job.' });
@@ -220,7 +222,7 @@ export async function cronRoutes(app) {
         // switch, not a customer's. Without this a customer could switch off the billing
         // that invoices every other customer.
         if (!(await isPlatformAdmin(req)))
-            return reply.code(403).send({ error: 'Automation is managed by the platform operator.' });
+            return reply.code(403).send({ error: NOT_OPERATOR });
         const name = req.params.name;
         if (!JOBS.some((j) => j.name === name))
             return reply.code(404).send({ error: 'No such job.' });
