@@ -33,6 +33,12 @@ export function setupChecks(byName) {
     out.push(secretsAvailable()
         ? { key: 'secret', label: 'Encryption key', state: 'ok', detail: 'PAYMENTS_SECRET is set, so card details and calendar links can be stored safely.' }
         : { key: 'secret', label: 'Encryption key', state: 'bad', detail: 'PAYMENTS_SECRET is not set, so card payments and reading your Outlook calendar cannot work. Add a long random value in cPanel and restart.' });
+    out.push((process.env.SOCIAL_TOKEN_KEY ?? '').length >= 16
+        ? { key: 'social', label: 'Social media key', state: 'ok', detail: 'SOCIAL_TOKEN_KEY is set, so Facebook, Instagram and LinkedIn can be connected.' }
+        : { key: 'social', label: 'Social media key', state: 'warn', detail: 'SOCIAL_TOKEN_KEY is not set, so social accounts cannot be connected. Add a long random value in cPanel and restart. Only needed if you post from Klippy.' });
+    out.push(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY
+        ? { key: 'push', label: 'Phone notifications', state: 'ok', detail: 'Push keys are set.' }
+        : { key: 'push', label: 'Phone notifications', state: 'warn', detail: 'VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are not set, so the installed app cannot buzz your phone. Optional.' });
     out.push(process.env.CRON_SECRET
         ? { key: 'cronkey', label: 'Cron key', state: 'ok', detail: 'CRON_SECRET is set.' }
         : { key: 'cronkey', label: 'Cron key', state: 'bad', detail: 'CRON_SECRET is not set, so the cPanel cron below is refused. Add a long random value in cPanel and restart.' });

@@ -89,6 +89,10 @@ function checkConfig() {
         off.push('web push notifications (VAPID keys unset)');
     if (!process.env.CORS_ORIGIN)
         off.push('cross-origin browser access (CORS_ORIGIN unset; requests will be denied)');
+    if (!process.env.SOCIAL_TOKEN_KEY)
+        off.push('connecting social media accounts (SOCIAL_TOKEN_KEY unset)');
+    if (!process.env.CRON_SECRET)
+        off.push('the wake-up cron (CRON_SECRET unset; /cron/tick refuses every call)');
     if (!process.env.JWT_SECRET)
         off.push('a STABLE session secret (JWT_SECRET unset; sessions drop on restart)');
     if (off.length) {
